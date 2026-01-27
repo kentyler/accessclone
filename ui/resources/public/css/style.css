@@ -1,0 +1,807 @@
+/* Application Template Styles */
+
+:root {
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --success: #16a34a;
+  --warning: #ca8a04;
+  --error: #dc2626;
+  --gray-50: #f9fafb;
+  --gray-100: #f3f4f6;
+  --gray-200: #e5e7eb;
+  --gray-300: #d1d5db;
+  --gray-500: #6b7280;
+  --gray-700: #374151;
+  --gray-900: #111827;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--gray-50);
+  color: var(--gray-900);
+  line-height: 1.5;
+}
+
+/* App Layout */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.app-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Header */
+.header {
+  background: white;
+  border-bottom: 1px solid var(--gray-200);
+  padding: 0 1rem;
+  flex-shrink: 0;
+}
+
+.header-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
+}
+
+.header h1 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.db-name {
+  font-size: 0.875rem;
+  color: var(--gray-500);
+}
+
+/* Buttons */
+.primary-btn {
+  background: var(--primary);
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.primary-btn:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
+.primary-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.secondary-btn {
+  background: white;
+  color: var(--gray-700);
+  border: 1px solid var(--gray-300);
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.secondary-btn:hover:not(:disabled) {
+  background: var(--gray-50);
+}
+
+.secondary-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Error banner */
+.error-banner {
+  background: #fee2e2;
+  color: var(--error);
+  padding: 0.5rem 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.875rem;
+}
+
+.error-banner button {
+  background: none;
+  border: none;
+  color: var(--error);
+  cursor: pointer;
+  font-weight: 500;
+}
+
+/* Loading */
+.loading-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--gray-200);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-initial {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  color: var(--gray-500);
+}
+
+/* ============================================
+   Sidebar - Access-style navigation pane
+   ============================================ */
+
+.sidebar {
+  width: 220px;
+  background: white;
+  border-right: 1px solid var(--gray-200);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  transition: width 0.2s ease;
+}
+
+.sidebar.collapsed {
+  width: 36px;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--gray-200);
+  gap: 0.5rem;
+}
+
+.sidebar-title {
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.collapse-toggle {
+  background: none;
+  border: 1px solid var(--gray-300);
+  width: 22px;
+  height: 22px;
+  border-radius: 3px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.625rem;
+  color: var(--gray-500);
+  flex-shrink: 0;
+}
+
+.collapse-toggle:hover {
+  background: var(--gray-100);
+}
+
+.object-type-selector {
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.object-type-selector select {
+  width: 100%;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid var(--gray-300);
+  border-radius: 4px;
+  font-size: 0.875rem;
+  background: white;
+}
+
+.new-object-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  width: calc(100% - 1rem);
+  margin: 0.5rem;
+  padding: 0.375rem 0.5rem;
+  background: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.new-object-btn:hover {
+  background: var(--primary-hover);
+}
+
+.new-object-btn .icon {
+  font-weight: bold;
+}
+
+.object-list-container {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.object-list {
+  list-style: none;
+  padding: 0.25rem;
+}
+
+.object-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.5rem;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+.object-item:hover {
+  background: var(--gray-100);
+}
+
+.object-item.active {
+  background: var(--primary);
+  color: white;
+}
+
+.empty-list {
+  padding: 1rem 0.5rem;
+  color: var(--gray-500);
+  font-size: 0.75rem;
+  text-align: center;
+  font-style: italic;
+}
+
+/* ============================================
+   Main Area
+   ============================================ */
+
+.main-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.editor-container {
+  flex: 1;
+  overflow: auto;
+  background: var(--gray-100);
+}
+
+/* ============================================
+   Tabs
+   ============================================ */
+
+.tab-bar {
+  display: flex;
+  background: var(--gray-100);
+  border-bottom: 1px solid var(--gray-200);
+  min-height: 32px;
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+
+.no-tabs {
+  padding: 0.5rem 1rem;
+  color: var(--gray-500);
+  font-size: 0.875rem;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  background: var(--gray-50);
+  border-right: 1px solid var(--gray-200);
+  cursor: pointer;
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.tab:hover {
+  background: white;
+}
+
+.tab.active {
+  background: white;
+  border-bottom: 2px solid var(--primary);
+  margin-bottom: -1px;
+}
+
+.tab-close {
+  background: none;
+  border: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: var(--gray-500);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.tab-close:hover {
+  background: var(--gray-200);
+  color: var(--gray-700);
+}
+
+/* ============================================
+   Welcome Panel
+   ============================================ */
+
+.welcome-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  padding: 2rem;
+}
+
+.welcome-panel h2 {
+  margin-bottom: 0.5rem;
+}
+
+.welcome-panel p {
+  color: var(--gray-500);
+  margin-bottom: 1.5rem;
+}
+
+.quick-actions {
+  display: flex;
+  gap: 1rem;
+}
+
+/* ============================================
+   Form Editor
+   ============================================ */
+
+.form-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.form-toolbar {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.375rem 0.75rem;
+  background: white;
+  border-bottom: 1px solid var(--gray-200);
+  flex-shrink: 0;
+}
+
+.toolbar-left,
+.toolbar-right {
+  display: flex;
+  gap: 0.375rem;
+}
+
+.toolbar-btn {
+  padding: 0.25rem 0.5rem;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.toolbar-btn:hover {
+  background: var(--gray-100);
+  border-color: var(--gray-300);
+}
+
+.toolbar-btn.active {
+  background: var(--gray-200);
+  border-color: var(--gray-300);
+}
+
+.editor-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.editor-left {
+  width: 180px;
+  background: white;
+  border-right: 1px solid var(--gray-200);
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.editor-center {
+  flex: 1;
+  overflow: auto;
+  padding: 1rem;
+}
+
+.editor-right {
+  width: 220px;
+  background: white;
+  border-left: 1px solid var(--gray-200);
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+/* Control Palette */
+.control-palette {
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.control-palette h4 {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  color: var(--gray-500);
+  margin-bottom: 0.5rem;
+  letter-spacing: 0.05em;
+}
+
+.control-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.control-btn {
+  display: flex;
+  align-items: center;
+  padding: 0.375rem 0.5rem;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  font-size: 0.875rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.control-btn:hover {
+  background: var(--gray-100);
+  border-color: var(--gray-200);
+}
+
+/* AI Assistant */
+.ai-assistant {
+  padding: 0.75rem;
+}
+
+.ai-assistant h4 {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  color: var(--gray-500);
+  margin-bottom: 0.5rem;
+  letter-spacing: 0.05em;
+}
+
+.assistant-input textarea {
+  width: 100%;
+  height: 60px;
+  padding: 0.375rem;
+  border: 1px solid var(--gray-300);
+  border-radius: 4px;
+  font-size: 0.8125rem;
+  resize: vertical;
+  margin-bottom: 0.375rem;
+}
+
+.assistant-input textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.assistant-input .primary-btn {
+  width: 100%;
+  padding: 0.375rem;
+}
+
+.assistant-suggestions {
+  margin-top: 0.75rem;
+}
+
+.assistant-suggestions .hint {
+  font-size: 0.75rem;
+  color: var(--gray-500);
+  margin-bottom: 0.25rem;
+}
+
+.assistant-suggestions ul {
+  list-style: none;
+  font-size: 0.6875rem;
+  color: var(--gray-500);
+}
+
+.assistant-suggestions li {
+  padding: 0.125rem 0;
+}
+
+/* Form Canvas */
+.form-canvas {
+  background: white;
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+  outline: none;
+}
+
+.form-canvas:focus {
+  border-color: var(--primary);
+}
+
+.canvas-header {
+  padding: 0.375rem 0.75rem;
+  background: var(--gray-100);
+  border-bottom: 1px solid var(--gray-200);
+  font-size: 0.8125rem;
+  color: var(--gray-700);
+  border-radius: 6px 6px 0 0;
+}
+
+.canvas-body {
+  flex: 1;
+  padding: 1rem;
+  position: relative;
+  min-height: 250px;
+}
+
+.canvas-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--gray-500);
+  text-align: center;
+}
+
+.canvas-empty p {
+  margin-bottom: 0.5rem;
+}
+
+.canvas-empty .hint {
+  font-size: 0.75rem;
+  max-width: 300px;
+}
+
+.controls-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.form-control {
+  position: absolute;
+  border: 1px solid var(--gray-300);
+  background: var(--gray-50);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+  cursor: move;
+}
+
+.form-control:hover {
+  border-color: var(--primary);
+}
+
+/* Properties Panel */
+.properties-panel {
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.properties-panel h4 {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  color: var(--gray-500);
+  margin-bottom: 0.5rem;
+  letter-spacing: 0.05em;
+}
+
+.property-group {
+  margin-bottom: 0.75rem;
+}
+
+.property-group label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--gray-700);
+  margin-bottom: 0.25rem;
+}
+
+.property-group select,
+.property-group input {
+  width: 100%;
+  padding: 0.25rem 0.375rem;
+  border: 1px solid var(--gray-300);
+  border-radius: 3px;
+  font-size: 0.8125rem;
+}
+
+/* Table/Query Viewer */
+.table-viewer,
+.query-viewer {
+  padding: 1.5rem;
+}
+
+.table-viewer h3,
+.query-viewer h3 {
+  margin-bottom: 0.5rem;
+}
+
+.no-editor {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--gray-500);
+}
+
+/* ============================================
+   Field List Panel - Draggable fields
+   ============================================ */
+
+.field-list-panel {
+  padding: 0.75rem;
+  min-height: 150px;
+  background: var(--gray-50);
+}
+
+.field-list-panel h4 {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  color: var(--gray-500);
+  margin-bottom: 0.5rem;
+  letter-spacing: 0.05em;
+}
+
+.empty-fields {
+  font-size: 0.75rem;
+  color: var(--gray-500);
+  font-style: italic;
+  padding: 0.5rem 0;
+}
+
+.field-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.field-item {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.5rem;
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
+  border-radius: 3px;
+  font-size: 0.8125rem;
+  cursor: grab;
+  transition: all 0.15s ease;
+}
+
+.field-item:hover {
+  background: white;
+  border-color: var(--primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.field-item:active {
+  cursor: grabbing;
+}
+
+.field-icon {
+  font-size: 0.75rem;
+  width: 1rem;
+  text-align: center;
+}
+
+.field-name {
+  flex: 1;
+  font-weight: 500;
+  color: var(--gray-700);
+}
+
+.field-type {
+  font-size: 0.6875rem;
+  color: var(--gray-500);
+  background: var(--gray-100);
+  padding: 0.125rem 0.375rem;
+  border-radius: 2px;
+}
+
+/* Form control styling for different types */
+.form-control.label {
+  border: 1px dashed var(--gray-300);
+  background: transparent;
+  font-weight: 500;
+  font-size: 0.8125rem;
+  color: var(--gray-700);
+}
+
+.form-control.text-box {
+  background: white;
+  border: 1px solid var(--gray-500);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
+  border-radius: 2px;
+}
+
+.form-control.text-box:hover {
+  border-color: var(--primary);
+}
+
+/* Selection state for controls */
+.form-control.selected {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+/* Delete button on controls */
+.control-delete {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background: var(--error);
+  color: white;
+  border: 2px solid white;
+  border-radius: 50%;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.form-control:hover .control-delete,
+.form-control.selected .control-delete {
+  display: flex;
+}
+
+.control-delete:hover {
+  background: #b91c1c;
+}

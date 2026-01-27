@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build output
+ui/resources/public/js/
+ui/.shadow-cljs/
+
+# Editor files
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

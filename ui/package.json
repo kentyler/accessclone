@@ -1,0 +1,17 @@
+{
+  "name": "app-template",
+  "version": "0.1.0",
+  "description": "CloneAccess Application Template",
+  "scripts": {
+    "dev": "shadow-cljs watch app",
+    "release": "shadow-cljs release app",
+    "server": "shadow-cljs server"
+  },
+  "devDependencies": {
+    "shadow-cljs": "^2.27.0"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  }
+}

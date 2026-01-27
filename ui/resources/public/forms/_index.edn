@@ -1,0 +1,5 @@
+;; Index of all form files
+;; Add new form filenames here (without .edn extension)
+["recipe_calculator"
+ "ingredient_entry"
+ "inventory_list"]

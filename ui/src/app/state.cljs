@@ -46,7 +46,13 @@
 
            ;; Form runtime state (when viewing a form)
            :form-data {}
-           :form-session nil}))
+           :form-session nil
+
+           ;; Chat panel state
+           :chat-messages []  ; [{:role "user" :content "..."} {:role "assistant" :content "..."}]
+           :chat-input ""
+           :chat-loading? false
+           :chat-panel-open? true}))
 
 ;; Loading/Error
 (defn set-loading! [loading?]
@@ -440,6 +446,37 @@
           (println "Error loading functions:" (:body response))
           (set-error! "Failed to load functions from database")
           (object-load-complete!))))))
+
+;; Chat panel
+(defn toggle-chat-panel! []
+  (swap! app-state update :chat-panel-open? not))
+
+(defn set-chat-input! [text]
+  (swap! app-state assoc :chat-input text))
+
+(defn add-chat-message! [role content]
+  (swap! app-state update :chat-messages conj {:role role :content content}))
+
+(defn set-chat-loading! [loading?]
+  (swap! app-state assoc :chat-loading? loading?))
+
+(defn send-chat-message!
+  "Send a message to the LLM and get a response"
+  []
+  (let [input (str/trim (:chat-input @app-state))]
+    (when (not (str/blank? input))
+      (add-chat-message! "user" input)
+      (set-chat-input! "")
+      (set-chat-loading! true)
+      (go
+        (let [response (<! (http/post (str api-base "/api/chat")
+                                      {:json-params {:message input
+                                                     :database_id (:database_id (:current-database @app-state))}
+                                       :headers (db-headers)}))]
+          (set-chat-loading! false)
+          (if (:success response)
+            (add-chat-message! "assistant" (get-in response [:body :message]))
+            (add-chat-message! "assistant" (str "Error: " (get-in response [:body :error] "Failed to get response")))))))))
 
 ;; Initialize - load objects from files and database
 (defn init! []

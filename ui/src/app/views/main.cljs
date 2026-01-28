@@ -1,6 +1,7 @@
 (ns app.views.main
   "Main application layout with Access-style navigation"
   (:require [reagent.core :as r]
+            [clojure.string :as str]
             [app.state :as state]
             [app.views.sidebar :as sidebar]
             [app.views.tabs :as tabs]
@@ -107,6 +108,62 @@
       [form-editor/object-editor]
       [welcome-panel])]])
 
+(defn chat-message [{:keys [role content]}]
+  [:div.chat-message {:class role}
+   [:div.message-content content]])
+
+(defn chat-panel []
+  (let [messages (:chat-messages @state/app-state)
+        input (:chat-input @state/app-state)
+        loading? (:chat-loading? @state/app-state)
+        open? (:chat-panel-open? @state/app-state)
+        messages-end (r/atom nil)]
+    ;; Scroll to bottom when messages change
+    (r/create-class
+     {:component-did-update
+      (fn [this]
+        (when-let [el @messages-end]
+          (.scrollIntoView el #js {:behavior "smooth"})))
+      :reagent-render
+      (fn []
+        (let [messages (:chat-messages @state/app-state)
+              input (:chat-input @state/app-state)
+              loading? (:chat-loading? @state/app-state)
+              open? (:chat-panel-open? @state/app-state)]
+          [:aside.chat-panel {:class (when-not open? "collapsed")}
+           [:div.chat-header
+            [:span.chat-title "Assistant"]
+            [:button.chat-toggle
+             {:on-click state/toggle-chat-panel!}
+             (if open? "\u00BB" "\u00AB")]]
+           (when open?
+             [:<>
+              [:div.chat-messages
+               (if (empty? messages)
+                 [:div.chat-empty "Ask me anything about your database or forms."]
+                 (for [[idx msg] (map-indexed vector messages)]
+                   ^{:key idx}
+                   [chat-message msg]))
+               (when loading?
+                 [:div.chat-message.assistant
+                  [:div.message-content.typing "Thinking..."]])
+               [:div {:ref #(reset! messages-end %)}]]
+              [:div.chat-input-area
+               [:textarea.chat-input
+                {:value input
+                 :placeholder "Type a message..."
+                 :disabled loading?
+                 :on-change #(state/set-chat-input! (.. % -target -value))
+                 :on-key-down (fn [e]
+                                (when (and (= (.-key e) "Enter")
+                                           (not (.-shiftKey e)))
+                                  (.preventDefault e)
+                                  (state/send-chat-message!)))}]
+               [:button.chat-send
+                {:on-click state/send-chat-message!
+                 :disabled (or loading? (empty? (clojure.string/trim input)))}
+                "Send"]]])]))})))
+
 (defn app []
   [:div.app
    [header]
@@ -115,4 +172,5 @@
    [options-dialog]
    [:div.app-body
     [sidebar/sidebar]
-    [main-area]]])
+    [main-area]
+    [chat-panel]]])

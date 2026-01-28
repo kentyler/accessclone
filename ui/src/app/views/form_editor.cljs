@@ -3,6 +3,15 @@
   (:require [reagent.core :as r]
             [app.state :as state]))
 
+(defn snap-to-grid
+  "Snap a coordinate to the nearest grid point.
+   If ctrl-key? is true, return the original value (pixel-perfect positioning)."
+  [value ctrl-key?]
+  (if ctrl-key?
+    value
+    (let [grid-size (state/get-grid-size)]
+      (* grid-size (js/Math.round (/ value grid-size))))))
+
 (defn get-record-source-fields
   "Get fields for the current record source (table or query)"
   [record-source]
@@ -95,40 +104,46 @@
     [:button.control-btn {:title "Subform"} "Subform"]]])
 
 (defn add-field-control!
-  "Add a control for a dropped field"
-  [field-name field-type x y]
+  "Add a control for a dropped field.
+   ctrl-key? bypasses snap-to-grid for pixel-perfect positioning."
+  [field-name field-type x y ctrl-key?]
   (let [form-editor (:form-editor @state/app-state)
         current (:current form-editor)
         controls (or (:controls current) [])
+        snapped-x (snap-to-grid x ctrl-key?)
+        snapped-y (snap-to-grid y ctrl-key?)
         new-control {:type :text-box
                      :field field-name
                      :label field-name
-                     :x x
-                     :y y
+                     :x snapped-x
+                     :y snapped-y
                      :width 150
                      :height 24}
         ;; Also add a label above/before the control
         label-control {:type :label
                        :text field-name
-                       :x x
-                       :y (- y 20)
+                       :x snapped-x
+                       :y (snap-to-grid (- y 20) ctrl-key?)
                        :width 150
                        :height 18}]
     (state/set-form-definition!
      (assoc current :controls (conj controls label-control new-control)))))
 
 (defn move-control!
-  "Move an existing control to a new position"
-  [control-idx new-x new-y]
+  "Move an existing control to a new position.
+   ctrl-key? bypasses snap-to-grid for pixel-perfect positioning."
+  [control-idx new-x new-y ctrl-key?]
   (let [form-editor (:form-editor @state/app-state)
         current (:current form-editor)
-        controls (or (:controls current) [])]
+        controls (or (:controls current) [])
+        snapped-x (snap-to-grid new-x ctrl-key?)
+        snapped-y (snap-to-grid new-y ctrl-key?)]
     (when (< control-idx (count controls))
       (state/set-form-definition!
        (assoc current :controls
               (update controls control-idx
                       (fn [ctrl]
-                        (assoc ctrl :x new-x :y new-y))))))))
+                        (assoc ctrl :x snapped-x :y snapped-y))))))))
 
 (defn form-canvas
   "The design surface where controls are placed"
@@ -136,7 +151,8 @@
   (let [form-editor (:form-editor @state/app-state)
         current (:current form-editor)
         controls (or (:controls current) [])
-        selected-idx (:selected-control form-editor)]
+        selected-idx (:selected-control form-editor)
+        grid-size (state/get-grid-size)]
     [:div.form-canvas
      {:tab-index 0
       :on-key-down (fn [e]
@@ -148,7 +164,9 @@
      [:div.canvas-header
       [:span "Form Design View"]]
      [:div.canvas-body
-      {:on-drag-over (fn [e] (.preventDefault e))
+      {:style {:background-image (str "radial-gradient(circle, #ccc 1px, transparent 1px)")
+               :background-size (str grid-size "px " grid-size "px")}
+       :on-drag-over (fn [e] (.preventDefault e))
        :on-click (fn [e]
                    (when (or (.. e -target -classList (contains "canvas-body"))
                              (.. e -target -classList (contains "controls-container")))
@@ -158,6 +176,7 @@
                   (let [rect (.getBoundingClientRect (.-currentTarget e))
                         x (- (.-clientX e) (.-left rect))
                         y (- (.-clientY e) (.-top rect))
+                        ctrl-key? (.-ctrlKey e)
                         ;; Check if this is an existing control being moved
                         control-idx (.getData (.-dataTransfer e) "application/x-control-idx")
                         ;; Or a new field being added
@@ -165,12 +184,12 @@
                     (cond
                       ;; Moving existing control
                       (and control-idx (not= control-idx ""))
-                      (move-control! (js/parseInt control-idx 10) x y)
+                      (move-control! (js/parseInt control-idx 10) x y ctrl-key?)
 
                       ;; Adding new field
                       (and field-data (not= field-data ""))
                       (let [parsed (js->clj (js/JSON.parse field-data) :keywordize-keys true)]
-                        (add-field-control! (:name parsed) (:type parsed) x y)))))}
+                        (add-field-control! (:name parsed) (:type parsed) x y ctrl-key?)))))}
       (if (empty? controls)
         [:div.canvas-empty
          [:p "Drag fields here or use the AI assistant"]

@@ -49,6 +49,25 @@ DELETE /api/forms/:name
 - Deletes the form file
 - Removes from `_index.edn`
 
+### Read Config
+```
+GET /api/config
+```
+Returns: EDN content of `settings/config.edn`
+
+### Save Config
+```
+PUT /api/config
+Content-Type: application/json
+
+{
+  "form-designer": {
+    "grid-size": 8
+  }
+}
+```
+- Saves app configuration to `settings/config.edn`
+
 ## File Structure
 
 The server reads/writes to `../forms/`:

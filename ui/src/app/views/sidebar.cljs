@@ -9,7 +9,6 @@
    {:id :queries  :label "Queries"}
    {:id :forms    :label "Forms"}
    {:id :reports  :label "Reports"}
-   {:id :macros   :label "Macros"}
    {:id :modules  :label "Modules"}])
 
 (defn object-type-selector

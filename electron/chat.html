@@ -1,0 +1,997 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CloneTemplate Setup</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Header */
+    .header {
+      background: #16213e;
+      padding: 16px 20px;
+      border-bottom: 1px solid #0f3460;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .header h1 {
+      font-size: 18px;
+      font-weight: 600;
+      color: #e94560;
+    }
+
+    .header .status {
+      font-size: 12px;
+      color: #888;
+    }
+
+    .header .status.connected {
+      color: #4ade80;
+    }
+
+    /* API Key Setup */
+    .api-setup {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px;
+    }
+
+    .api-setup h2 {
+      margin-bottom: 16px;
+      color: #e94560;
+    }
+
+    .api-setup p {
+      color: #aaa;
+      margin-bottom: 24px;
+      text-align: center;
+      max-width: 400px;
+      line-height: 1.6;
+    }
+
+    .api-setup input {
+      width: 100%;
+      max-width: 400px;
+      padding: 12px 16px;
+      border: 1px solid #0f3460;
+      border-radius: 8px;
+      background: #16213e;
+      color: #eee;
+      font-size: 14px;
+      margin-bottom: 16px;
+    }
+
+    .api-setup input:focus {
+      outline: none;
+      border-color: #e94560;
+    }
+
+    .api-setup button {
+      padding: 12px 32px;
+      background: #e94560;
+      border: none;
+      border-radius: 8px;
+      color: white;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .api-setup button:hover {
+      background: #d63850;
+    }
+
+    .api-setup button:disabled {
+      background: #555;
+      cursor: not-allowed;
+    }
+
+    .api-setup .error {
+      color: #ef4444;
+      margin-top: 12px;
+      font-size: 13px;
+    }
+
+    .api-setup .hint {
+      margin-top: 24px;
+      font-size: 12px;
+      color: #666;
+    }
+
+    .api-setup .hint a {
+      color: #e94560;
+    }
+
+    /* Project Setup */
+    .project-setup {
+      flex: 1;
+      display: none;
+      flex-direction: column;
+      padding: 40px;
+      overflow-y: auto;
+    }
+
+    .project-setup.active {
+      display: flex;
+    }
+
+    .project-setup h2 {
+      color: #e94560;
+      margin-bottom: 8px;
+    }
+
+    .project-setup .subtitle {
+      color: #888;
+      margin-bottom: 32px;
+    }
+
+    .project-setup .form-group {
+      margin-bottom: 24px;
+    }
+
+    .project-setup label {
+      display: block;
+      margin-bottom: 8px;
+      color: #ccc;
+      font-weight: 500;
+    }
+
+    .project-setup input[type="text"] {
+      width: 100%;
+      max-width: 400px;
+      padding: 12px 16px;
+      border: 1px solid #0f3460;
+      border-radius: 8px;
+      background: #16213e;
+      color: #eee;
+      font-size: 14px;
+    }
+
+    .project-setup input[type="text"]:focus {
+      outline: none;
+      border-color: #e94560;
+    }
+
+    .project-setup .file-picker {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .project-setup .file-picker input {
+      flex: 1;
+      max-width: none;
+    }
+
+    .project-setup .file-picker button {
+      padding: 12px 16px;
+      background: #0f3460;
+      border: none;
+      border-radius: 8px;
+      color: #eee;
+      cursor: pointer;
+    }
+
+    .project-setup .file-picker button:hover {
+      background: #16213e;
+    }
+
+    /* Database list */
+    .database-list {
+      margin-top: 12px;
+      max-width: 600px;
+    }
+
+    .database-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 12px;
+      background: #16213e;
+      border-radius: 6px;
+      margin-bottom: 8px;
+    }
+
+    .database-item .path {
+      flex: 1;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 13px;
+      color: #aaa;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .database-item .remove-btn {
+      background: none;
+      border: none;
+      color: #ef4444;
+      cursor: pointer;
+      padding: 4px 8px;
+      font-size: 14px;
+    }
+
+    .database-item .remove-btn:hover {
+      color: #f87171;
+    }
+
+    .add-database-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 16px;
+      background: transparent;
+      border: 1px dashed #0f3460;
+      border-radius: 6px;
+      color: #888;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    .add-database-btn:hover {
+      border-color: #e94560;
+      color: #e94560;
+    }
+
+    .database-note {
+      margin-top: 12px;
+      font-size: 12px;
+      color: #666;
+      max-width: 600px;
+    }
+
+    .project-setup .actions {
+      margin-top: 32px;
+      display: flex;
+      gap: 12px;
+    }
+
+    .project-setup .actions button {
+      padding: 12px 32px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .project-setup .actions .primary-btn {
+      background: #e94560;
+      color: white;
+    }
+
+    .project-setup .actions .primary-btn:hover {
+      background: #d63850;
+    }
+
+    .project-setup .actions .primary-btn:disabled {
+      background: #555;
+      cursor: not-allowed;
+    }
+
+    .project-setup .actions .secondary-btn {
+      background: #0f3460;
+      color: #eee;
+    }
+
+    .project-setup .actions .secondary-btn:hover {
+      background: #16213e;
+    }
+
+    .project-setup .error {
+      color: #ef4444;
+      margin-top: 12px;
+      font-size: 13px;
+    }
+
+    /* Chat Container */
+    .chat-container {
+      flex: 1;
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .chat-container.active {
+      display: flex;
+    }
+
+    /* Messages */
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+    }
+
+    .message {
+      margin-bottom: 16px;
+      max-width: 85%;
+    }
+
+    .message.user {
+      margin-left: auto;
+    }
+
+    .message .content {
+      padding: 12px 16px;
+      border-radius: 12px;
+      line-height: 1.5;
+    }
+
+    .message.user .content {
+      background: #e94560;
+      border-bottom-right-radius: 4px;
+    }
+
+    .message.assistant .content {
+      background: #16213e;
+      border-bottom-left-radius: 4px;
+    }
+
+    .message .content p {
+      margin-bottom: 12px;
+    }
+
+    .message .content p:last-child {
+      margin-bottom: 0;
+    }
+
+    .message .content code {
+      background: #0f3460;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 13px;
+    }
+
+    .message .content pre {
+      background: #0a0a1a;
+      padding: 12px;
+      border-radius: 8px;
+      overflow-x: auto;
+      margin: 12px 0;
+    }
+
+    .message .content pre code {
+      background: none;
+      padding: 0;
+    }
+
+    /* Command blocks */
+    .command-block {
+      background: #0a0a1a;
+      border: 1px solid #0f3460;
+      border-radius: 8px;
+      margin: 12px 0;
+      overflow: hidden;
+    }
+
+    .command-block .command-header {
+      background: #0f3460;
+      padding: 8px 12px;
+      font-size: 12px;
+      color: #888;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .command-block pre {
+      margin: 0;
+      padding: 12px;
+      background: transparent;
+    }
+
+    .command-block .run-btn,
+    .command-block .save-btn {
+      background: #4ade80;
+      border: none;
+      padding: 4px 12px;
+      border-radius: 4px;
+      color: #000;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .command-block .run-btn:hover,
+    .command-block .save-btn:hover {
+      background: #22c55e;
+    }
+
+    .command-block .save-btn {
+      background: #60a5fa;
+    }
+
+    .command-block .save-btn:hover {
+      background: #3b82f6;
+    }
+
+    .command-block .output {
+      border-top: 1px solid #0f3460;
+      padding: 12px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 13px;
+      color: #aaa;
+      white-space: pre-wrap;
+    }
+
+    .command-block .output.error {
+      color: #ef4444;
+    }
+
+    .command-block .output.success {
+      color: #4ade80;
+    }
+
+    /* Input area */
+    .input-area {
+      padding: 16px 20px;
+      background: #16213e;
+      border-top: 1px solid #0f3460;
+    }
+
+    .input-area form {
+      display: flex;
+      gap: 12px;
+    }
+
+    .input-area input {
+      flex: 1;
+      padding: 12px 16px;
+      border: 1px solid #ffffff;
+      border-radius: 8px;
+      background: #1a1a2e;
+      color: #eee;
+      font-size: 14px;
+    }
+
+    .input-area input:focus {
+      outline: none;
+      border-color: #e94560;
+    }
+
+    .input-area button {
+      padding: 12px 24px;
+      background: #e94560;
+      border: none;
+      border-radius: 8px;
+      color: white;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .input-area button:hover {
+      background: #d63850;
+    }
+
+    .input-area button:disabled {
+      background: #555;
+      cursor: not-allowed;
+    }
+
+    /* Loading indicator */
+    .typing {
+      display: flex;
+      gap: 4px;
+      padding: 12px 16px;
+    }
+
+    .typing span {
+      width: 8px;
+      height: 8px;
+      background: #e94560;
+      border-radius: 50%;
+      animation: typing 1s infinite;
+    }
+
+    .typing span:nth-child(2) { animation-delay: 0.2s; }
+    .typing span:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes typing {
+      0%, 100% { opacity: 0.3; }
+      50% { opacity: 1; }
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #1a1a2e;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #0f3460;
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #16213e;
+    }
+  </style>
+</head>
+<body>
+  <!-- Load format library -->
+  <script src="lib/format.js"></script>
+
+  <div class="header">
+    <h1>CloneTemplate Setup</h1>
+    <span class="status" id="status">Not connected</span>
+  </div>
+
+  <!-- API Key Setup -->
+  <div class="api-setup" id="apiSetup">
+    <h2>Welcome to CloneTemplate</h2>
+    <p>
+      To get started, I'll need your Anthropic API key. This lets me guide you through
+      the installation process and help troubleshoot any issues.
+    </p>
+    <input
+      type="password"
+      id="apiKeyInput"
+      placeholder="Enter your Anthropic API key (sk-ant-...)"
+      autocomplete="off"
+    >
+    <button id="connectBtn" onclick="connectApi()">Connect</button>
+    <div class="error" id="apiError"></div>
+    <p class="hint">
+      Don't have an API key? <a href="https://console.anthropic.com/" target="_blank">Get one here</a>
+    </p>
+  </div>
+
+  <!-- Project Setup -->
+  <div class="project-setup" id="projectSetup">
+    <h2>Project Setup</h2>
+    <p class="subtitle">Configure your Access database conversion project</p>
+
+    <div class="form-group">
+      <label for="projectName">Project Name</label>
+      <input type="text" id="projectName" placeholder="e.g., calculator">
+      <p class="database-note">Used for the database name and project folder</p>
+    </div>
+
+    <div class="form-group">
+      <label>Source Access Databases</label>
+      <div class="database-list" id="databaseList"></div>
+      <button class="add-database-btn" onclick="addDatabase()">
+        + Add Database
+      </button>
+      <p class="database-note">Add all related databases (front-end, back-end). They will be combined into a single application.</p>
+    </div>
+
+    <div class="form-group">
+      <label>Destination Folder</label>
+      <div class="file-picker">
+        <input type="text" id="destinationPath" placeholder="Select folder..." readonly>
+        <button onclick="selectDestination()">Browse...</button>
+      </div>
+      <p class="database-note">Where the converted project will be created</p>
+    </div>
+
+    <div class="error" id="projectError"></div>
+
+    <div class="actions">
+      <button class="primary-btn" onclick="startConversion()">Continue</button>
+    </div>
+  </div>
+
+  <!-- Chat Interface -->
+  <div class="chat-container" id="chatContainer">
+    <div class="messages" id="messages"></div>
+    <div class="input-area">
+      <form onsubmit="sendMessage(event)">
+        <input
+          type="text"
+          id="messageInput"
+          placeholder="Type a message..."
+          autocomplete="off"
+        >
+        <button type="submit" id="sendBtn">Send</button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    // State
+    let isConnected = false;
+    let isLoading = false;
+    let sourceDatabases = [];
+    let projectSettings = null;
+    let llmProvider = 'Assistant';
+
+    // Elements
+    const apiSetup = document.getElementById('apiSetup');
+    const projectSetup = document.getElementById('projectSetup');
+    const chatContainer = document.getElementById('chatContainer');
+    const messagesEl = document.getElementById('messages');
+    const messageInput = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const statusEl = document.getElementById('status');
+    const apiKeyInput = document.getElementById('apiKeyInput');
+    const connectBtn = document.getElementById('connectBtn');
+    const apiError = document.getElementById('apiError');
+    const projectNameInput = document.getElementById('projectName');
+    const databaseList = document.getElementById('databaseList');
+    const destinationPathInput = document.getElementById('destinationPath');
+    const projectError = document.getElementById('projectError');
+
+    // Check for existing config on load
+    async function init() {
+      const config = await window.api.getConfig();
+      if (config.apiKey) {
+        // Store LLM provider name
+        llmProvider = config.llmProvider || 'Assistant';
+
+        // Have API key, check if project is configured
+        if (config.project && config.project.name && config.project.sourceDatabases.length > 0) {
+          // Project configured, go to chat
+          projectSettings = config.project;
+          showChat();
+          await sendInitialMessage();
+        } else {
+          // Need project setup
+          showProjectSetup();
+        }
+      }
+    }
+
+    // Connect with API key
+    async function connectApi() {
+      const apiKey = apiKeyInput.value.trim();
+      if (!apiKey) {
+        apiError.textContent = 'Please enter an API key';
+        return;
+      }
+
+      connectBtn.disabled = true;
+      connectBtn.textContent = 'Connecting...';
+      apiError.textContent = '';
+
+      const result = await window.api.saveApiKey(apiKey);
+
+      if (result.success) {
+        llmProvider = result.llmProvider || 'Assistant';
+        showProjectSetup();
+      } else {
+        apiError.textContent = result.error || 'Failed to connect';
+        connectBtn.disabled = false;
+        connectBtn.textContent = 'Connect';
+      }
+    }
+
+    // Show project setup screen
+    function showProjectSetup() {
+      apiSetup.style.display = 'none';
+      projectSetup.classList.add('active');
+      chatContainer.classList.remove('active');
+      statusEl.textContent = 'Connected';
+      statusEl.classList.add('connected');
+      projectNameInput.focus();
+    }
+
+    // Add a database to the list
+    async function addDatabase() {
+      const result = await window.api.selectAccessDatabase();
+      if (result.success && result.path) {
+        // Check if already added
+        if (!sourceDatabases.includes(result.path)) {
+          sourceDatabases.push(result.path);
+          renderDatabaseList();
+
+          // Auto-suggest project name from first database
+          if (sourceDatabases.length === 1 && !projectNameInput.value) {
+            const filename = result.path.split('\\').pop().split('/').pop();
+            const name = filename.replace(/\.(accdb|mdb)$/i, '').toLowerCase().replace(/[^a-z0-9]/g, '_');
+            projectNameInput.value = name;
+          }
+        }
+      }
+    }
+
+    // Remove a database from the list
+    function removeDatabase(index) {
+      sourceDatabases.splice(index, 1);
+      renderDatabaseList();
+    }
+
+    // Render the database list
+    function renderDatabaseList() {
+      databaseList.innerHTML = sourceDatabases.map((path, index) => `
+        <div class="database-item">
+          <span class="path" title="${path}">${path}</span>
+          <button class="remove-btn" onclick="removeDatabase(${index})">✕</button>
+        </div>
+      `).join('');
+    }
+
+    // Select destination folder
+    async function selectDestination() {
+      const result = await window.api.selectDestinationFolder();
+      if (result.success && result.path) {
+        destinationPathInput.value = result.path;
+      }
+    }
+
+    // Start conversion (validate and go to chat)
+    async function startConversion() {
+      projectError.textContent = '';
+
+      const name = projectNameInput.value.trim();
+      const destination = destinationPathInput.value.trim();
+
+      // Validate
+      if (!name) {
+        projectError.textContent = 'Please enter a project name';
+        return;
+      }
+      if (!/^[a-z][a-z0-9_]*$/.test(name)) {
+        projectError.textContent = 'Project name must start with a letter and contain only lowercase letters, numbers, and underscores';
+        return;
+      }
+      if (sourceDatabases.length === 0) {
+        projectError.textContent = 'Please add at least one Access database';
+        return;
+      }
+      if (!destination) {
+        projectError.textContent = 'Please select a destination folder';
+        return;
+      }
+
+      // Save settings
+      projectSettings = {
+        name: name,
+        sourceDatabases: sourceDatabases,
+        destinationPath: destination
+      };
+
+      const saveResult = await window.api.saveProjectSettings(projectSettings);
+      if (!saveResult.success) {
+        projectError.textContent = saveResult.error || 'Failed to save settings';
+        return;
+      }
+
+      // Go to chat
+      showChat();
+      await sendInitialMessage();
+    }
+
+    // Show chat interface
+    function showChat() {
+      apiSetup.style.display = 'none';
+      projectSetup.classList.remove('active');
+      chatContainer.classList.add('active');
+      statusEl.textContent = 'Connected';
+      statusEl.classList.add('connected');
+      isConnected = true;
+      messageInput.placeholder = `Ask ${llmProvider} a question...`;
+      messageInput.focus();
+    }
+
+    // Send initial message to start the conversation
+    async function sendInitialMessage() {
+      let initialMessage = "Hi! I'm ready to set up my project.";
+
+      if (projectSettings) {
+        initialMessage = `Hi! I'm ready to convert my Access database to a web application.
+
+**Project name:** ${projectSettings.name}
+**Source databases:**
+${projectSettings.sourceDatabases.map(p => `- ${p}`).join('\n')}
+**Destination folder:** ${projectSettings.destinationPath}
+
+Please guide me through the installation and conversion process.`;
+      }
+
+      addMessage('user', initialMessage);
+      await getAssistantResponse(initialMessage);
+    }
+
+    // Send message
+    async function sendMessage(event) {
+      event.preventDefault();
+
+      const message = messageInput.value.trim();
+      if (!message || isLoading) return;
+
+      messageInput.value = '';
+      addMessage('user', message);
+      await getAssistantResponse(message);
+    }
+
+    // Get response from assistant
+    async function getAssistantResponse(userMessage) {
+      isLoading = true;
+      sendBtn.disabled = true;
+
+      // Show typing indicator
+      const typingEl = document.createElement('div');
+      typingEl.className = 'message assistant';
+      typingEl.innerHTML = '<div class="typing"><span></span><span></span><span></span></div>';
+      messagesEl.appendChild(typingEl);
+      scrollToBottom();
+
+      try {
+        const result = await window.api.sendMessage(userMessage);
+
+        // Remove typing indicator
+        typingEl.remove();
+
+        if (result.success) {
+          addMessage('assistant', result.message);
+        } else {
+          addMessage('assistant', `Error: ${result.error}`);
+        }
+      } catch (err) {
+        typingEl.remove();
+        addMessage('assistant', `Error: ${err.message}`);
+      }
+
+      isLoading = false;
+      sendBtn.disabled = false;
+      messageInput.focus();
+    }
+
+    // Add message to chat
+    function addMessage(role, content) {
+      const messageEl = document.createElement('div');
+      messageEl.className = `message ${role}`;
+
+      // Parse markdown-like content using Format library
+      const formattedContent = window.Format.formatContent(content, { runnableCommands: true });
+
+      messageEl.innerHTML = `<div class="content">${formattedContent}</div>`;
+      messagesEl.appendChild(messageEl);
+
+      // Add click handlers to run buttons
+      messageEl.querySelectorAll('.run-btn').forEach(btn => {
+        btn.addEventListener('click', () => runCommand(btn));
+      });
+
+      // Add click handlers to save buttons
+      messageEl.querySelectorAll('.save-btn').forEach(btn => {
+        btn.addEventListener('click', () => saveFile(btn));
+      });
+
+      scrollToBottom();
+    }
+
+    // Run a PowerShell command
+    async function runCommand(button) {
+      const command = decodeURIComponent(button.dataset.command);
+      const block = button.closest('.command-block');
+
+      // Remove existing output
+      const existingOutput = block.querySelector('.output');
+      if (existingOutput) existingOutput.remove();
+
+      button.disabled = true;
+      button.textContent = 'Running...';
+      button.style.background = '#f59e0b'; // Yellow/orange while running
+
+      try {
+        const result = await window.api.runCommand(command);
+
+        const outputEl = document.createElement('div');
+        outputEl.className = 'output';
+
+        if (result.success) {
+          if (result.exitCode === 0) {
+            outputEl.classList.add('success');
+            outputEl.textContent = result.stdout || 'Command completed successfully';
+            button.textContent = 'Done';
+            button.style.background = '#4ade80'; // Green for success
+          } else {
+            outputEl.classList.add('error');
+            outputEl.textContent = result.stderr || result.stdout || `Exit code: ${result.exitCode}`;
+            button.textContent = 'Failed';
+            button.style.background = '#ef4444'; // Red for failure
+          }
+        } else {
+          outputEl.classList.add('error');
+          outputEl.textContent = result.error;
+          button.textContent = 'Failed';
+          button.style.background = '#ef4444'; // Red for failure
+        }
+
+        block.appendChild(outputEl);
+        scrollToBottom();
+      } catch (err) {
+        const outputEl = document.createElement('div');
+        outputEl.className = 'output error';
+        outputEl.textContent = err.message;
+        block.appendChild(outputEl);
+        button.textContent = 'Failed';
+        button.style.background = '#ef4444'; // Red for failure
+      }
+
+      // Keep button disabled after completion - it's been run
+      button.disabled = true;
+    }
+
+    // Save a file
+    async function saveFile(button) {
+      const filePath = decodeURIComponent(button.dataset.path);
+      const content = decodeURIComponent(button.dataset.content);
+      const block = button.closest('.command-block');
+
+      // Remove existing output
+      const existingOutput = block.querySelector('.output');
+      if (existingOutput) existingOutput.remove();
+
+      button.disabled = true;
+      button.textContent = 'Saving...';
+      button.style.background = '#f59e0b'; // Yellow while saving
+
+      try {
+        const result = await window.api.writeFile(filePath, content);
+
+        const outputEl = document.createElement('div');
+        outputEl.className = 'output';
+
+        if (result.success) {
+          outputEl.classList.add('success');
+          outputEl.textContent = `Saved to ${result.path}`;
+          button.textContent = 'Saved';
+          button.style.background = '#4ade80'; // Green for success
+        } else {
+          outputEl.classList.add('error');
+          outputEl.textContent = result.error;
+          button.textContent = 'Failed';
+          button.style.background = '#ef4444'; // Red for failure
+        }
+
+        block.appendChild(outputEl);
+        scrollToBottom();
+      } catch (err) {
+        const outputEl = document.createElement('div');
+        outputEl.className = 'output error';
+        outputEl.textContent = err.message;
+        block.appendChild(outputEl);
+        button.textContent = 'Failed';
+        button.style.background = '#ef4444';
+      }
+
+      button.disabled = true;
+    }
+
+    // Scroll to bottom of messages
+    function scrollToBottom() {
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    // Handle Enter key in API input
+    apiKeyInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        connectApi();
+      }
+    });
+
+    // Initialize
+    init();
+  </script>
+</body>
+</html>

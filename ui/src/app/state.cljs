@@ -6,15 +6,22 @@
             [cljs.reader :as reader]
             [clojure.string :as str]))
 
+(def api-base "http://localhost:3001")
+
 ;; Application state atom
 (defonce app-state
-  (r/atom {;; App info (set during deployment)
-           :app-name "Application"
-           :database-name "app_db"
+  (r/atom {;; Database selection
+           :available-databases []
+           :current-database nil  ; {:database_id "calculator" :name "Recipe Calculator" ...}
+           :loading-objects? false  ; true while loading tables/queries/functions
+
+           ;; App configuration (loaded from settings/config.edn)
+           :config {:form-designer {:grid-size 8}}
 
            ;; UI state
            :loading? false
            :error nil
+           :options-dialog-open? false
 
            ;; Sidebar state
            :sidebar-collapsed? false
@@ -25,7 +32,6 @@
                      :queries []
                      :forms []
                      :reports []
-                     :macros []
                      :modules []}
 
            ;; Open objects (tabs)
@@ -51,6 +57,73 @@
 
 (defn clear-error! []
   (swap! app-state assoc :error nil))
+
+;; Database selection
+(defn set-available-databases! [databases]
+  (swap! app-state assoc :available-databases databases))
+
+(defn set-current-database! [db]
+  (swap! app-state assoc :current-database db))
+
+(defn set-loading-objects! [loading?]
+  (swap! app-state assoc :loading-objects? loading?))
+
+;; Track pending object loads (tables, queries, functions)
+(defonce pending-loads (atom 0))
+
+(defn start-loading-objects! []
+  (reset! pending-loads 3)  ; 3 types: tables, queries, functions
+  (set-loading-objects! true))
+
+(defn object-load-complete! []
+  (swap! pending-loads dec)
+  (when (<= @pending-loads 0)
+    (set-loading-objects! false)))
+
+(defn load-databases!
+  "Load available databases from API and set current, then load objects"
+  []
+  (go
+    (let [response (<! (http/get (str api-base "/api/databases")))]
+      (if (:success response)
+        (let [databases (get-in response [:body :databases])
+              current-id (get-in response [:body :current])
+              current-db (first (filter #(= (:database_id %) current-id) databases))]
+          (set-available-databases! databases)
+          (set-current-database! current-db)
+          (println "Loaded" (count databases) "databases, current:" (:name current-db))
+          ;; Now load objects for the current database
+          (start-loading-objects!)
+          (load-tables!)
+          (load-queries!)
+          (load-functions!))
+        (do
+          (println "Error loading databases:" (:body response))
+          (set-error! "Failed to load databases"))))))
+
+(defn switch-database!
+  "Switch to a different database"
+  [database-id]
+  (go
+    (set-loading! true)
+    (let [response (<! (http/post (str api-base "/api/databases/switch")
+                                  {:json-params {:database_id database-id}}))]
+      (set-loading! false)
+      (if (:success response)
+        (let [new-db (first (filter #(= (:database_id %) database-id)
+                                    (:available-databases @app-state)))]
+          (set-current-database! new-db)
+          ;; Clear open tabs when switching databases
+          (swap! app-state assoc :open-objects [] :active-tab nil)
+          ;; Reload objects for new database
+          (start-loading-objects!)
+          (load-tables!)
+          (load-queries!)
+          (load-functions!)
+          (println "Switched to database:" (:name new-db)))
+        (do
+          (println "Error switching database:" (:body response))
+          (set-error! "Failed to switch database"))))))
 
 ;; Sidebar
 (defn toggle-sidebar! []
@@ -166,6 +239,20 @@
 (defn select-control! [idx]
   (swap! app-state assoc-in [:form-editor :selected-control] idx))
 
+;; Options dialog
+(defn open-options-dialog! []
+  (swap! app-state assoc :options-dialog-open? true))
+
+(defn close-options-dialog! []
+  (swap! app-state assoc :options-dialog-open? false))
+
+;; Config
+(defn get-grid-size []
+  (get-in @app-state [:config :form-designer :grid-size] 8))
+
+(defn set-grid-size! [size]
+  (swap! app-state assoc-in [:config :form-designer :grid-size] size))
+
 (defn delete-control! [idx]
   (let [form-editor (:form-editor @app-state)
         current (:current form-editor)
@@ -175,6 +262,34 @@
                                       (subvec controls (inc idx))))]
         (swap! app-state assoc-in [:form-editor :selected-control] nil)
         (set-form-definition! (assoc current :controls new-controls))))))
+
+;; Config file operations
+(defn load-config!
+  "Load app configuration from settings/config.edn"
+  []
+  (go
+    (let [response (<! (http/get (str api-base "/api/config")))]
+      (if (:success response)
+        (try
+          (let [config (reader/read-string (:body response))]
+            (swap! app-state assoc :config config)
+            (println "Config loaded:" config))
+          (catch :default e
+            (println "Error parsing config:" e)))
+        (println "Could not load config - using defaults")))))
+
+(defn save-config!
+  "Save app configuration to settings/config.edn"
+  []
+  (go
+    (let [config (:config @app-state)
+          response (<! (http/put (str api-base "/api/config")
+                                 {:json-params config}))]
+      (if (:success response)
+        (println "Config saved")
+        (do
+          (println "Error saving config:" (:body response))
+          (set-error! "Failed to save configuration"))))))
 
 ;; Form file operations
 (defn load-form-file!
@@ -209,8 +324,6 @@
             (println "Error parsing form index:" e)))
         (println "Could not load form index - using empty forms list")))))
 
-(def api-base "http://localhost:3001")
-
 (defn save-form-to-file!
   "Save a form to its EDN file via backend API"
   [form]
@@ -239,52 +352,104 @@
             (println "Error saving form:" (:body response))
             (set-error! (str "Failed to save form: " (get-in response [:body :error])))))))))
 
+;; Helper to get current database headers
+(defn- db-headers []
+  (when-let [db-id (:database_id (:current-database @app-state))]
+    {"X-Database-ID" db-id}))
+
+;; Load tables from database API
+(defn load-tables!
+  "Load tables from PostgreSQL via backend API"
+  []
+  (go
+    (let [response (<! (http/get (str api-base "/api/tables")
+                                 {:headers (db-headers)}))]
+      (if (:success response)
+        (let [tables (get-in response [:body :tables])
+              ;; Add an id to each table for UI compatibility
+              tables-with-ids (map-indexed
+                               (fn [idx table]
+                                 {:id (inc idx)
+                                  :name (:name table)
+                                  :fields (mapv (fn [field]
+                                                  {:name (:name field)
+                                                   :type (:type field)
+                                                   :pk (:isPrimaryKey field)
+                                                   :fk (when (:isForeignKey field)
+                                                         (:foreignTable field))
+                                                   :nullable (:nullable field)})
+                                                (:fields table))})
+                               tables)]
+          (swap! app-state assoc-in [:objects :tables] (vec tables-with-ids))
+          (println "Loaded" (count tables-with-ids) "tables from database")
+          (object-load-complete!))
+        (do
+          (println "Error loading tables:" (:body response))
+          (set-error! "Failed to load tables from database")
+          (object-load-complete!))))))
+
+;; Load queries (views) from database API
+(defn load-queries!
+  "Load queries/views from PostgreSQL via backend API"
+  []
+  (go
+    (let [response (<! (http/get (str api-base "/api/queries")
+                                 {:headers (db-headers)}))]
+      (if (:success response)
+        (let [queries (get-in response [:body :queries])
+              ;; Add an id to each query for UI compatibility
+              queries-with-ids (map-indexed
+                                (fn [idx query]
+                                  {:id (inc idx)
+                                   :name (:name query)
+                                   :fields (mapv (fn [field]
+                                                   {:name (:name field)
+                                                    :type (:type field)
+                                                    :nullable (:nullable field)})
+                                                 (:fields query))})
+                                queries)]
+          (swap! app-state assoc-in [:objects :queries] (vec queries-with-ids))
+          (println "Loaded" (count queries-with-ids) "queries from database")
+          (object-load-complete!))
+        (do
+          (println "Error loading queries:" (:body response))
+          (set-error! "Failed to load queries from database")
+          (object-load-complete!))))))
+
+;; Load functions from database API
+(defn load-functions!
+  "Load functions from PostgreSQL via backend API"
+  []
+  (go
+    (let [response (<! (http/get (str api-base "/api/functions")
+                                 {:headers (db-headers)}))]
+      (if (:success response)
+        (let [functions (get-in response [:body :functions])
+              ;; Add an id and filter to show only vba_ prefixed functions
+              functions-with-ids (map-indexed
+                                  (fn [idx func]
+                                    {:id (inc idx)
+                                     :name (:name func)
+                                     :arguments (:arguments func)
+                                     :return-type (:returnType func)})
+                                  functions)]
+          (swap! app-state assoc-in [:objects :modules] (vec functions-with-ids))
+          (println "Loaded" (count functions-with-ids) "functions from database")
+          (object-load-complete!))
+        (do
+          (println "Error loading functions:" (:body response))
+          (set-error! "Failed to load functions from database")
+          (object-load-complete!))))))
+
 ;; Initialize - load objects from files and database
 (defn init! []
+  ;; Load available databases first (sets current database, then loads objects)
+  (load-databases!)
+
+  ;; Load app configuration
+  (load-config!)
+
   ;; Load forms from EDN files
   (load-forms-from-index!)
 
-  ;; Tables and queries still come from database metadata (hardcoded for now)
-  ;; TODO: Load from PostgreSQL information_schema
-  (swap! app-state assoc-in [:objects :tables]
-         [{:id 1 :name "recipe"
-           :fields [{:name "id" :type "integer" :pk true}
-                    {:name "name" :type "text"}
-                    {:name "description" :type "text"}
-                    {:name "created_at" :type "timestamp"}]}
-          {:id 2 :name "recipe_ingredient"
-           :fields [{:name "id" :type "integer" :pk true}
-                    {:name "recipe_id" :type "integer" :fk "recipe"}
-                    {:name "ingredient_id" :type "integer" :fk "ingredient"}
-                    {:name "grams" :type "numeric"}
-                    {:name "percentage" :type "numeric"}]}
-          {:id 3 :name "ingredient"
-           :fields [{:name "id" :type "integer" :pk true}
-                    {:name "name" :type "text"}
-                    {:name "description" :type "text"}
-                    {:name "cost_per_gram" :type "numeric"}]}
-          {:id 4 :name "ingredient_test"
-           :fields [{:name "id" :type "integer" :pk true}
-                    {:name "ingredient_id" :type "integer" :fk "ingredient"}
-                    {:name "test_date" :type "date"}
-                    {:name "potency" :type "numeric"}]}
-          {:id 5 :name "product"
-           :fields [{:name "id" :type "integer" :pk true}
-                    {:name "name" :type "text"}
-                    {:name "sku" :type "text"}
-                    {:name "price" :type "numeric"}]}
-          {:id 6 :name "carrier"
-           :fields [{:name "id" :type "integer" :pk true}
-                    {:name "name" :type "text"}
-                    {:name "type" :type "text"}]}])
-  (swap! app-state assoc-in [:objects :queries]
-         [{:id 1 :name "ingredient_with_total_grams_on_hand"
-           :fields [{:name "id" :type "integer"}
-                    {:name "name" :type "text"}
-                    {:name "total_grams" :type "numeric"}
-                    {:name "cost_per_gram" :type "numeric"}]}
-          {:id 2 :name "recipe_candidates_temp"
-           :fields [{:name "recipe_id" :type "integer"}
-                    {:name "ingredient_combo" :type "text"}
-                    {:name "total_cost" :type "numeric"}]}])
-  (println "Application state initialized - forms loading from EDN files"))
+  (println "Application state initialized - loading from database and EDN files"))

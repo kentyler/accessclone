@@ -640,6 +640,29 @@ body {
   min-height: 250px;
 }
 
+.form-selector {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--gray-400);
+  background: var(--gray-100);
+  cursor: pointer;
+  z-index: 10;
+}
+
+.form-selector:hover {
+  border-color: var(--primary);
+  background: var(--gray-200);
+}
+
+.form-selector.selected {
+  border-color: var(--primary);
+  background: var(--primary-light, #e0e7ff);
+  box-shadow: 0 0 0 2px var(--primary);
+}
+
 .canvas-empty {
   display: flex;
   flex-direction: column;

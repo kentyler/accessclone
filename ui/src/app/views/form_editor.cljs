@@ -176,6 +176,13 @@
                       (and field-data (not= field-data ""))
                       (let [parsed (js->clj (js/JSON.parse field-data) :keywordize-keys true)]
                         (add-field-control! (:name parsed) (:type parsed) x y ctrl-key?)))))}
+      ;; Form selector box in upper left corner
+      [:div.form-selector
+       {:class (when (nil? selected-idx) "selected")
+        :on-click (fn [e]
+                    (.stopPropagation e)
+                    (state/select-control! nil))
+        :title "Select form to edit properties"}]
       (if (empty? controls)
         [:div.canvas-empty
          [:p "Drag fields here or use the AI assistant"]

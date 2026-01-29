@@ -703,18 +703,132 @@ body {
   border-color: var(--primary);
 }
 
-/* Properties Panel */
+/* Property Sheet (Access-style) */
+.property-sheet {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--gray-200);
+  background: var(--gray-100);
+}
+
+.property-sheet-header {
+  padding: 0.5rem 0.75rem;
+  background: var(--gray-200);
+  border-bottom: 1px solid var(--gray-300);
+}
+
+.property-sheet-title {
+  display: block;
+  font-weight: 600;
+  font-size: 0.8125rem;
+  margin-bottom: 0.25rem;
+}
+
+.selection-type {
+  font-size: 0.75rem;
+  color: var(--gray-600);
+}
+
+.property-sheet-tabs {
+  display: flex;
+  gap: 0;
+  background: var(--gray-100);
+  border-bottom: 1px solid var(--gray-300);
+}
+
+.property-sheet-tabs .tab-btn {
+  flex: 1;
+  padding: 0.375rem 0.5rem;
+  font-size: 0.6875rem;
+  border: none;
+  border-right: 1px solid var(--gray-300);
+  background: var(--gray-200);
+  cursor: pointer;
+}
+
+.property-sheet-tabs .tab-btn:last-child {
+  border-right: none;
+}
+
+.property-sheet-tabs .tab-btn:hover {
+  background: var(--gray-100);
+}
+
+.property-sheet-tabs .tab-btn.active {
+  background: white;
+  font-weight: 600;
+}
+
+.property-sheet-content {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 400px;
+  background: white;
+}
+
+.properties-list {
+  display: table;
+  width: 100%;
+  font-size: 0.75rem;
+}
+
+.property-row {
+  display: table-row;
+}
+
+.property-row:hover {
+  background: var(--gray-50);
+}
+
+.property-label {
+  display: table-cell;
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--gray-200);
+  background: var(--gray-100);
+  width: 45%;
+  vertical-align: middle;
+}
+
+.property-input {
+  display: table-cell;
+  padding: 0.125rem 0.25rem;
+  border-bottom: 1px solid var(--gray-200);
+  vertical-align: middle;
+}
+
+.property-input input,
+.property-input select {
+  width: 100%;
+  padding: 0.125rem 0.25rem;
+  border: 1px solid transparent;
+  font-size: 0.75rem;
+  background: transparent;
+}
+
+.property-input input:focus,
+.property-input select:focus {
+  border-color: var(--primary);
+  outline: none;
+  background: white;
+}
+
+.property-input input[type="number"] {
+  width: 70px;
+}
+
+.property-category {
+  padding: 0.375rem 0.5rem;
+  background: var(--gray-200);
+  font-weight: 600;
+  font-size: 0.6875rem;
+  text-transform: capitalize;
+  border-bottom: 1px solid var(--gray-300);
+}
+
+/* Legacy property styles (for field list panel) */
 .properties-panel {
   padding: 0.75rem;
   border-bottom: 1px solid var(--gray-200);
-}
-
-.properties-panel h4 {
-  font-size: 0.6875rem;
-  text-transform: uppercase;
-  color: var(--gray-500);
-  margin-bottom: 0.5rem;
-  letter-spacing: 0.05em;
 }
 
 .property-group {
@@ -735,17 +849,6 @@ body {
   border: 1px solid var(--gray-300);
   border-radius: 3px;
   font-size: 0.8125rem;
-}
-
-.property-group input[type="number"] {
-  width: 80px;
-}
-
-.property-value {
-  display: block;
-  font-size: 0.8125rem;
-  color: var(--gray-600);
-  padding: 0.25rem 0;
 }
 
 /* Table/Query Viewer */

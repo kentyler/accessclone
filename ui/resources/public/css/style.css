@@ -701,6 +701,113 @@ body {
   margin: 0.25rem 0;
 }
 
+/* Form Sections */
+.sections-container {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.form-section {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--gray-300);
+}
+
+.form-section:last-child {
+  border-bottom: none;
+}
+
+.section-divider {
+  display: flex;
+  align-items: center;
+  padding: 0.125rem 0.5rem;
+  background: var(--gray-300);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--gray-700);
+  user-select: none;
+  transition: background-color 0.1s;
+}
+
+.section-divider.resizable {
+  cursor: ns-resize;
+}
+
+.section-divider.resizable:hover {
+  background: var(--gray-400);
+}
+
+.section-divider.resizable:active {
+  background: var(--primary-light, #93c5fd);
+}
+
+.form-canvas.resizing {
+  cursor: ns-resize;
+}
+
+.form-canvas.resizing * {
+  cursor: ns-resize !important;
+}
+
+.section-divider::before {
+  content: "◢";
+  margin-right: 0.25rem;
+  font-size: 0.5rem;
+}
+
+.section-label {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.section-body {
+  position: relative;
+  min-height: 40px;
+  overflow: hidden;
+}
+
+.section-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--gray-400);
+  font-size: 0.75rem;
+  font-style: italic;
+}
+
+.section-bottom-resize {
+  height: 4px;
+  background: var(--gray-300);
+  cursor: ns-resize;
+  transition: background-color 0.1s;
+}
+
+.section-bottom-resize:hover {
+  background: var(--gray-400);
+}
+
+/* View mode sections */
+.view-sections-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.view-section {
+  position: relative;
+}
+
+.view-section.header,
+.view-section.footer {
+  background: var(--gray-100);
+}
+
+.view-section.detail {
+  flex: 1;
+}
+
 .canvas-empty {
   display: flex;
   flex-direction: column;
@@ -816,6 +923,16 @@ body {
   background: var(--primary);
   color: white;
   border-color: var(--primary);
+}
+
+.record-nav-bar .delete-btn {
+  color: var(--error, #dc2626);
+}
+
+.record-nav-bar .delete-btn:hover:not(:disabled) {
+  background: var(--error, #dc2626);
+  color: white;
+  border-color: var(--error, #dc2626);
 }
 
 .record-nav-bar .nav-btn:disabled {

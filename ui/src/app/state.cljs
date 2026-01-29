@@ -127,7 +127,7 @@
           (load-functions!))
         (do
           (println "Error loading databases:" (:body response))
-          (log-error! "Failed to load databases" "load-databases" {:response (:body response)})))))
+          (log-error! "Failed to load databases" "load-databases" {:response (:body response)}))))))
 
 (defn switch-database!
   "Switch to a different database"
@@ -151,7 +151,7 @@
           (println "Switched to database:" (:name new-db)))
         (do
           (println "Error switching database:" (:body response))
-          (log-error! "Failed to switch database" "switch-database" {:response (:body response)})))))))
+          (log-error! "Failed to switch database" "switch-database" {:response (:body response)}))))))
 
 ;; Sidebar
 (defn toggle-sidebar! []
@@ -332,9 +332,11 @@
   (swap! app-state assoc-in [:form-editor :record-position] {:current pos :total total}))
 
 (defn update-record-field! [field-name value]
+  (println "update-record-field!" field-name "=" value)
   (swap! app-state assoc-in [:form-editor :current-record (keyword field-name)] value)
   ;; Mark the record as dirty
-  (swap! app-state assoc-in [:form-editor :record-dirty?] true))
+  (swap! app-state assoc-in [:form-editor :record-dirty?] true)
+  (println "Record marked dirty, current-record:" (get-in @app-state [:form-editor :current-record])))
 
 (defn navigate-to-record!
   "Navigate to a specific record by position (1-indexed)"
@@ -353,12 +355,16 @@
 (defn save-current-record!
   "Save the current record to the database"
   []
+  (println "=== save-current-record! called ===")
   (let [record-source (get-in @app-state [:form-editor :current :record-source])
         current-record (get-in @app-state [:form-editor :current-record])
         records (get-in @app-state [:form-editor :records] [])
         pos (get-in @app-state [:form-editor :record-position :current] 1)
         record-dirty? (get-in @app-state [:form-editor :record-dirty?])]
-    (when (and record-source current-record record-dirty?)
+    (println "Conditions:" {:record-source record-source
+                            :current-record current-record
+                            :record-dirty? record-dirty?})
+    (if (and record-source current-record record-dirty?)
       (go
         ;; Find primary key - check for pk flag or common names
         (let [fields (get-record-source-fields record-source)
@@ -394,9 +400,15 @@
                 (println "Error inserting record:" (:body response))))
             ;; Update existing record
             (let [update-data (dissoc record-for-api pk-field-name)
-                  response (<! (http/put (str api-base "/api/data/" record-source "/" pk-value)
-                                         {:json-params update-data
-                                          :headers (db-headers)}))]
+                  url (str api-base "/api/data/" record-source "/" pk-value)
+                  _ (println "PUT URL:" url)
+                  _ (println "PUT data:" update-data)
+                  _ (println "PUT headers:" (db-headers))
+                  response (<! (http/put url {:json-params update-data
+                                              :headers (db-headers)}))]
+              (println "PUT response:" {:success (:success response)
+                                        :status (:status response)
+                                        :body (:body response)})
               (if (:success response)
                 (do
                   (println "Record updated successfully")
@@ -404,7 +416,8 @@
                     (swap! app-state assoc-in [:form-editor :records (dec pos)] updated-record)
                     (swap! app-state assoc-in [:form-editor :current-record] updated-record)
                     (swap! app-state assoc-in [:form-editor :record-dirty?] false)))
-                (println "Error updating record:" (:body response))))))))))
+                (println "Error updating record:" (:body response))))))
+      (println "Save skipped - conditions not met")))))
 
 (defn new-record!
   "Create a new empty record"
@@ -413,6 +426,40 @@
     (swap! app-state assoc-in [:form-editor :current-record] {})
     (swap! app-state assoc-in [:form-editor :record-position] {:current (inc total) :total (inc total)})
     (swap! app-state assoc-in [:form-editor :record-dirty?] true)))
+
+(defn delete-current-record!
+  "Delete the current record from the database"
+  []
+  (let [record-source (get-in @app-state [:form-editor :current :record-source])
+        current-record (get-in @app-state [:form-editor :current-record])
+        records (get-in @app-state [:form-editor :records] [])
+        pos (get-in @app-state [:form-editor :record-position :current] 1)]
+    (when (and record-source current-record)
+      (let [fields (get-record-source-fields record-source)
+            pk-field-name (or (some #(when (:pk %) (:name %)) fields) "id")
+            pk-value (or (get current-record (keyword pk-field-name))
+                         (get current-record pk-field-name))]
+        (when pk-value
+          (go
+            (let [response (<! (http/delete (str api-base "/api/data/" record-source "/" pk-value)
+                                            {:headers (db-headers)}))]
+              (if (:success response)
+                (let [new-records (vec (concat (subvec records 0 (dec pos))
+                                               (subvec records pos)))
+                      new-total (count new-records)
+                      new-pos (min pos new-total)]
+                  (swap! app-state assoc-in [:form-editor :records] new-records)
+                  (if (> new-total 0)
+                    (do
+                      (swap! app-state assoc-in [:form-editor :record-position] {:current new-pos :total new-total})
+                      (swap! app-state assoc-in [:form-editor :current-record] (nth new-records (dec new-pos)))
+                      (swap! app-state assoc-in [:form-editor :record-dirty?] false))
+                    (do
+                      (swap! app-state assoc-in [:form-editor :record-position] {:current 0 :total 0})
+                      (swap! app-state assoc-in [:form-editor :current-record] {})
+                      (swap! app-state assoc-in [:form-editor :record-dirty?] false)))
+                  (println "Record deleted successfully"))
+                (println "Error deleting record:" (:body response))))))))))
 
 (defn get-record-source-fields
   "Get fields for a record source (table or query)"
@@ -436,7 +483,9 @@
           :dirty? false
           :original (:definition form)
           :current (:definition form)
-          :selected-control nil}))
+          :selected-control nil})
+  ;; Default to Form View and load data
+  (set-view-mode! :view))
 
 (defn select-control! [idx]
   (swap! app-state assoc-in [:form-editor :selected-control] idx))
@@ -455,26 +504,28 @@
 (defn set-grid-size! [size]
   (swap! app-state assoc-in [:config :form-designer :grid-size] size))
 
-(defn delete-control! [idx]
+(defn delete-control!
+  "Delete a control from a section"
+  [section idx]
   (let [form-editor (:form-editor @app-state)
         current (:current form-editor)
-        controls (or (:controls current) [])]
+        controls (or (get-in current [section :controls]) [])]
     (when (< idx (count controls))
       (let [new-controls (vec (concat (subvec controls 0 idx)
                                       (subvec controls (inc idx))))]
         (swap! app-state assoc-in [:form-editor :selected-control] nil)
-        (set-form-definition! (assoc current :controls new-controls))))))
+        (set-form-definition! (assoc-in current [section :controls] new-controls))))))
 
 (defn update-control!
-  "Update a property of the selected control"
-  [idx prop value]
+  "Update a property of a control in a section"
+  [section idx prop value]
   (let [form-editor (:form-editor @app-state)
         current (:current form-editor)
-        controls (or (:controls current) [])]
+        controls (or (get-in current [section :controls]) [])]
     (when (< idx (count controls))
       (set-form-definition!
-       (assoc current :controls
-              (update controls idx assoc prop value))))))
+       (assoc-in current [section :controls]
+                 (update controls idx assoc prop value))))))
 
 ;; Config file operations
 (defn load-config!
@@ -667,6 +718,24 @@
 (defn set-chat-loading! [loading?]
   (swap! app-state assoc :chat-loading? loading?))
 
+(defn navigate-to-record-by-id!
+  "Navigate to a record by its primary key ID"
+  [record-id]
+  (let [records (get-in @app-state [:form-editor :records] [])
+        record-source (get-in @app-state [:form-editor :current :record-source])
+        fields (get-record-source-fields record-source)
+        pk-field-name (or (some #(when (:pk %) (:name %)) fields) "id")
+        ;; Find the position of the record with this ID
+        pos (first (keep-indexed
+                    (fn [idx rec]
+                      (when (= (or (get rec (keyword pk-field-name))
+                                   (get rec pk-field-name))
+                               record-id)
+                        (inc idx)))
+                    records))]
+    (when pos
+      (navigate-to-record! pos))))
+
 (defn send-chat-message!
   "Send a message to the LLM and get a response"
   []
@@ -676,13 +745,22 @@
       (set-chat-input! "")
       (set-chat-loading! true)
       (go
-        (let [response (<! (http/post (str api-base "/api/chat")
+        (let [record-source (get-in @app-state [:form-editor :current :record-source])
+              form-context (when record-source
+                             {:record_source record-source})
+              response (<! (http/post (str api-base "/api/chat")
                                       {:json-params {:message input
-                                                     :database_id (:database_id (:current-database @app-state))}
+                                                     :database_id (:database_id (:current-database @app-state))
+                                                     :form_context form-context}
                                        :headers (db-headers)}))]
           (set-chat-loading! false)
           (if (:success response)
-            (add-chat-message! "assistant" (get-in response [:body :message]))
+            (do
+              (add-chat-message! "assistant" (get-in response [:body :message]))
+              ;; Handle navigation command if present
+              (when-let [nav (get-in response [:body :navigation])]
+                (when (= (:action nav) "navigate")
+                  (navigate-to-record-by-id! (:record_id nav)))))
             (add-chat-message! "assistant" (str "Error: " (get-in response [:body :error] "Failed to get response")))))))))
 
 ;; Initialize - load objects from files and database

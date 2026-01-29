@@ -140,7 +140,7 @@
              [:<>
               [:div.chat-messages
                (if (empty? messages)
-                 [:div.chat-empty "Ask me anything about your database or forms."]
+                 [:div.chat-empty "Ask me anything about your database or forms. I can also help you find records."]
                  (for [[idx msg] (map-indexed vector messages)]
                    ^{:key idx}
                    [chat-message msg]))

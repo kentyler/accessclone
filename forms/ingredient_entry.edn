@@ -1,33 +1,67 @@
 {:id 2
  :name "Ingredient Entry"
- :type :form
+ :type "form"
  :record-source "ingredient"
  :default-view "single"
- :controls
- [{:type :label
-   :text "Ingredient Name"
-   :x 20 :y 20
-   :width 120 :height 18}
-  {:type :text-box
-   :field "name"
-   :label "name"
-   :x 20 :y 40
-   :width 200 :height 24}
-  {:type :label
-   :text "Description"
-   :x 20 :y 80
-   :width 100 :height 18}
-  {:type :text-box
-   :field "description"
-   :label "description"
-   :x 20 :y 100
-   :width 300 :height 50}
-  {:type :label
-   :text "Cost per Gram"
-   :x 20 :y 170
-   :width 100 :height 18}
-  {:type :text-box
-   :field "cost_per_gram"
-   :label "cost_per_gram"
-   :x 20 :y 190
-   :width 100 :height 24}]}
+ :header {:height 40
+          :controls [{:type :label
+                      :text "Ingredient Entry"
+                      :x 8
+                      :y 8
+                      :width 200
+                      :height 24}]}
+ :detail {:height 200
+          :controls [{:type :label
+                      :text "ingredient"
+                      :x 8
+                      :y 8
+                      :width 150
+                      :height 18}
+                     {:type :text-box
+                      :field "ingredient"
+                      :label "ingredient"
+                      :x 8
+                      :y 28
+                      :width 150
+                      :height 24}
+                     {:type :label
+                      :text "ingredient_type"
+                      :x 8
+                      :y 60
+                      :width 150
+                      :height 18}
+                     {:type :text-box
+                      :field "ingredient_type"
+                      :label "ingredient_type"
+                      :x 8
+                      :y 80
+                      :width 150
+                      :height 24}
+                     {:type :label
+                      :text "initial_amount_in_grams"
+                      :x 8
+                      :y 112
+                      :width 150
+                      :height 18}
+                     {:type :text-box
+                      :field "initial_amount_in_grams"
+                      :label "initial_amount_in_grams"
+                      :x 8
+                      :y 132
+                      :width 150
+                      :height 24}
+                     {:type :label
+                      :text "note"
+                      :x 8
+                      :y 164
+                      :width 150
+                      :height 18}
+                     {:type :text-box
+                      :field "note"
+                      :label "note"
+                      :x 8
+                      :y 184
+                      :width 200
+                      :height 24}]}
+ :footer {:height 30
+          :controls []}}

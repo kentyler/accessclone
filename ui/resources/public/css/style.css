@@ -736,6 +736,17 @@ body {
   font-size: 0.8125rem;
 }
 
+.property-group input[type="number"] {
+  width: 80px;
+}
+
+.property-value {
+  display: block;
+  font-size: 0.8125rem;
+  color: var(--gray-600);
+  padding: 0.25rem 0;
+}
+
 /* Table/Query Viewer */
 .table-viewer,
 .query-viewer {

@@ -61,12 +61,11 @@
           [field-item field])])]))
 
 (defn form-properties
-  "Properties panel for the form"
+  "Properties panel for the form itself"
   []
   (let [form-editor (:form-editor @state/app-state)
         current (:current form-editor)]
-    [:div.properties-panel
-     [:h4 "Form Properties"]
+    [:div.properties-content
      [:div.property-group
       [:label "Record Source"]
       [:select
@@ -88,6 +87,66 @@
                      (assoc current :default-view (.. % -target -value)))}
        [:option {:value "single"} "Single Record"]
        [:option {:value "continuous"} "List (Paginated)"]]]]))
+
+(defn control-properties
+  "Properties panel for a selected control"
+  [idx control]
+  [:div.properties-content
+   [:div.property-group
+    [:label "Type"]
+    [:span.property-value (name (:type control))]]
+   [:div.property-group
+    [:label "Text/Label"]
+    [:input
+     {:type "text"
+      :value (or (:text control) (:label control) "")
+      :on-change #(state/update-control! idx
+                   (if (= (:type control) :label) :text :label)
+                   (.. % -target -value))}]]
+   (when (:field control)
+     [:div.property-group
+      [:label "Field"]
+      [:span.property-value (:field control)]])
+   [:div.property-group
+    [:label "X"]
+    [:input
+     {:type "number"
+      :value (or (:x control) 0)
+      :on-change #(state/update-control! idx :x (js/parseInt (.. % -target -value) 10))}]]
+   [:div.property-group
+    [:label "Y"]
+    [:input
+     {:type "number"
+      :value (or (:y control) 0)
+      :on-change #(state/update-control! idx :y (js/parseInt (.. % -target -value) 10))}]]
+   [:div.property-group
+    [:label "Width"]
+    [:input
+     {:type "number"
+      :value (or (:width control) 100)
+      :on-change #(state/update-control! idx :width (js/parseInt (.. % -target -value) 10))}]]
+   [:div.property-group
+    [:label "Height"]
+    [:input
+     {:type "number"
+      :value (or (:height control) 24)
+      :on-change #(state/update-control! idx :height (js/parseInt (.. % -target -value) 10))}]]])
+
+(defn properties-panel
+  "Properties panel that shows form or control properties based on selection"
+  []
+  (let [form-editor (:form-editor @state/app-state)
+        selected-idx (:selected-control form-editor)
+        current (:current form-editor)
+        controls (or (:controls current) [])
+        selected-control (when selected-idx (get controls selected-idx))]
+    [:div.properties-panel
+     [:h4 (if selected-control
+            (str (name (:type selected-control)) " Properties")
+            "Form Properties")]
+     (if selected-control
+       [control-properties selected-idx selected-control]
+       [form-properties])]))
 
 (defn add-field-control!
   "Add a control for a dropped field.
@@ -246,7 +305,7 @@
         [:div.editor-center
          [form-canvas]]
         [:div.editor-right
-         [form-properties]
+         [properties-panel]
          [field-list]]]])))
 
 (defn table-viewer

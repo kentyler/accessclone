@@ -291,6 +291,17 @@
         (swap! app-state assoc-in [:form-editor :selected-control] nil)
         (set-form-definition! (assoc current :controls new-controls))))))
 
+(defn update-control!
+  "Update a property of the selected control"
+  [idx prop value]
+  (let [form-editor (:form-editor @app-state)
+        current (:current form-editor)
+        controls (or (:controls current) [])]
+    (when (< idx (count controls))
+      (set-form-definition!
+       (assoc current :controls
+              (update controls idx assoc prop value))))))
+
 ;; Config file operations
 (defn load-config!
   "Load app configuration from settings/config.edn"

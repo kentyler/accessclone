@@ -352,24 +352,34 @@
   (let [record-source (get-in @app-state [:form-editor :current :record-source])
         current-record (get-in @app-state [:form-editor :current-record])
         records (get-in @app-state [:form-editor :records] [])
-        pos (get-in @app-state [:form-editor :record-position :current] 1)]
-    (when (and record-source current-record)
+        pos (get-in @app-state [:form-editor :record-position :current] 1)
+        record-dirty? (get-in @app-state [:form-editor :record-dirty?])]
+    (when (and record-source current-record record-dirty?)
       (go
-        ;; Find primary key - assume first field or 'id'
-        (let [pk-field (or (some #(when (:pk %) (:name %))
-                                 (get-record-source-fields record-source))
-                           "id")
-              pk-value (get current-record (keyword pk-field))
-              is-new? (nil? pk-value)]
+        ;; Find primary key - check for pk flag or common names
+        (let [fields (get-record-source-fields record-source)
+              pk-field-name (or (some #(when (:pk %) (:name %)) fields)
+                                "id")
+              ;; Check both string and keyword versions of pk
+              pk-value (or (get current-record (keyword pk-field-name))
+                           (get current-record pk-field-name))
+              is-new? (or (nil? pk-value) (= pk-value ""))
+              ;; Convert record to string keys for API
+              record-for-api (reduce-kv
+                              (fn [m k v]
+                                (assoc m (if (keyword? k) (name k) k) v))
+                              {}
+                              current-record)]
+          (println "Saving record:" {:pk pk-field-name :pk-value pk-value :is-new? is-new? :data record-for-api})
           (if is-new?
-            ;; Insert new record
-            (let [response (<! (http/post (str api-base "/api/data/" record-source)
-                                          {:json-params current-record
+            ;; Insert new record - remove pk field
+            (let [insert-data (dissoc record-for-api pk-field-name)
+                  response (<! (http/post (str api-base "/api/data/" record-source)
+                                          {:json-params insert-data
                                            :headers (db-headers)}))]
               (if (:success response)
                 (do
                   (println "Record inserted successfully")
-                  ;; Add to records list
                   (let [new-record (get-in response [:body :data])]
                     (swap! app-state update-in [:form-editor :records] conj new-record)
                     (swap! app-state assoc-in [:form-editor :current-record] new-record)
@@ -379,13 +389,13 @@
                              {:current new-total :total new-total}))))
                 (println "Error inserting record:" (:body response))))
             ;; Update existing record
-            (let [response (<! (http/put (str api-base "/api/data/" record-source "/" pk-value)
-                                         {:json-params (dissoc current-record (keyword pk-field))
+            (let [update-data (dissoc record-for-api pk-field-name)
+                  response (<! (http/put (str api-base "/api/data/" record-source "/" pk-value)
+                                         {:json-params update-data
                                           :headers (db-headers)}))]
               (if (:success response)
                 (do
                   (println "Record updated successfully")
-                  ;; Update in records list
                   (let [updated-record (get-in response [:body :data])]
                     (swap! app-state assoc-in [:form-editor :records (dec pos)] updated-record)
                     (swap! app-state assoc-in [:form-editor :current-record] updated-record)

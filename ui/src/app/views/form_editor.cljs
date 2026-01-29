@@ -217,28 +217,6 @@
               :title "Delete"}
              "\u00D7"]])])]]))
 
-(defn ai-assistant
-  "LLM assistant panel for form design"
-  []
-  (let [prompt (r/atom "")]
-    (fn []
-      [:div.ai-assistant
-       [:h4 "AI Assistant"]
-       [:div.assistant-input
-        [:textarea
-         {:placeholder "Describe the form you want to create..."
-          :value @prompt
-          :on-change #(reset! prompt (.. % -target -value))}]
-        [:button.primary-btn
-         {:on-click #(js/alert "AI form generation coming soon!")}
-         "Generate"]]
-       [:div.assistant-suggestions
-        [:p.hint "Try:"]
-        [:ul
-         [:li "\"Add a text box for recipe name\""]
-         [:li "\"Create a subform showing ingredients\""]
-         [:li "\"Add Save and Cancel buttons\""]]]])))
-
 (defn form-toolbar
   "Toolbar with form actions"
   []
@@ -274,8 +252,7 @@
        [form-toolbar]
        [:div.editor-body
         [:div.editor-left
-         [control-palette]
-         [ai-assistant]]
+         [control-palette]]
         [:div.editor-center
          [form-canvas]]
         [:div.editor-right

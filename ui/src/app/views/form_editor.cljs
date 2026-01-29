@@ -341,15 +341,18 @@
             "Close All"]
            [:div.context-menu-separator]
            [:div.context-menu-item
-            {:on-click (fn [e]
+            {:class (when (= (state/get-view-mode) :view) "active")
+             :on-click (fn [e]
                          (.stopPropagation e)
                          (state/hide-context-menu!)
-                         (js/alert "Form View - coming soon"))}
+                         (state/set-view-mode! :view))}
             "Form View"]
-           [:div.context-menu-item.active
-            {:on-click (fn [e]
+           [:div.context-menu-item
+            {:class (when (= (state/get-view-mode) :design) "active")
+             :on-click (fn [e]
                          (.stopPropagation e)
-                         (state/hide-context-menu!))}
+                         (state/hide-context-menu!)
+                         (state/set-view-mode! :design))}
             "Design View"]]))]
      [:div.canvas-body
       {:style {:background-image (str "radial-gradient(circle, #ccc 1px, transparent 1px)")
@@ -430,14 +433,107 @@
       [:span.filter-indicator "No Filter"]
       [:input.search-box {:type "text" :placeholder "Search"}]]]))
 
+(defn form-view-control
+  "Render a single control in view mode"
+  [ctrl current-record on-change]
+  (let [field (:field ctrl)
+        value (get current-record (keyword field) "")]
+    [:div.view-control
+     {:style {:left (:x ctrl)
+              :top (:y ctrl)
+              :width (:width ctrl)
+              :height (:height ctrl)}}
+     (case (:type ctrl)
+       :label
+       [:span.view-label (or (:text ctrl) (:label ctrl))]
+
+       :text-box
+       [:input.view-input
+        {:type "text"
+         :value value
+         :on-change #(when field (on-change field (.. % -target -value)))}]
+
+       :button
+       [:button.view-button
+        {:on-click #(js/alert (str "Button clicked: " (:text ctrl)))}
+        (or (:text ctrl) (:caption ctrl) "Button")]
+
+       :check-box
+       [:label.view-checkbox
+        [:input {:type "checkbox"
+                 :checked (boolean value)
+                 :on-change #(when field (on-change field (.. % -target -checked)))}]
+        (or (:text ctrl) (:caption ctrl))]
+
+       :combo-box
+       [:select.view-select
+        {:value value
+         :on-change #(when field (on-change field (.. % -target -value)))}
+        [:option ""]]
+
+       ;; Default - just show text
+       [:span (or (:text ctrl) (:label ctrl) "")])]))
+
+(defn form-view
+  "The form in view/data entry mode"
+  []
+  (let [form-editor (:form-editor @state/app-state)
+        current (:current form-editor)
+        controls (or (:controls current) [])
+        current-record (or (:current-record form-editor) {})
+        record-pos (or (:record-position form-editor) {:current 1 :total 1})]
+    [:div.form-canvas.view-mode
+     [:div.canvas-header
+      [:span "Form View"]]
+     [:div.canvas-body.view-mode-body
+      [:div.view-controls-container
+       (for [[idx ctrl] (map-indexed vector controls)]
+         ^{:key idx}
+         [form-view-control ctrl current-record
+          (fn [field value]
+            (state/update-record-field! field value))])]]
+     ;; Record navigation bar (footer)
+     [:div.record-nav-bar
+      [:span.nav-label "Record:"]
+      [:button.nav-btn {:title "First"
+                        :on-click #(state/set-record-position! 1 (:total record-pos))} "|◀"]
+      [:button.nav-btn {:title "Previous"
+                        :on-click #(state/set-record-position!
+                                    (max 1 (dec (:current record-pos)))
+                                    (:total record-pos))} "◀"]
+      [:span.record-counter (str (:current record-pos) " of " (:total record-pos))]
+      [:button.nav-btn {:title "Next"
+                        :on-click #(state/set-record-position!
+                                    (min (:total record-pos) (inc (:current record-pos)))
+                                    (:total record-pos))} "▶"]
+      [:button.nav-btn {:title "Last"
+                        :on-click #(state/set-record-position! (:total record-pos) (:total record-pos))} "▶|"]
+      [:button.nav-btn {:title "New"
+                        :on-click #(do (state/set-current-record! {})
+                                       (state/set-record-position!
+                                        (inc (:total record-pos))
+                                        (inc (:total record-pos))))} "▶*"]
+      [:span.nav-separator]
+      [:span.filter-indicator "No Filter"]
+      [:input.search-box {:type "text" :placeholder "Search"}]]]))
+
 (defn form-toolbar
   "Toolbar with form actions"
   []
-  (let [dirty? (get-in @state/app-state [:form-editor :dirty?])]
+  (let [dirty? (get-in @state/app-state [:form-editor :dirty?])
+        view-mode (state/get-view-mode)]
     [:div.form-toolbar
      [:div.toolbar-left
-      [:button.toolbar-btn.active {:title "Design View"} "Design"]
-      [:button.toolbar-btn {:title "Form View"} "View"]]
+      [:button.toolbar-btn
+       {:class (when (= view-mode :design) "active")
+        :title "Design View"
+        :on-click #(state/set-view-mode! :design)}
+       "Design"]
+      [:button.toolbar-btn
+       {:class (when (= view-mode :view) "active")
+        :title "Form View"
+        :on-click #(state/set-view-mode! :view)}
+       "View"]]
      [:div.toolbar-right
       [:button.secondary-btn
        {:disabled (not dirty?)
@@ -453,7 +549,8 @@
   "Main form editor component"
   []
   (let [active-tab (:active-tab @state/app-state)
-        editing-form-id (get-in @state/app-state [:form-editor :form-id])]
+        editing-form-id (get-in @state/app-state [:form-editor :form-id])
+        view-mode (state/get-view-mode)]
     (when (and active-tab (= (:type active-tab) :forms))
       ;; Load form data when tab changes to a different form
       (let [form (first (filter #(= (:id %) (:id active-tab))
@@ -462,12 +559,18 @@
           (state/load-form-for-editing! form)))
       [:div.form-editor
        [form-toolbar]
-       [:div.editor-body
-        [:div.editor-center
-         [form-canvas]]
-        [:div.editor-right
-         [properties-panel]
-         [field-list]]]])))
+       (if (= view-mode :view)
+         ;; View mode - just the form, no panels
+         [:div.editor-body.view-mode
+          [:div.editor-center
+           [form-view]]]
+         ;; Design mode - form with properties and field panels
+         [:div.editor-body
+          [:div.editor-center
+           [form-canvas]]
+          [:div.editor-right
+           [properties-panel]
+           [field-list]]])])))
 
 (defn table-viewer
   "Simple table viewer for tables"

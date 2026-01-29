@@ -283,6 +283,24 @@
                                 (get-in @app-state [:objects :forms])))]
         (save-form-to-file! form)))))
 
+;; View mode
+(defn set-view-mode! [mode]
+  "Set form view mode - :design or :view"
+  (swap! app-state assoc-in [:form-editor :view-mode] mode))
+
+(defn get-view-mode []
+  (get-in @app-state [:form-editor :view-mode] :design))
+
+;; Record navigation state
+(defn set-current-record! [record]
+  (swap! app-state assoc-in [:form-editor :current-record] record))
+
+(defn set-record-position! [pos total]
+  (swap! app-state assoc-in [:form-editor :record-position] {:current pos :total total}))
+
+(defn update-record-field! [field-name value]
+  (swap! app-state assoc-in [:form-editor :current-record field-name] value))
+
 (defn load-form-for-editing! [form]
   ;; Auto-save current form if dirty before loading new one
   (when (get-in @app-state [:form-editor :dirty?])

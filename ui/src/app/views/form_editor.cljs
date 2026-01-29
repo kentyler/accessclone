@@ -89,20 +89,6 @@
        [:option {:value "single"} "Single Record"]
        [:option {:value "continuous"} "List (Paginated)"]]]]))
 
-(defn control-palette
-  "Palette of controls that can be added to the form"
-  []
-  [:div.control-palette
-   [:h4 "Controls"]
-   [:div.control-buttons
-    [:button.control-btn {:title "Text Box"} "Text Box"]
-    [:button.control-btn {:title "Label"} "Label"]
-    [:button.control-btn {:title "Button"} "Button"]
-    [:button.control-btn {:title "Combo Box"} "Combo Box"]
-    [:button.control-btn {:title "List Box"} "List Box"]
-    [:button.control-btn {:title "Check Box"} "Check Box"]
-    [:button.control-btn {:title "Subform"} "Subform"]]])
-
 (defn add-field-control!
   "Add a control for a dropped field.
    ctrl-key? bypasses snap-to-grid for pixel-perfect positioning."
@@ -251,8 +237,6 @@
       [:div.form-editor
        [form-toolbar]
        [:div.editor-body
-        [:div.editor-left
-         [control-palette]]
         [:div.editor-center
          [form-canvas]]
         [:div.editor-right

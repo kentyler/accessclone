@@ -399,14 +399,13 @@
 (defn form-editor
   "Main form editor component"
   []
-  (let [active-tab (:active-tab @state/app-state)]
+  (let [active-tab (:active-tab @state/app-state)
+        editing-form-id (get-in @state/app-state [:form-editor :form-id])]
     (when (and active-tab (= (:type active-tab) :forms))
-      ;; Load form data when tab changes
+      ;; Load form data when tab changes to a different form
       (let [form (first (filter #(= (:id %) (:id active-tab))
                                 (get-in @state/app-state [:objects :forms])))]
-        (when (and form
-                   (not= (:definition form)
-                         (get-in @state/app-state [:form-editor :original])))
+        (when (and form (not= (:id form) editing-form-id))
           (state/load-form-for-editing! form)))
       [:div.form-editor
        [form-toolbar]

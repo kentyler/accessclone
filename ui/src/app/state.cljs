@@ -233,24 +233,25 @@
 
 (defn save-form! []
   (let [current (get-in @app-state [:form-editor :current])
-        active (:active-tab @app-state)]
-    (when (and active (= (:type active) :forms))
+        ;; Use the form-id stored in form-editor, not active-tab
+        form-id (get-in @app-state [:form-editor :form-id])]
+    (when (and form-id current)
       ;; Update the form in objects list
-      (update-object! :forms (:id active) {:definition current})
+      (update-object! :forms form-id {:definition current})
       ;; Update the tab name if form name changed
       (swap! app-state update :open-objects
              (fn [tabs]
                (mapv (fn [tab]
                        (if (and (= (:type tab) :forms)
-                                (= (:id tab) (:id active)))
+                                (= (:id tab) form-id))
                          (assoc tab :name (:name current))
                          tab))
                      tabs)))
       ;; Mark as clean
       (swap! app-state assoc-in [:form-editor :dirty?] false)
       (swap! app-state assoc-in [:form-editor :original] current)
-      ;; Save to EDN file (logs for now - needs backend)
-      (let [form (first (filter #(= (:id %) (:id active))
+      ;; Save to EDN file
+      (let [form (first (filter #(= (:id %) form-id)
                                 (get-in @app-state [:objects :forms])))]
         (save-form-to-file! form)))))
 
@@ -259,7 +260,8 @@
   (when (get-in @app-state [:form-editor :dirty?])
     (save-form!))
   (swap! app-state assoc :form-editor
-         {:dirty? false
+         {:form-id (:id form)
+          :dirty? false
           :original (:definition form)
           :current (:definition form)
           :selected-control nil}))

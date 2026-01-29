@@ -703,6 +703,74 @@ body {
   border-color: var(--primary);
 }
 
+/* Record Navigation Bar */
+.record-nav-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  background: var(--gray-200);
+  border-top: 1px solid var(--gray-300);
+  font-size: 0.75rem;
+}
+
+.record-nav-bar .nav-label {
+  color: var(--gray-600);
+  margin-right: 0.25rem;
+}
+
+.record-nav-bar .nav-btn {
+  padding: 0.125rem 0.375rem;
+  border: 1px solid var(--gray-400);
+  background: var(--gray-100);
+  cursor: pointer;
+  font-size: 0.625rem;
+  line-height: 1;
+  min-width: 20px;
+}
+
+.record-nav-bar .nav-btn:hover {
+  background: var(--gray-200);
+  border-color: var(--gray-500);
+}
+
+.record-nav-bar .nav-btn:active {
+  background: var(--gray-300);
+}
+
+.record-nav-bar .record-counter {
+  padding: 0.125rem 0.5rem;
+  background: white;
+  border: 1px solid var(--gray-300);
+  min-width: 50px;
+  text-align: center;
+}
+
+.record-nav-bar .nav-separator {
+  width: 1px;
+  height: 16px;
+  background: var(--gray-400);
+  margin: 0 0.5rem;
+}
+
+.record-nav-bar .filter-indicator {
+  color: var(--gray-500);
+  font-style: italic;
+}
+
+.record-nav-bar .search-box {
+  margin-left: auto;
+  padding: 0.125rem 0.375rem;
+  border: 1px solid var(--gray-300);
+  font-size: 0.75rem;
+  width: 100px;
+}
+
+.record-nav-bar .search-box:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
 /* Property Sheet (Access-style) */
 .property-sheet {
   display: flex;

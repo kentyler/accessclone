@@ -375,7 +375,19 @@
                           (.stopPropagation e)
                           (state/delete-control! idx))
               :title "Delete"}
-             "\u00D7"]])])]]))
+             "\u00D7"]])])]
+     ;; Record navigation bar (footer)
+     [:div.record-nav-bar
+      [:span.nav-label "Record:"]
+      [:button.nav-btn {:title "First"} "|◀"]
+      [:button.nav-btn {:title "Previous"} "◀"]
+      [:span.record-counter "1 of 5"]
+      [:button.nav-btn {:title "Next"} "▶"]
+      [:button.nav-btn {:title "Last"} "▶|"]
+      [:button.nav-btn {:title "New"} "▶*"]
+      [:span.nav-separator]
+      [:span.filter-indicator "No Filter"]
+      [:input.search-box {:type "text" :placeholder "Search"}]]]))
 
 (defn form-toolbar
   "Toolbar with form actions"

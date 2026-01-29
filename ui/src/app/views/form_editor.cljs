@@ -296,7 +296,9 @@
         grid-size (state/get-grid-size)]
     [:div.form-canvas
      {:tab-index 0
+      :on-click (fn [_] (state/hide-context-menu!))
       :on-key-down (fn [e]
+                     (state/hide-context-menu!)
                      (when (and selected-idx
                                 (or (= (.-key e) "Delete")
                                     (= (.-key e) "Backspace")))
@@ -308,8 +310,47 @@
         :on-click (fn [e]
                     (.stopPropagation e)
                     (state/select-control! nil))
-        :title "Select form to edit properties"}]
-      [:span "Form Design View"]]
+        :on-context-menu (fn [e]
+                           (.preventDefault e)
+                           (.stopPropagation e)
+                           (state/show-context-menu! (.-clientX e) (.-clientY e)))
+        :title "Select form to edit properties (right-click for menu)"}]
+      [:span "Form Design View"]
+      ;; Context menu
+      (let [ctx-menu (:context-menu @state/app-state)]
+        (when (:visible? ctx-menu)
+          [:div.context-menu
+           {:style {:left (:x ctx-menu) :top (:y ctx-menu)}}
+           [:div.context-menu-item
+            {:on-click (fn [e]
+                         (.stopPropagation e)
+                         (state/hide-context-menu!)
+                         (state/save-form!))}
+            "Save"]
+           [:div.context-menu-item
+            {:on-click (fn [e]
+                         (.stopPropagation e)
+                         (state/hide-context-menu!)
+                         (state/close-current-tab!))}
+            "Close"]
+           [:div.context-menu-item
+            {:on-click (fn [e]
+                         (.stopPropagation e)
+                         (state/hide-context-menu!)
+                         (state/close-all-tabs!))}
+            "Close All"]
+           [:div.context-menu-separator]
+           [:div.context-menu-item
+            {:on-click (fn [e]
+                         (.stopPropagation e)
+                         (state/hide-context-menu!)
+                         (js/alert "Form View - coming soon"))}
+            "Form View"]
+           [:div.context-menu-item.active
+            {:on-click (fn [e]
+                         (.stopPropagation e)
+                         (state/hide-context-menu!))}
+            "Design View"]]))]
      [:div.canvas-body
       {:style {:background-image (str "radial-gradient(circle, #ccc 1px, transparent 1px)")
                :background-size (str grid-size "px " grid-size "px")}

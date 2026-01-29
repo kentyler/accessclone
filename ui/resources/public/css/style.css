@@ -665,6 +665,42 @@ body {
   box-shadow: 0 0 0 2px var(--primary);
 }
 
+/* Context Menu */
+.context-menu {
+  position: fixed;
+  background: white;
+  border: 1px solid var(--gray-300);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  min-width: 150px;
+  z-index: 1000;
+  padding: 0.25rem 0;
+}
+
+.context-menu-item {
+  padding: 0.375rem 1rem;
+  cursor: pointer;
+  font-size: 0.8125rem;
+}
+
+.context-menu-item:hover {
+  background: var(--gray-100);
+}
+
+.context-menu-item.active {
+  font-weight: 600;
+}
+
+.context-menu-item.disabled {
+  color: var(--gray-400);
+  cursor: default;
+}
+
+.context-menu-separator {
+  height: 1px;
+  background: var(--gray-200);
+  margin: 0.25rem 0;
+}
+
 .canvas-empty {
   display: flex;
   flex-direction: column;

@@ -213,6 +213,34 @@
 (defn set-active-tab! [object-type object-id]
   (swap! app-state assoc :active-tab {:type object-type :id object-id}))
 
+(defn close-all-tabs!
+  "Close all open tabs"
+  []
+  ;; Auto-save if dirty before closing
+  (when (get-in @app-state [:form-editor :dirty?])
+    (save-form!))
+  (swap! app-state assoc
+         :open-objects []
+         :active-tab nil
+         :form-editor nil))
+
+(defn close-current-tab!
+  "Close the currently active tab"
+  []
+  (let [active (:active-tab @app-state)]
+    (when active
+      ;; Auto-save if dirty before closing
+      (when (get-in @app-state [:form-editor :dirty?])
+        (save-form!))
+      (close-tab! (:type active) (:id active)))))
+
+;; Context menu
+(defn show-context-menu! [x y]
+  (swap! app-state assoc :context-menu {:x x :y y :visible? true}))
+
+(defn hide-context-menu! []
+  (swap! app-state assoc-in [:context-menu :visible?] false))
+
 ;; Form creation
 (defn create-new-form! []
   (let [existing-forms (get-in @app-state [:objects :forms])

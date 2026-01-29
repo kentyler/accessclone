@@ -321,11 +321,18 @@
        :on-drop (fn [e]
                   (.preventDefault e)
                   (let [rect (.getBoundingClientRect (.-currentTarget e))
-                        x (- (.-clientX e) (.-left rect))
-                        y (- (.-clientY e) (.-top rect))
+                        raw-x (- (.-clientX e) (.-left rect))
+                        raw-y (- (.-clientY e) (.-top rect))
                         ctrl-key? (.-ctrlKey e)
                         ;; Check if this is an existing control being moved
                         control-idx (.getData (.-dataTransfer e) "application/x-control-idx")
+                        ;; Get drag offset if moving existing control
+                        offset-data (.getData (.-dataTransfer e) "application/x-offset")
+                        offset (when (and offset-data (not= offset-data ""))
+                                 (js->clj (js/JSON.parse offset-data) :keywordize-keys true))
+                        ;; Adjust position by drag offset
+                        x (if offset (- raw-x (:x offset)) raw-x)
+                        y (if offset (- raw-y (:y offset)) raw-y)
                         ;; Or a new field being added
                         field-data (.getData (.-dataTransfer e) "application/x-field")]
                     (cond
@@ -336,7 +343,7 @@
                       ;; Adding new field
                       (and field-data (not= field-data ""))
                       (let [parsed (js->clj (js/JSON.parse field-data) :keywordize-keys true)]
-                        (add-field-control! (:name parsed) (:type parsed) x y ctrl-key?)))))}
+                        (add-field-control! (:name parsed) (:type parsed) raw-x raw-y ctrl-key?)))))}
       (if (empty? controls)
         [:div.canvas-empty
          [:p "Drag fields here or use the AI assistant"]
@@ -351,7 +358,13 @@
                          (.stopPropagation e)
                          (state/select-control! idx))
              :on-drag-start (fn [e]
-                              (.setData (.-dataTransfer e) "application/x-control-idx" (str idx)))
+                              ;; Store the offset from mouse to control's top-left
+                              (let [rect (.getBoundingClientRect (.-target e))
+                                    offset-x (- (.-clientX e) (.-left rect))
+                                    offset-y (- (.-clientY e) (.-top rect))]
+                                (.setData (.-dataTransfer e) "application/x-control-idx" (str idx))
+                                (.setData (.-dataTransfer e) "application/x-offset"
+                                          (js/JSON.stringify (clj->js {:x offset-x :y offset-y})))))
              :style {:left (:x ctrl)
                      :top (:y ctrl)
                      :width (:width ctrl)

@@ -644,11 +644,12 @@ body {
 
 .form-selector {
   display: inline-block;
+  flex-shrink: 0;
   width: 14px;
   height: 14px;
   margin-right: 8px;
-  border: 1px solid var(--gray-400);
-  background: var(--gray-100);
+  border: 2px solid var(--gray-500);
+  background: white;
   cursor: pointer;
   vertical-align: middle;
 }

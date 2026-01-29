@@ -35,6 +35,50 @@ pool.query('SELECT NOW()')
   .then(() => console.log('Database connected successfully'))
   .catch(err => console.error('Database connection error:', err.message));
 
+// ============================================================
+// EVENT LOGGING
+// ============================================================
+
+/**
+ * Log an event to the shared.events table
+ * @param {string} eventType - 'error', 'warning', 'info', 'action', etc.
+ * @param {string} source - where the event originated ('server', 'api', endpoint name, etc.)
+ * @param {string} message - human-readable message
+ * @param {object} options - { databaseId, userId, sessionId, details }
+ */
+async function logEvent(eventType, source, message, options = {}) {
+  const { databaseId, userId, sessionId, details } = options;
+  try {
+    await pool.query(`
+      INSERT INTO shared.events (event_type, source, database_id, user_id, session_id, message, details)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `, [
+      eventType,
+      source,
+      databaseId || null,
+      userId || null,
+      sessionId || null,
+      message,
+      details ? JSON.stringify(details) : null
+    ]);
+  } catch (err) {
+    // Don't let logging errors break the app, just console log
+    console.error('Failed to log event:', err.message);
+  }
+}
+
+// Helper for logging errors with stack trace
+async function logError(source, message, error, options = {}) {
+  await logEvent('error', source, message, {
+    ...options,
+    details: {
+      ...options.details,
+      error: error?.message,
+      stack: error?.stack
+    }
+  });
+}
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -104,6 +148,7 @@ app.get('/api/databases', async (req, res) => {
     });
   } catch (err) {
     console.error('Error fetching databases:', err);
+    await logError('/api/databases', 'Failed to fetch databases', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -642,6 +687,74 @@ app.post('/api/function/:name', async (req, res) => {
   } catch (err) {
     console.error('Error calling function:', err);
     res.status(500).json({ error: 'Failed to call function', details: err.message });
+  }
+});
+
+// ============================================================
+// EVENTS ENDPOINTS
+// ============================================================
+
+/**
+ * POST /api/events
+ * Log an event from the UI
+ */
+app.post('/api/events', async (req, res) => {
+  const { event_type, source, message, details } = req.body;
+  const databaseId = req.databaseId;
+
+  if (!event_type || !message) {
+    return res.status(400).json({ error: 'event_type and message are required' });
+  }
+
+  try {
+    await logEvent(event_type, source || 'ui', message, {
+      databaseId,
+      details
+    });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/events
+ * Retrieve recent events
+ * Query params: limit, offset, type, source
+ */
+app.get('/api/events', async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 50, 500);
+  const offset = parseInt(req.query.offset) || 0;
+  const eventType = req.query.type;
+  const source = req.query.source;
+
+  try {
+    let query = `
+      SELECT event_id, event_type, source, database_id, user_id, session_id,
+             message, details, created_at
+      FROM shared.events
+      WHERE 1=1
+    `;
+    const params = [];
+    let paramIndex = 1;
+
+    if (eventType) {
+      query += ` AND event_type = $${paramIndex++}`;
+      params.push(eventType);
+    }
+    if (source) {
+      query += ` AND source = $${paramIndex++}`;
+      params.push(source);
+    }
+
+    query += ` ORDER BY created_at DESC LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
+    params.push(limit, offset);
+
+    const result = await pool.query(query, params);
+    res.json({ events: result.rows });
+  } catch (err) {
+    console.error('Error fetching events:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 

@@ -64,6 +64,28 @@
 (defn clear-error! []
   (swap! app-state assoc :error nil))
 
+;; Event logging
+(defn log-event!
+  "Log an event to the server"
+  ([event-type message] (log-event! event-type message nil nil))
+  ([event-type message source] (log-event! event-type message source nil))
+  ([event-type message source details]
+   (go
+     (<! (http/post (str api-base "/api/events")
+                    {:json-params {:event_type event-type
+                                   :source (or source "ui")
+                                   :message message
+                                   :details details}
+                     :headers (db-headers)})))))
+
+(defn log-error!
+  "Log an error and display it in the UI"
+  ([message] (log-error! message nil nil))
+  ([message source] (log-error! message source nil))
+  ([message source details]
+   (set-error! message)
+   (log-event! "error" message source details)))
+
 ;; Database selection
 (defn set-available-databases! [databases]
   (swap! app-state assoc :available-databases databases))
@@ -105,7 +127,7 @@
           (load-functions!))
         (do
           (println "Error loading databases:" (:body response))
-          (set-error! "Failed to load databases"))))))
+          (log-error! "Failed to load databases" "load-databases" {:response (:body response)})))))
 
 (defn switch-database!
   "Switch to a different database"
@@ -129,7 +151,7 @@
           (println "Switched to database:" (:name new-db)))
         (do
           (println "Error switching database:" (:body response))
-          (set-error! "Failed to switch database"))))))
+          (log-error! "Failed to switch database" "switch-database" {:response (:body response)})))))))
 
 ;; Sidebar
 (defn toggle-sidebar! []
@@ -295,7 +317,7 @@
         (println "Config saved")
         (do
           (println "Error saving config:" (:body response))
-          (set-error! "Failed to save configuration"))))))
+          (log-error! "Failed to save configuration" "save-config" {:response (:body response)}))))))
 
 ;; Form file operations
 (defn load-form-file!
@@ -356,7 +378,7 @@
                            forms))))
           (do
             (println "Error saving form:" (:body response))
-            (set-error! (str "Failed to save form: " (get-in response [:body :error])))))))))
+            (log-error! (str "Failed to save form: " (get-in response [:body :error])) "save-form" {:response (:body response)})))))))
 
 ;; Helper to get current database headers
 (defn- db-headers []
@@ -391,7 +413,7 @@
           (object-load-complete!))
         (do
           (println "Error loading tables:" (:body response))
-          (set-error! "Failed to load tables from database")
+          (log-error! "Failed to load tables from database" "load-tables" {:response (:body response)})
           (object-load-complete!))))))
 
 ;; Load queries (views) from database API
@@ -419,7 +441,7 @@
           (object-load-complete!))
         (do
           (println "Error loading queries:" (:body response))
-          (set-error! "Failed to load queries from database")
+          (log-error! "Failed to load queries from database" "load-queries" {:response (:body response)})
           (object-load-complete!))))))
 
 ;; Load functions from database API
@@ -444,7 +466,7 @@
           (object-load-complete!))
         (do
           (println "Error loading functions:" (:body response))
-          (set-error! "Failed to load functions from database")
+          (log-error! "Failed to load functions from database" "load-functions" {:response (:body response)})
           (object-load-complete!))))))
 
 ;; Chat panel

@@ -265,9 +265,16 @@
   (swap! app-state assoc-in [:form-editor :dirty?]
          (not= definition (get-in @app-state [:form-editor :original]))))
 
-(defn save-form! []
+(defn clear-lint-errors! []
+  (swap! app-state assoc-in [:form-editor :lint-errors] nil))
+
+(defn set-lint-errors! [errors]
+  (swap! app-state assoc-in [:form-editor :lint-errors] errors))
+
+(defn do-save-form!
+  "Actually save the form (called after lint passes)"
+  []
   (let [current (get-in @app-state [:form-editor :current])
-        ;; Use the form-id stored in form-editor, not active-tab
         form-id (get-in @app-state [:form-editor :form-id])]
     (when (and form-id current)
       ;; Update the form in objects list
@@ -288,6 +295,30 @@
       (let [form (first (filter #(= (:id %) form-id)
                                 (get-in @app-state [:objects :forms])))]
         (save-form-to-file! form)))))
+
+(defn save-form!
+  "Lint the form and save if valid"
+  []
+  (let [current (get-in @app-state [:form-editor :current])
+        form-id (get-in @app-state [:form-editor :form-id])]
+    (when (and form-id current)
+      (clear-lint-errors!)
+      (go
+        (let [response (<! (http/post (str api-base "/api/lint/form")
+                                      {:json-params {:form current}}))]
+          (if (:success response)
+            (let [result (:body response)]
+              (if (:valid result)
+                (do
+                  (do-save-form!)
+                  (println "Form saved successfully"))
+                (do
+                  (set-lint-errors! (:errors result))
+                  (println "Form has validation errors:" (:errors result)))))
+            (do
+              ;; Lint endpoint failed, save anyway
+              (println "Lint check failed, saving anyway")
+              (do-save-form!))))))))
 
 ;; View mode
 (defn set-view-mode! [mode]

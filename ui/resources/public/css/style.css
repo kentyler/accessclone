@@ -788,6 +788,78 @@ body {
   background: var(--gray-400);
 }
 
+/* Lint Errors Panel */
+.lint-errors-panel {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 4px;
+  margin: 0.5rem;
+  padding: 0.75rem;
+}
+
+.lint-errors-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.lint-errors-title {
+  font-weight: 600;
+  color: #991b1b;
+  font-size: 0.875rem;
+}
+
+.lint-errors-close {
+  background: none;
+  border: none;
+  color: #991b1b;
+  cursor: pointer;
+  font-size: 1.25rem;
+  padding: 0;
+  line-height: 1;
+}
+
+.lint-errors-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 0.75rem 0;
+  font-size: 0.8125rem;
+}
+
+.lint-error {
+  padding: 0.25rem 0;
+  border-bottom: 1px solid #fecaca;
+}
+
+.lint-error:last-child {
+  border-bottom: none;
+}
+
+.error-location {
+  color: #991b1b;
+  font-weight: 500;
+  margin-right: 0.5rem;
+}
+
+.error-location::after {
+  content: ":";
+}
+
+.error-message {
+  color: #7f1d1d;
+}
+
+.lint-errors-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.lint-errors-actions .secondary-btn {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+}
+
 /* View mode sections */
 .view-sections-container {
   display: flex;

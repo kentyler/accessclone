@@ -660,6 +660,40 @@
         :on-click #(state/save-current-record!)}
        "Save"]]]))
 
+(defn ask-ai-to-fix-errors!
+  "Send lint errors to AI for suggestions"
+  [errors]
+  (let [error-text (str "My form has these validation errors:\n"
+                        (clojure.string/join "\n" (map #(str "- " (:location %) ": " (:message %)) errors))
+                        "\n\nHow can I fix these issues?")]
+    (state/set-chat-input! error-text)
+    (state/send-chat-message!)))
+
+(defn lint-errors-panel
+  "Display lint errors with Ask AI button"
+  []
+  (let [errors (get-in @state/app-state [:form-editor :lint-errors])]
+    (when (seq errors)
+      [:div.lint-errors-panel
+       [:div.lint-errors-header
+        [:span.lint-errors-title "Form Validation Errors"]
+        [:button.lint-errors-close
+         {:on-click state/clear-lint-errors!}
+         "\u00D7"]]
+       [:ul.lint-errors-list
+        (for [[idx error] (map-indexed vector errors)]
+          ^{:key idx}
+          [:li.lint-error
+           [:span.error-location (:location error)]
+           [:span.error-message (:message error)]])]
+       [:div.lint-errors-actions
+        [:button.secondary-btn
+         {:on-click #(ask-ai-to-fix-errors! errors)}
+         "Ask AI to Help Fix"]
+        [:button.secondary-btn
+         {:on-click state/clear-lint-errors!}
+         "Dismiss"]]])))
+
 (defn form-toolbar
   "Toolbar with form actions"
   []
@@ -702,6 +736,7 @@
           (state/load-form-for-editing! form)))
       [:div.form-editor
        [form-toolbar]
+       [lint-errors-panel]
        (if (= view-mode :view)
          ;; View mode - just the form, no panels
          [:div.editor-body.view-mode

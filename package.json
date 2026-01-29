@@ -1,0 +1,16 @@
+{
+  "name": "polyaccess",
+  "version": "0.1.0",
+  "description": "Low-code platform for converting MS Access databases to web applications",
+  "private": true,
+  "scripts": {
+    "lint:forms": "node scripts/lint-forms.js",
+    "test": "npm run lint:forms",
+    "start": "cd server && npm start",
+    "build:ui": "cd ui && npx shadow-cljs compile app"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kentyler/CloneTemplate.git"
+  }
+}

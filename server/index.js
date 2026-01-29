@@ -22,6 +22,7 @@ const eventsRoutes = require('./routes/events');
 const chatRoutes = require('./routes/chat');
 const formsRoutes = require('./routes/forms');
 const configRoutes = require('./routes/config');
+const lintRoutes = require('./routes/lint');
 
 const app = express();
 const PORT = config.server.port;
@@ -121,6 +122,7 @@ app.use('/api/events', eventsRoutes(pool, logEvent));
 app.use('/api/chat', chatRoutes(pool, secrets));
 app.use('/api/forms', formsRoutes(FORMS_DIR, helpers));
 app.use('/api/config', configRoutes(SETTINGS_DIR, helpers));
+app.use('/api/lint', lintRoutes(pool, secrets));
 
 // ============================================================
 // START SERVER

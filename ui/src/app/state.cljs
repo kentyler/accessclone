@@ -286,7 +286,24 @@
 ;; View mode
 (defn set-view-mode! [mode]
   "Set form view mode - :design or :view"
-  (swap! app-state assoc-in [:form-editor :view-mode] mode))
+  (swap! app-state assoc-in [:form-editor :view-mode] mode)
+  ;; When switching to view mode, load data
+  (when (= mode :view)
+    (let [record-source (get-in @app-state [:form-editor :current :record-source])]
+      (when record-source
+        ;; Trigger data load
+        (go
+          (let [response (<! (http/get (str api-base "/api/data/" record-source)
+                                       {:query-params {:limit 1000}
+                                        :headers (db-headers)}))]
+            (if (:success response)
+              (let [data (get-in response [:body :data])
+                    total (get-in response [:body :pagination :totalCount] (count data))]
+                (swap! app-state assoc-in [:form-editor :records] (vec data))
+                (swap! app-state assoc-in [:form-editor :record-position] {:current 1 :total total})
+                (when (seq data)
+                  (swap! app-state assoc-in [:form-editor :current-record] (first data))))
+              (println "Error loading data:" (:body response)))))))))
 
 (defn get-view-mode []
   (get-in @app-state [:form-editor :view-mode] :design))
@@ -299,7 +316,84 @@
   (swap! app-state assoc-in [:form-editor :record-position] {:current pos :total total}))
 
 (defn update-record-field! [field-name value]
-  (swap! app-state assoc-in [:form-editor :current-record field-name] value))
+  (swap! app-state assoc-in [:form-editor :current-record (keyword field-name)] value)
+  ;; Mark the record as dirty
+  (swap! app-state assoc-in [:form-editor :record-dirty?] true))
+
+(defn navigate-to-record!
+  "Navigate to a specific record by position (1-indexed)"
+  [position]
+  (let [records (get-in @app-state [:form-editor :records] [])
+        total (count records)
+        pos (max 1 (min total position))]
+    (when (and (> total 0) (<= pos total))
+      (swap! app-state assoc-in [:form-editor :record-position] {:current pos :total total})
+      (swap! app-state assoc-in [:form-editor :current-record] (nth records (dec pos)))
+      (swap! app-state assoc-in [:form-editor :record-dirty?] false))))
+
+(defn save-current-record!
+  "Save the current record to the database"
+  []
+  (let [record-source (get-in @app-state [:form-editor :current :record-source])
+        current-record (get-in @app-state [:form-editor :current-record])
+        records (get-in @app-state [:form-editor :records] [])
+        pos (get-in @app-state [:form-editor :record-position :current] 1)]
+    (when (and record-source current-record)
+      (go
+        ;; Find primary key - assume first field or 'id'
+        (let [pk-field (or (some #(when (:pk %) (:name %))
+                                 (get-record-source-fields record-source))
+                           "id")
+              pk-value (get current-record (keyword pk-field))
+              is-new? (nil? pk-value)]
+          (if is-new?
+            ;; Insert new record
+            (let [response (<! (http/post (str api-base "/api/data/" record-source)
+                                          {:json-params current-record
+                                           :headers (db-headers)}))]
+              (if (:success response)
+                (do
+                  (println "Record inserted successfully")
+                  ;; Add to records list
+                  (let [new-record (get-in response [:body :data])]
+                    (swap! app-state update-in [:form-editor :records] conj new-record)
+                    (swap! app-state assoc-in [:form-editor :current-record] new-record)
+                    (swap! app-state assoc-in [:form-editor :record-dirty?] false)
+                    (let [new-total (count (get-in @app-state [:form-editor :records]))]
+                      (swap! app-state assoc-in [:form-editor :record-position]
+                             {:current new-total :total new-total}))))
+                (println "Error inserting record:" (:body response))))
+            ;; Update existing record
+            (let [response (<! (http/put (str api-base "/api/data/" record-source "/" pk-value)
+                                         {:json-params (dissoc current-record (keyword pk-field))
+                                          :headers (db-headers)}))]
+              (if (:success response)
+                (do
+                  (println "Record updated successfully")
+                  ;; Update in records list
+                  (let [updated-record (get-in response [:body :data])]
+                    (swap! app-state assoc-in [:form-editor :records (dec pos)] updated-record)
+                    (swap! app-state assoc-in [:form-editor :current-record] updated-record)
+                    (swap! app-state assoc-in [:form-editor :record-dirty?] false)))
+                (println "Error updating record:" (:body response))))))))))
+
+(defn new-record!
+  "Create a new empty record"
+  []
+  (let [total (get-in @app-state [:form-editor :record-position :total] 0)]
+    (swap! app-state assoc-in [:form-editor :current-record] {})
+    (swap! app-state assoc-in [:form-editor :record-position] {:current (inc total) :total (inc total)})
+    (swap! app-state assoc-in [:form-editor :record-dirty?] true)))
+
+(defn get-record-source-fields
+  "Get fields for a record source (table or query)"
+  [record-source]
+  (when record-source
+    (let [tables (get-in @app-state [:objects :tables])
+          queries (get-in @app-state [:objects :queries])
+          table (first (filter #(= (:name %) record-source) tables))
+          query (first (filter #(= (:name %) record-source) queries))]
+      (or (:fields table) (:fields query) []))))
 
 (defn load-form-for-editing! [form]
   ;; Auto-save current form if dirty before loading new one

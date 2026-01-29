@@ -807,6 +807,37 @@ body {
   border-color: var(--primary);
 }
 
+.record-nav-bar .save-btn {
+  padding: 0.125rem 0.5rem;
+  font-weight: 500;
+}
+
+.record-nav-bar .save-btn.dirty {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+
+.record-nav-bar .nav-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.no-source-warning {
+  color: var(--gray-500);
+  font-style: italic;
+  margin-left: 0.5rem;
+}
+
+.no-records {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--gray-500);
+  font-style: italic;
+}
+
 /* Form View Mode */
 .form-canvas.view-mode {
   background: white;

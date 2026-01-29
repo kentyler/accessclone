@@ -437,7 +437,10 @@
   "Render a single control in view mode"
   [ctrl current-record on-change]
   (let [field (:field ctrl)
-        value (get current-record (keyword field) "")]
+        ;; Try both keyword and string versions of field name
+        value (or (get current-record (keyword field))
+                  (get current-record field)
+                  "")]
     [:div.view-control
      {:style {:left (:x ctrl)
               :top (:y ctrl)
@@ -481,38 +484,54 @@
         current (:current form-editor)
         controls (or (:controls current) [])
         current-record (or (:current-record form-editor) {})
-        record-pos (or (:record-position form-editor) {:current 1 :total 1})]
+        record-pos (or (:record-position form-editor) {:current 0 :total 0})
+        record-dirty? (:record-dirty? form-editor)
+        record-source (:record-source current)]
     [:div.form-canvas.view-mode
      [:div.canvas-header
-      [:span "Form View"]]
+      [:span "Form View"]
+      (when (not record-source)
+        [:span.no-source-warning " (No record source selected)"])]
      [:div.canvas-body.view-mode-body
-      [:div.view-controls-container
-       (for [[idx ctrl] (map-indexed vector controls)]
-         ^{:key idx}
-         [form-view-control ctrl current-record
-          (fn [field value]
-            (state/update-record-field! field value))])]]
+      (if (and record-source (> (:total record-pos) 0))
+        [:div.view-controls-container
+         (for [[idx ctrl] (map-indexed vector controls)]
+           ^{:key idx}
+           [form-view-control ctrl current-record
+            (fn [field value]
+              (state/update-record-field! field value))])]
+        [:div.no-records
+         (if record-source
+           "No records found"
+           "Select a record source in Design View")])]
      ;; Record navigation bar (footer)
      [:div.record-nav-bar
       [:span.nav-label "Record:"]
       [:button.nav-btn {:title "First"
-                        :on-click #(state/set-record-position! 1 (:total record-pos))} "|◀"]
+                        :disabled (or (< (:total record-pos) 1) (<= (:current record-pos) 1))
+                        :on-click #(state/navigate-to-record! 1)} "|◀"]
       [:button.nav-btn {:title "Previous"
-                        :on-click #(state/set-record-position!
-                                    (max 1 (dec (:current record-pos)))
-                                    (:total record-pos))} "◀"]
-      [:span.record-counter (str (:current record-pos) " of " (:total record-pos))]
+                        :disabled (or (< (:total record-pos) 1) (<= (:current record-pos) 1))
+                        :on-click #(state/navigate-to-record! (dec (:current record-pos)))} "◀"]
+      [:span.record-counter
+       (if (> (:total record-pos) 0)
+         (str (:current record-pos) " of " (:total record-pos))
+         "0 of 0")]
       [:button.nav-btn {:title "Next"
-                        :on-click #(state/set-record-position!
-                                    (min (:total record-pos) (inc (:current record-pos)))
-                                    (:total record-pos))} "▶"]
+                        :disabled (or (< (:total record-pos) 1) (>= (:current record-pos) (:total record-pos)))
+                        :on-click #(state/navigate-to-record! (inc (:current record-pos)))} "▶"]
       [:button.nav-btn {:title "Last"
-                        :on-click #(state/set-record-position! (:total record-pos) (:total record-pos))} "▶|"]
-      [:button.nav-btn {:title "New"
-                        :on-click #(do (state/set-current-record! {})
-                                       (state/set-record-position!
-                                        (inc (:total record-pos))
-                                        (inc (:total record-pos))))} "▶*"]
+                        :disabled (or (< (:total record-pos) 1) (>= (:current record-pos) (:total record-pos)))
+                        :on-click #(state/navigate-to-record! (:total record-pos))} "▶|"]
+      [:button.nav-btn {:title "New Record"
+                        :on-click #(state/new-record!)} "▶*"]
+      [:span.nav-separator]
+      [:button.nav-btn.save-btn
+       {:title "Save Record"
+        :class (when record-dirty? "dirty")
+        :disabled (not record-dirty?)
+        :on-click #(state/save-current-record!)}
+       "Save"]
       [:span.nav-separator]
       [:span.filter-indicator "No Filter"]
       [:input.search-box {:type "text" :placeholder "Search"}]]]))

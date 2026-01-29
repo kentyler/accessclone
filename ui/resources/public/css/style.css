@@ -637,9 +637,9 @@ body {
 
 .canvas-body {
   flex: 1;
-  padding: 1rem;
   position: relative;
   min-height: 250px;
+  overflow: auto;
 }
 
 .form-selector {

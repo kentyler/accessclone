@@ -325,7 +325,10 @@
             {:on-click (fn [e]
                          (.stopPropagation e)
                          (state/hide-context-menu!)
-                         (state/save-form!))}
+                         ;; In view mode, save record; in design mode, save form
+                         (if (= (state/get-view-mode) :view)
+                           (state/save-current-record!)
+                           (state/save-form!)))}
             "Save"]
            [:div.context-menu-item
             {:on-click (fn [e]

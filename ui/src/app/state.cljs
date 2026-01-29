@@ -216,7 +216,10 @@
 (defn close-all-tabs!
   "Close all open tabs"
   []
-  ;; Auto-save if dirty before closing
+  ;; Auto-save dirty record before closing
+  (when (get-in @app-state [:form-editor :record-dirty?])
+    (save-current-record!))
+  ;; Auto-save dirty form definition before closing
   (when (get-in @app-state [:form-editor :dirty?])
     (save-form!))
   (swap! app-state assoc
@@ -229,7 +232,10 @@
   []
   (let [active (:active-tab @app-state)]
     (when active
-      ;; Auto-save if dirty before closing
+      ;; Auto-save dirty record before closing
+      (when (get-in @app-state [:form-editor :record-dirty?])
+        (save-current-record!))
+      ;; Auto-save dirty form definition before closing
       (when (get-in @app-state [:form-editor :dirty?])
         (save-form!))
       (close-tab! (:type active) (:id active)))))
@@ -286,24 +292,30 @@
 ;; View mode
 (defn set-view-mode! [mode]
   "Set form view mode - :design or :view"
-  (swap! app-state assoc-in [:form-editor :view-mode] mode)
-  ;; When switching to view mode, load data
-  (when (= mode :view)
-    (let [record-source (get-in @app-state [:form-editor :current :record-source])]
-      (when record-source
-        ;; Trigger data load
-        (go
-          (let [response (<! (http/get (str api-base "/api/data/" record-source)
-                                       {:query-params {:limit 1000}
-                                        :headers (db-headers)}))]
-            (if (:success response)
-              (let [data (get-in response [:body :data])
-                    total (get-in response [:body :pagination :totalCount] (count data))]
-                (swap! app-state assoc-in [:form-editor :records] (vec data))
-                (swap! app-state assoc-in [:form-editor :record-position] {:current 1 :total total})
-                (when (seq data)
-                  (swap! app-state assoc-in [:form-editor :current-record] (first data))))
-              (println "Error loading data:" (:body response)))))))))
+  (let [current-mode (get-in @app-state [:form-editor :view-mode] :design)]
+    ;; Auto-save dirty record when leaving view mode
+    (when (and (= current-mode :view) (not= mode :view))
+      (when (get-in @app-state [:form-editor :record-dirty?])
+        (save-current-record!)))
+    (swap! app-state assoc-in [:form-editor :view-mode] mode)
+    ;; When switching to view mode, load data
+    (when (= mode :view)
+      (let [record-source (get-in @app-state [:form-editor :current :record-source])]
+        (when record-source
+          ;; Trigger data load
+          (go
+            (let [response (<! (http/get (str api-base "/api/data/" record-source)
+                                         {:query-params {:limit 1000}
+                                          :headers (db-headers)}))]
+              (if (:success response)
+                (let [data (get-in response [:body :data])
+                      total (get-in response [:body :pagination :totalCount] (count data))]
+                  (swap! app-state assoc-in [:form-editor :records] (vec data))
+                  (swap! app-state assoc-in [:form-editor :record-position] {:current 1 :total total})
+                  (swap! app-state assoc-in [:form-editor :record-dirty?] false)
+                  (when (seq data)
+                    (swap! app-state assoc-in [:form-editor :current-record] (first data))))
+                (println "Error loading data:" (:body response))))))))))
 
 (defn get-view-mode []
   (get-in @app-state [:form-editor :view-mode] :design))
@@ -323,6 +335,9 @@
 (defn navigate-to-record!
   "Navigate to a specific record by position (1-indexed)"
   [position]
+  ;; Auto-save dirty record before navigating
+  (when (get-in @app-state [:form-editor :record-dirty?])
+    (save-current-record!))
   (let [records (get-in @app-state [:form-editor :records] [])
         total (count records)
         pos (max 1 (min total position))]
@@ -396,7 +411,10 @@
       (or (:fields table) (:fields query) []))))
 
 (defn load-form-for-editing! [form]
-  ;; Auto-save current form if dirty before loading new one
+  ;; Auto-save dirty record before switching forms
+  (when (get-in @app-state [:form-editor :record-dirty?])
+    (save-current-record!))
+  ;; Auto-save current form definition if dirty before loading new one
   (when (get-in @app-state [:form-editor :dirty?])
     (save-form!))
   (swap! app-state assoc :form-editor

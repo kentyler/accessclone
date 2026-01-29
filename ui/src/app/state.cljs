@@ -310,6 +310,10 @@
               (if (:success response)
                 (let [data (get-in response [:body :data])
                       total (get-in response [:body :pagination :totalCount] (count data))]
+                  (println "Loaded" (count data) "records from" record-source)
+                  (when (seq data)
+                    (println "First record keys:" (keys (first data)))
+                    (println "First record:" (first data)))
                   (swap! app-state assoc-in [:form-editor :records] (vec data))
                   (swap! app-state assoc-in [:form-editor :record-position] {:current 1 :total total})
                   (swap! app-state assoc-in [:form-editor :record-dirty?] false)

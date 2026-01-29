@@ -443,7 +443,8 @@
         ;; Try both keyword and string versions of field name
         value (or (get current-record (keyword field))
                   (get current-record field)
-                  "")]
+                  "")
+        _ (when field (println "Control field:" field "Value:" value "Record keys:" (keys current-record)))]
     [:div.view-control
      {:style {:left (:x ctrl)
               :top (:y ctrl)

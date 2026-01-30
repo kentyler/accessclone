@@ -1,7 +1,10 @@
 (ns app.views.form-editor
   "Form editor/designer - replaces Access design view"
   (:require [reagent.core :as r]
-            [app.state :as state]))
+            [app.state :as state]
+            [app.views.table-viewer :as table-viewer]
+            [app.views.query-viewer :as query-viewer]
+            [app.views.module-viewer :as module-viewer]))
 
 (defn snap-to-grid
   "Snap a coordinate to the nearest grid point.
@@ -750,27 +753,9 @@
            [properties-panel]
            [field-list]]])])))
 
-(defn table-viewer
-  "Simple table viewer for tables"
-  []
-  (let [active-tab (:active-tab @state/app-state)
-        table-name (when active-tab
-                     (:name (first (filter #(= (:id %) (:id active-tab))
-                                           (get-in @state/app-state [:objects :tables])))))]
-    [:div.table-viewer
-     [:h3 (str "Table: " table-name)]
-     [:p "Table viewer coming soon..."]]))
+;; Table viewer moved to app.views.table-viewer
 
-(defn query-viewer
-  "Simple query viewer"
-  []
-  (let [active-tab (:active-tab @state/app-state)
-        query-name (when active-tab
-                     (:name (first (filter #(= (:id %) (:id active-tab))
-                                           (get-in @state/app-state [:objects :queries])))))]
-    [:div.query-viewer
-     [:h3 (str "Query: " query-name)]
-     [:p "Query viewer coming soon..."]]))
+;; Query viewer moved to app.views.query-viewer
 
 (defn object-editor
   "Routes to the appropriate editor based on active tab type"
@@ -778,7 +763,8 @@
   (let [active-tab (:active-tab @state/app-state)]
     (case (:type active-tab)
       :forms [form-editor]
-      :tables [table-viewer]
-      :queries [query-viewer]
+      :tables [table-viewer/table-viewer]
+      :queries [query-viewer/query-viewer]
+      :modules [module-viewer/module-viewer]
       [:div.no-editor
        [:p "Select an object to edit"]])))

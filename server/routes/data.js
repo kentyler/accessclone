@@ -132,6 +132,7 @@ module.exports = function(pool) {
    * Update an existing record
    */
   router.put('/:table/:id', async (req, res) => {
+    console.log('PUT /api/data/:table/:id called', { table: req.params.table, id: req.params.id, body: req.body });
     try {
       const { table, id } = req.params;
       const data = req.body;

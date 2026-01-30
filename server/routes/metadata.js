@@ -85,18 +85,22 @@ module.exports = function(pool) {
 
   /**
    * GET /api/queries
-   * List all views with their columns
+   * List all views with their columns and SQL definition
    */
   router.get('/queries', async (req, res) => {
     try {
       const schemaName = req.schemaName || 'public';
 
-      // Get all views from the current database schema
+      // Get all views with their definitions
       const viewsResult = await pool.query(`
-        SELECT table_name
-        FROM information_schema.views
-        WHERE table_schema = $1
-        ORDER BY table_name
+        SELECT
+          v.table_name,
+          pg_get_viewdef(c.oid, true) as definition
+        FROM information_schema.views v
+        JOIN pg_class c ON c.relname = v.table_name
+        JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = v.table_schema
+        WHERE v.table_schema = $1
+        ORDER BY v.table_name
       `, [schemaName]);
 
       const queries = [];
@@ -112,6 +116,7 @@ module.exports = function(pool) {
 
         queries.push({
           name: row.table_name,
+          sql: row.definition,
           fields: columnsResult.rows.map(col => ({
             name: col.column_name,
             type: col.data_type,
@@ -128,6 +133,39 @@ module.exports = function(pool) {
   });
 
   /**
+   * POST /api/queries/run
+   * Execute an arbitrary SQL query and return results
+   */
+  router.post('/queries/run', async (req, res) => {
+    try {
+      const { sql } = req.body;
+      if (!sql) {
+        return res.status(400).json({ error: 'SQL query is required' });
+      }
+
+      // Basic safety check - only allow SELECT statements
+      const trimmedSql = sql.trim().toLowerCase();
+      if (!trimmedSql.startsWith('select')) {
+        return res.status(400).json({ error: 'Only SELECT queries are allowed' });
+      }
+
+      const result = await pool.query(sql);
+
+      res.json({
+        data: result.rows,
+        fields: result.fields.map(f => ({
+          name: f.name,
+          type: f.dataTypeID
+        })),
+        rowCount: result.rowCount
+      });
+    } catch (err) {
+      console.error('Error running query:', err);
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  /**
    * GET /api/functions
    * List all stored functions (excluding system functions)
    */
@@ -139,7 +177,9 @@ module.exports = function(pool) {
         SELECT
           p.proname as name,
           pg_get_function_arguments(p.oid) as arguments,
-          pg_get_function_result(p.oid) as return_type
+          pg_get_function_result(p.oid) as return_type,
+          pg_get_functiondef(p.oid) as definition,
+          obj_description(p.oid, 'pg_proc') as description
         FROM pg_proc p
         JOIN pg_namespace n ON p.pronamespace = n.oid
         WHERE n.nspname = $1
@@ -151,7 +191,9 @@ module.exports = function(pool) {
         functions: result.rows.map(row => ({
           name: row.name,
           arguments: row.arguments,
-          returnType: row.return_type
+          returnType: row.return_type,
+          source: row.definition,
+          description: row.description
         }))
       });
     } catch (err) {

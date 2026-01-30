@@ -112,6 +112,24 @@
   [:div.chat-message {:class role}
    [:div.message-content content]])
 
+(defn get-chat-context
+  "Get context-aware hint and placeholder based on active tab"
+  []
+  (let [active-tab (:active-tab @state/app-state)
+        tab-type (:type active-tab)
+        tab-name (:name active-tab)]
+    (case tab-type
+      :forms {:empty-hint (str "I can help you find records, analyze data, or modify the form design for \"" tab-name "\".")
+              :placeholder "Ask about records or form design..."}
+      :tables {:empty-hint (str "I can help you query data, add columns, or modify the \"" tab-name "\" table structure.")
+               :placeholder "Ask about table data or structure..."}
+      :queries {:empty-hint (str "I can help you modify the SQL, create new queries, or explain what \"" tab-name "\" does.")
+                :placeholder "Ask about this query or create new ones..."}
+      :modules {:empty-hint (str "I can help you edit \"" tab-name "\", create new functions, or explain what this code does.")
+                :placeholder "Ask me to edit or create functions..."}
+      {:empty-hint "Ask me anything about your database, forms, or code. I can help you find records, write queries, and create functions."
+       :placeholder "Type a message..."})))
+
 (defn chat-panel []
   (let [messages (:chat-messages @state/app-state)
         input (:chat-input @state/app-state)
@@ -129,7 +147,8 @@
         (let [messages (:chat-messages @state/app-state)
               input (:chat-input @state/app-state)
               loading? (:chat-loading? @state/app-state)
-              open? (:chat-panel-open? @state/app-state)]
+              open? (:chat-panel-open? @state/app-state)
+              {:keys [empty-hint placeholder]} (get-chat-context)]
           [:aside.chat-panel {:class (when-not open? "collapsed")}
            [:div.chat-header
             [:span.chat-title "Assistant"]
@@ -140,7 +159,7 @@
              [:<>
               [:div.chat-messages
                (if (empty? messages)
-                 [:div.chat-empty "Ask me anything about your database or forms. I can also help you find records."]
+                 [:div.chat-empty empty-hint]
                  (for [[idx msg] (map-indexed vector messages)]
                    ^{:key idx}
                    [chat-message msg]))
@@ -151,7 +170,7 @@
               [:div.chat-input-area
                [:textarea.chat-input
                 {:value input
-                 :placeholder "Type a message..."
+                 :placeholder placeholder
                  :disabled loading?
                  :on-change #(state/set-chat-input! (.. % -target -value))
                  :on-key-down (fn [e]

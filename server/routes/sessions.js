@@ -8,6 +8,47 @@ const router = express.Router();
 
 module.exports = function(pool) {
   /**
+   * GET /api/ui-state
+   * Get saved UI state (open tabs, active database, etc.)
+   */
+  router.get('/ui-state', async (req, res) => {
+    try {
+      const result = await pool.query(
+        "SELECT setting_value FROM app_config WHERE setting_name = 'ui_state'"
+      );
+      if (result.rows.length > 0 && result.rows[0].setting_value) {
+        res.json(JSON.parse(result.rows[0].setting_value));
+      } else {
+        res.json({});
+      }
+    } catch (err) {
+      console.error('Error fetching UI state:', err);
+      res.json({}); // Return empty on error, don't fail
+    }
+  });
+
+  /**
+   * PUT /api/ui-state
+   * Save UI state (open tabs, active database, etc.)
+   */
+  router.put('/ui-state', async (req, res) => {
+    try {
+      const stateJson = JSON.stringify(req.body);
+      await pool.query(
+        `INSERT INTO app_config (setting_name, setting_value, description)
+         VALUES ('ui_state', $1, 'Saved UI state - open tabs, active database')
+         ON CONFLICT (setting_name)
+         DO UPDATE SET setting_value = $1`,
+        [stateJson]
+      );
+      res.json({ success: true });
+    } catch (err) {
+      console.error('Error saving UI state:', err);
+      res.status(500).json({ error: 'Failed to save UI state' });
+    }
+  });
+
+  /**
    * POST /api/session
    * Create a new session for function execution
    */

@@ -8,7 +8,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const router = express.Router();
 
-module.exports = function(formsDir, { updateFormIndex, removeFromFormIndex, jsonToEdn }) {
+module.exports = function(formsDir, { updateFormIndex, removeFromFormIndex, jsonToEdn }, pool) {
   /**
    * GET /api/forms
    * List all form files
@@ -64,6 +64,18 @@ module.exports = function(formsDir, { updateFormIndex, removeFromFormIndex, json
 
       await fs.writeFile(filepath, content, 'utf8');
       await updateFormIndex(formsDir, req.params.name);
+
+      // Populate graph from form if pool is available
+      if (pool) {
+        try {
+          const { populateFromForm } = require('../graph/populate');
+          const databaseId = req.headers['x-database-id'] || req.databaseId || 'default';
+          await populateFromForm(pool, req.params.name, content, databaseId);
+        } catch (graphErr) {
+          console.error('Error populating graph from form:', graphErr.message);
+          // Don't fail the save if graph population fails
+        }
+      }
 
       console.log(`Saved form: ${filename}`);
       res.json({ success: true, filename });

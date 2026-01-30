@@ -40,7 +40,19 @@ This is PolyAccess (formerly CloneTemplate), a platform for converting MS Access
 ### API Routes (server/routes/)
 - `/api/data/:table` - CRUD operations for table records
 - `/api/databases` - Multi-database management
+- `/api/graph/*` - Dependency/intent graph queries
 - Schema routing via X-Database-ID header
+
+### Dependency/Intent Graph (server/graph/)
+A unified graph in `shared._nodes` and `shared._edges` that tracks:
+- **Structural nodes**: tables, columns, forms, controls (with database_id)
+- **Intent nodes**: business purposes like "Track Inventory Costs" (global, no database_id)
+- **Edges**: contains, references, bound_to, serves (structure→intent)
+
+Populated once on first startup from schemas. Forms auto-update when saved.
+After schema changes (new tables/columns), call `POST /api/graph/populate` to sync.
+
+LLM tools in chat: `query_dependencies`, `query_intent`, `propose_intent`
 
 ## Skills Files
 

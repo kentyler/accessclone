@@ -38,6 +38,12 @@ server/                Node.js/Express backend
     databases.js       Multi-database management
     forms.js           Form definition storage
     metadata.js        Table/query/function introspection
+    graph.js           Dependency/intent graph API
+  graph/
+    schema.js          Graph table creation
+    query.js           Node/edge CRUD, traversal
+    populate.js        Schema/form scanning
+    render.js          Prose output for LLM
 
 electron/              Desktop wrapper
 
@@ -65,6 +71,8 @@ settings/              App configuration
 - [x] Auto-save on navigation between records
 - [x] Multi-database schema routing
 - [x] Chat panel with LLM integration
+- [x] Dependency/intent graph (tables, columns, forms, controls, intents)
+- [x] LLM tools for querying dependencies and proposing intents
 
 ### Not Yet Implemented:
 - [ ] Report designer (banded reports like Access)
@@ -171,21 +179,23 @@ All share: forms + database + scripting. Same conversion pattern applies.
 | `ui/src/app/views/form_editor.cljs` | Form designer and view components |
 | `server/index.js` | Express server, schema routing middleware |
 | `server/routes/data.js` | CRUD endpoints for records |
+| `server/graph/` | Dependency/intent graph (schema, query, populate, render) |
 | `skills/form-design.md` | LLM guidance for form creation |
 | `CLAUDE.md` | Project instructions for Claude |
 
-## Recent Session Summary (2026-01-28)
+## Recent Session Summary (2026-01-29)
 
-1. Fixed form view not displaying records (field binding mismatch)
-2. Fixed record saving (was working, user had data type error)
-3. Fixed auto-increment on primary keys (database schema issue)
-4. Added comprehensive debug logging (can remove later)
-5. Discussed business model and market positioning
-6. Updated skill files and documentation
+1. Implemented unified dependency/intent graph
+   - `shared._nodes` for tables, columns, forms, controls, intents
+   - `shared._edges` for relationships (contains, references, bound_to, serves)
+   - Populates once on first startup, incremental updates on form save
+   - REST API at `/api/graph/*`
+2. Added LLM tools for graph: `query_dependencies`, `query_intent`, `propose_intent`
+3. Graph enables impact analysis ("what depends on this table?") and intent tracking
 
 ## Next Session Priorities
 
-1. Test new record creation (user will test in morning)
-2. Remove debug logging from form_editor.cljs and state.cljs once confirmed working
-3. Continue with Phase 3-6 of multi-database plan if desired
-4. Consider starting report designer
+1. Test graph population with real database
+2. Test LLM tools via chat ("What depends on the ingredient table?")
+3. Work out incremental update strategy for schema changes in practice
+4. Continue with Phase 3-6 of multi-database plan if desired

@@ -1,6 +1,16 @@
 # Form Design Skill
 
-This skill guides LLMs in creating and modifying form definitions for the CloneTemplate UI.
+This skill guides LLMs in creating and modifying form definitions for PolyAccess (formerly CloneTemplate).
+
+## Current Implementation Status
+
+The form editor now includes:
+- **Design View**: Visual editor with drag-drop field placement
+- **Form View**: Live data entry mode with record navigation
+- **Access-style Property Sheet**: Tabbed interface (Format, Data, Event, Other, All)
+- **Record Navigation**: First/Prev/Next/Last/New buttons with record counter
+- **Auto-save**: Records save automatically when navigating or switching forms
+- **CRUD Operations**: Create, read, update records against PostgreSQL
 
 ## Core Concept
 
@@ -220,13 +230,24 @@ Form with filter controls and results list:
 
 ### Bound Controls
 
-Controls with `:field` are bound to database columns:
+Controls can be bound to database columns using either `:field` or `:control-source`:
 
-```clojure
+- `:field` - Set automatically when dragging fields from the field list onto the form
+- `:control-source` - Set via the Property Sheet's Data tab (matches Access terminology)
+
+Both work identically - the runtime checks for either property:
+
 {:type :text-box
  :field "recipe_name"  ; Reads/writes recipe.recipe_name
  :x 20 :y 40 :width 200 :height 24}
-```
+
+Or via Property Sheet:
+
+{:type :text-box
+ :control-source "recipe_name"  ; Same effect
+ :x 20 :y 40 :width 200 :height 24}
+
+**Important**: The field name must match the actual database column name exactly.
 
 ### Unbound Controls
 

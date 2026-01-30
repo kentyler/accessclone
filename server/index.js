@@ -23,6 +23,11 @@ const chatRoutes = require('./routes/chat');
 const formsRoutes = require('./routes/forms');
 const configRoutes = require('./routes/config');
 const lintRoutes = require('./routes/lint');
+const graphRoutes = require('./routes/graph');
+
+// Load graph modules
+const { initializeGraph } = require('./graph/schema');
+const { populateFromSchemas } = require('./graph/populate');
 
 const app = express();
 const PORT = config.server.port;
@@ -40,9 +45,29 @@ const pool = new Pool({
   connectionTimeoutMillis: config.database.connectionTimeoutMillis,
 });
 
-// Test database connection on startup
+// Test database connection and initialize graph on startup
 pool.query('SELECT NOW()')
-  .then(() => console.log('Database connected successfully'))
+  .then(async () => {
+    console.log('Database connected successfully');
+
+    // Initialize graph schema
+    try {
+      await initializeGraph(pool);
+
+      // Only populate if graph is empty (first run)
+      const countResult = await pool.query('SELECT COUNT(*) FROM shared._nodes');
+      const nodeCount = parseInt(countResult.rows[0].count);
+
+      if (nodeCount === 0) {
+        console.log('Graph is empty, populating from schemas...');
+        await populateFromSchemas(pool);
+      } else {
+        console.log(`Graph already has ${nodeCount} nodes, skipping population`);
+      }
+    } catch (err) {
+      console.error('Graph initialization error:', err.message);
+    }
+  })
   .catch(err => console.error('Database connection error:', err.message));
 
 // Load secrets for chat
@@ -120,9 +145,10 @@ app.use('/api/data', dataRoutes(pool));
 app.use('/api/session', sessionsRoutes(pool));
 app.use('/api/events', eventsRoutes(pool, logEvent));
 app.use('/api/chat', chatRoutes(pool, secrets));
-app.use('/api/forms', formsRoutes(FORMS_DIR, helpers));
+app.use('/api/forms', formsRoutes(FORMS_DIR, helpers, pool));
 app.use('/api/config', configRoutes(SETTINGS_DIR, helpers));
 app.use('/api/lint', lintRoutes(pool, secrets));
+app.use('/api/graph', graphRoutes(pool));
 
 // ============================================================
 // START SERVER

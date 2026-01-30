@@ -44,6 +44,27 @@
                          :current nil
                          :selected-control nil}  ; index of selected control
 
+           ;; Table viewer state
+           :table-viewer {:table-id nil
+                          :table-info nil  ; {:name "..." :fields [...]}
+                          :records []
+                          :view-mode :datasheet  ; :datasheet or :design
+                          :loading? false}
+
+           ;; Query viewer state
+           :query-viewer {:query-id nil
+                          :query-info nil  ; {:name "..." :sql "..." :fields [...]}
+                          :sql ""          ; Current SQL (may be edited)
+                          :results []
+                          :result-fields []
+                          :view-mode :results  ; :results or :sql
+                          :loading? false
+                          :error nil}
+
+           ;; Module viewer state
+           :module-viewer {:module-id nil
+                           :module-info nil}  ; {:name "..." :source "..." :arguments "..." :return-type "..."}
+
            ;; Form runtime state (when viewing a form)
            :form-data {}
            :form-session nil
@@ -99,6 +120,12 @@
 ;; Track pending object loads (tables, queries, functions)
 (defonce pending-loads (atom 0))
 
+;; Forward declarations for UI state restoration
+(declare check-restore-ui-state!)
+
+;; Pending UI state to restore after objects load
+(defonce pending-ui-state (atom nil))
+
 (defn start-loading-objects! []
   (reset! pending-loads 3)  ; 3 types: tables, queries, functions
   (set-loading-objects! true))
@@ -106,7 +133,9 @@
 (defn object-load-complete! []
   (swap! pending-loads dec)
   (when (<= @pending-loads 0)
-    (set-loading-objects! false)))
+    (set-loading-objects! false)
+    ;; Check if we should restore UI state
+    (check-restore-ui-state!)))
 
 (defn load-databases!
   "Load available databases from API and set current, then load objects"
@@ -115,10 +144,15 @@
     (let [response (<! (http/get (str api-base "/api/databases")))]
       (if (:success response)
         (let [databases (get-in response [:body :databases])
-              current-id (get-in response [:body :current])
-              current-db (first (filter #(= (:database_id %) current-id) databases))]
+              server-current-id (get-in response [:body :current])
+              ;; Use saved database ID if available, otherwise server's current
+              saved-db-id (:saved-database-id @app-state)
+              target-id (or saved-db-id server-current-id)
+              current-db (first (filter #(= (:database_id %) target-id) databases))]
           (set-available-databases! databases)
-          (set-current-database! current-db)
+          (set-current-database! (or current-db (first databases)))
+          ;; Clear the saved-database-id now that we've used it
+          (swap! app-state dissoc :saved-database-id)
           (println "Loaded" (count databases) "databases, current:" (:name current-db))
           ;; Now load objects for the current database
           (start-loading-objects!)
@@ -143,6 +177,8 @@
           (set-current-database! new-db)
           ;; Clear open tabs when switching databases
           (swap! app-state assoc :open-objects [] :active-tab nil)
+          ;; Save cleared UI state
+          (save-ui-state!)
           ;; Reload objects for new database
           (start-loading-objects!)
           (load-tables!)
@@ -190,7 +226,9 @@
                                (get-in @app-state [:objects object-type])))]
         (swap! app-state update :open-objects conj
                (assoc tab :name (:name obj)))))
-    (swap! app-state assoc :active-tab tab)))
+    (swap! app-state assoc :active-tab tab)
+    ;; Save UI state
+    (save-ui-state!)))
 
 (defn close-tab!
   "Close a tab"
@@ -208,10 +246,14 @@
       (swap! app-state assoc :active-tab
              (when (seq new-open)
                {:type (:type (last new-open))
-                :id (:id (last new-open))})))))
+                :id (:id (last new-open))})))
+    ;; Save UI state
+    (save-ui-state!)))
 
 (defn set-active-tab! [object-type object-id]
-  (swap! app-state assoc :active-tab {:type object-type :id object-id}))
+  (swap! app-state assoc :active-tab {:type object-type :id object-id})
+  ;; Save UI state
+  (save-ui-state!))
 
 (defn close-all-tabs!
   "Close all open tabs"
@@ -558,6 +600,350 @@
        (assoc-in current [section :controls]
                  (update controls idx assoc prop value))))))
 
+;; ============================================================
+;; TABLE VIEWER
+;; ============================================================
+
+(declare refresh-table-data!)
+
+;; Clipboard for cut/copy/paste
+(defonce table-clipboard (atom nil))
+
+(defn set-table-view-mode!
+  "Set table view mode - :datasheet or :design"
+  [mode]
+  (swap! app-state assoc-in [:table-viewer :view-mode] mode)
+  ;; Load data when switching to datasheet view
+  (when (= mode :datasheet)
+    (refresh-table-data!)))
+
+(defn load-table-for-viewing!
+  "Load a table for viewing"
+  [table]
+  (swap! app-state assoc :table-viewer
+         {:table-id (:id table)
+          :table-info table
+          :records []
+          :view-mode :datasheet
+          :loading? true})
+  ;; Load the data
+  (go
+    (let [response (<! (http/get (str api-base "/api/data/" (:name table))
+                                 {:query-params {:limit 1000}
+                                  :headers (db-headers)}))]
+      (swap! app-state assoc-in [:table-viewer :loading?] false)
+      (if (:success response)
+        (let [data (get-in response [:body :data] [])]
+          (swap! app-state assoc-in [:table-viewer :records] (vec data)))
+        (println "Error loading table data:" (:body response))))))
+
+(defn refresh-table-data!
+  "Refresh the current table's data"
+  []
+  (let [table-info (get-in @app-state [:table-viewer :table-info])]
+    (when table-info
+      (swap! app-state assoc-in [:table-viewer :loading?] true)
+      (go
+        (let [response (<! (http/get (str api-base "/api/data/" (:name table-info))
+                                     {:query-params {:limit 1000}
+                                      :headers (db-headers)}))]
+          (swap! app-state assoc-in [:table-viewer :loading?] false)
+          (if (:success response)
+            (let [data (get-in response [:body :data] [])]
+              (swap! app-state assoc-in [:table-viewer :records] (vec data)))
+            (println "Error refreshing table data:" (:body response))))))))
+
+;; Cell selection and editing
+(defn select-table-cell!
+  "Select a cell in the datasheet"
+  [row-idx col-name]
+  (swap! app-state assoc-in [:table-viewer :selected] {:row row-idx :col col-name})
+  (swap! app-state assoc-in [:table-viewer :context-menu :visible] false))
+
+(defn select-table-row!
+  "Select an entire row"
+  [row-idx]
+  (swap! app-state assoc-in [:table-viewer :selected] {:row row-idx :col nil}))
+
+(defn start-editing-cell!
+  "Start editing a cell"
+  [row-idx col-name]
+  (swap! app-state assoc-in [:table-viewer :selected] {:row row-idx :col col-name})
+  (swap! app-state assoc-in [:table-viewer :editing] {:row row-idx :col col-name}))
+
+(defn stop-editing-cell!
+  "Stop editing the current cell"
+  []
+  (swap! app-state assoc-in [:table-viewer :editing] nil))
+
+(defn get-pk-field
+  "Get the primary key field name for the current table"
+  []
+  (let [fields (get-in @app-state [:table-viewer :table-info :fields])]
+    (or (:name (first (filter :pk fields))) "id")))
+
+(defn save-table-cell!
+  "Save the edited cell value"
+  [new-value]
+  (let [selected (get-in @app-state [:table-viewer :selected])
+        row-idx (:row selected)
+        col-name (:col selected)
+        records (get-in @app-state [:table-viewer :records])
+        record (nth records row-idx)
+        pk-field (get-pk-field)
+        pk-value (get record (keyword pk-field))
+        table-name (get-in @app-state [:table-viewer :table-info :name])]
+    (when (and row-idx col-name pk-value)
+      ;; Update local state immediately
+      (swap! app-state assoc-in [:table-viewer :records row-idx (keyword col-name)] new-value)
+      ;; Save to server
+      (go
+        (let [response (<! (http/put (str api-base "/api/data/" table-name "/" pk-value)
+                                     {:json-params {col-name new-value}
+                                      :headers (db-headers)}))]
+          (if (:success response)
+            (println "Cell saved:" col-name "=" new-value)
+            (do
+              (println "Error saving cell:" (:body response))
+              ;; Revert on error
+              (refresh-table-data!))))))))
+
+(defn move-to-next-cell!
+  "Move to the next cell (Tab) or previous cell (Shift+Tab)"
+  [shift?]
+  (let [selected (get-in @app-state [:table-viewer :selected])
+        fields (get-in @app-state [:table-viewer :table-info :fields])
+        records (get-in @app-state [:table-viewer :records])
+        col-names (mapv :name fields)
+        row-idx (:row selected)
+        col-name (:col selected)
+        col-idx (.indexOf col-names col-name)]
+    (if shift?
+      ;; Move backwards
+      (if (> col-idx 0)
+        (start-editing-cell! row-idx (nth col-names (dec col-idx)))
+        (when (> row-idx 0)
+          (start-editing-cell! (dec row-idx) (last col-names))))
+      ;; Move forwards
+      (if (< col-idx (dec (count col-names)))
+        (start-editing-cell! row-idx (nth col-names (inc col-idx)))
+        (when (< row-idx (dec (count records)))
+          (start-editing-cell! (inc row-idx) (first col-names)))))))
+
+;; Context menu
+(defn show-table-context-menu!
+  "Show context menu at position"
+  [x y]
+  (swap! app-state assoc-in [:table-viewer :context-menu]
+         {:visible true :x x :y y}))
+
+(defn hide-table-context-menu!
+  "Hide context menu"
+  []
+  (swap! app-state assoc-in [:table-viewer :context-menu :visible] false))
+
+;; Cut/Copy/Paste
+(defn copy-table-cell!
+  "Copy selected cell value to clipboard"
+  []
+  (let [selected (get-in @app-state [:table-viewer :selected])
+        row-idx (:row selected)
+        col-name (:col selected)
+        records (get-in @app-state [:table-viewer :records])
+        value (when (and row-idx col-name)
+                (get (nth records row-idx) (keyword col-name)))]
+    (reset! table-clipboard {:value value :cut? false})
+    (println "Copied:" value)))
+
+(defn cut-table-cell!
+  "Cut selected cell value"
+  []
+  (let [selected (get-in @app-state [:table-viewer :selected])
+        row-idx (:row selected)
+        col-name (:col selected)
+        records (get-in @app-state [:table-viewer :records])
+        value (when (and row-idx col-name)
+                (get (nth records row-idx) (keyword col-name)))]
+    (reset! table-clipboard {:value value :cut? true :row row-idx :col col-name})
+    (println "Cut:" value)))
+
+(defn paste-table-cell!
+  "Paste clipboard value to selected cell"
+  []
+  (when-let [clipboard @table-clipboard]
+    (let [value (:value clipboard)]
+      (save-table-cell! value)
+      ;; If it was a cut, clear the original cell
+      (when (:cut? clipboard)
+        (let [orig-row (:row clipboard)
+              orig-col (:col clipboard)]
+          (swap! app-state assoc-in [:table-viewer :selected] {:row orig-row :col orig-col})
+          (save-table-cell! nil)
+          (reset! table-clipboard nil))))))
+
+;; New record
+(defn new-table-record!
+  "Add a new empty record to the table"
+  []
+  (let [table-name (get-in @app-state [:table-viewer :table-info :name])
+        fields (get-in @app-state [:table-viewer :table-info :fields])
+        ;; Create empty record with just non-pk fields
+        empty-record (reduce (fn [m field]
+                               (if (:pk field)
+                                 m
+                                 (assoc m (:name field) nil)))
+                             {}
+                             fields)]
+    (go
+      (let [response (<! (http/post (str api-base "/api/data/" table-name)
+                                    {:json-params empty-record
+                                     :headers (db-headers)}))]
+        (if (:success response)
+          (do
+            (println "New record created")
+            (refresh-table-data!))
+          (println "Error creating record:" (:body response)))))))
+
+;; Delete record
+(defn delete-table-record!
+  "Delete the selected record"
+  []
+  (let [selected (get-in @app-state [:table-viewer :selected])
+        row-idx (:row selected)
+        records (get-in @app-state [:table-viewer :records])
+        record (when row-idx (nth records row-idx nil))
+        pk-field (get-pk-field)
+        pk-value (when record (get record (keyword pk-field)))
+        table-name (get-in @app-state [:table-viewer :table-info :name])]
+    (when pk-value
+      (go
+        (let [response (<! (http/delete (str api-base "/api/data/" table-name "/" pk-value)
+                                        {:headers (db-headers)}))]
+          (if (:success response)
+            (do
+              (println "Record deleted")
+              (swap! app-state assoc-in [:table-viewer :selected] nil)
+              (refresh-table-data!))
+            (println "Error deleting record:" (:body response))))))))
+
+;; ============================================================
+;; QUERY VIEWER
+;; ============================================================
+
+(defn set-query-view-mode!
+  "Set query view mode - :results or :sql"
+  [mode]
+  (swap! app-state assoc-in [:query-viewer :view-mode] mode))
+
+(defn load-query-for-viewing!
+  "Load a query for viewing"
+  [query]
+  (swap! app-state assoc :query-viewer
+         {:query-id (:id query)
+          :query-info query
+          :sql (or (:sql query) "")
+          :results []
+          :result-fields []
+          :view-mode :results
+          :loading? true
+          :error nil})
+  ;; Run the query to get results
+  (run-query!))
+
+(defn update-query-sql!
+  "Update the SQL in the editor"
+  [sql]
+  (swap! app-state assoc-in [:query-viewer :sql] sql))
+
+(defn run-query!
+  "Execute the current SQL and fetch results"
+  []
+  (let [query-info (get-in @app-state [:query-viewer :query-info])
+        sql (get-in @app-state [:query-viewer :sql])
+        ;; If no custom SQL, select from the view
+        effective-sql (if (str/blank? sql)
+                        (str "SELECT * FROM " (:name query-info) " LIMIT 1000")
+                        sql)]
+    (swap! app-state assoc-in [:query-viewer :loading?] true)
+    (swap! app-state assoc-in [:query-viewer :error] nil)
+    (go
+      (let [response (<! (http/post (str api-base "/api/queries/run")
+                                    {:json-params {:sql effective-sql}
+                                     :headers (db-headers)}))]
+        (swap! app-state assoc-in [:query-viewer :loading?] false)
+        (if (:success response)
+          (let [data (get-in response [:body :data] [])
+                fields (get-in response [:body :fields] [])]
+            (swap! app-state assoc-in [:query-viewer :results] (vec data))
+            (swap! app-state assoc-in [:query-viewer :result-fields] (vec fields)))
+          (do
+            (println "Error running query:" (:body response))
+            (swap! app-state assoc-in [:query-viewer :error]
+                   (get-in response [:body :error] "Query failed"))))))))
+
+;; ============================================================
+;; MODULE VIEWER
+;; ============================================================
+
+(defn load-module-for-viewing!
+  "Load a module/function for viewing"
+  [module]
+  (swap! app-state assoc :module-viewer
+         {:module-id (:id module)
+          :module-info module}))
+
+;; ============================================================
+;; UI STATE PERSISTENCE
+;; ============================================================
+
+(defn save-ui-state!
+  "Save current UI state (open tabs, active tab, database) to server"
+  []
+  (let [current-db (:current-database @app-state)
+        open-objects (:open-objects @app-state)
+        active-tab (:active-tab @app-state)
+        ui-state {:database_id (:database_id current-db)
+                  :open_objects (vec (map #(select-keys % [:type :id :name]) open-objects))
+                  :active_tab (when active-tab
+                                (select-keys active-tab [:type :id]))}]
+    (go
+      (<! (http/put (str api-base "/api/session/ui-state")
+                    {:json-params ui-state})))))
+
+(defn restore-ui-state!
+  "Restore UI state after objects are loaded"
+  [ui-state]
+  (when ui-state
+    (let [open-objects (:open_objects ui-state)
+          active-tab (:active_tab ui-state)]
+      ;; Restore open tabs - match against loaded objects to get full info
+      (when (seq open-objects)
+        (let [restored-tabs
+              (vec (keep (fn [tab]
+                           (let [obj-type (keyword (:type tab))
+                                 obj-id (:id tab)
+                                 objects (get-in @app-state [:objects obj-type])
+                                 obj (first (filter #(= (:id %) obj-id) objects))]
+                             (when obj
+                               {:type obj-type
+                                :id obj-id
+                                :name (:name obj)})))
+                         open-objects))]
+          (swap! app-state assoc :open-objects restored-tabs)))
+      ;; Restore active tab
+      (when active-tab
+        (swap! app-state assoc :active-tab
+               {:type (keyword (:type active-tab))
+                :id (:id active-tab)})))))
+
+(defn load-ui-state!
+  "Load saved UI state from server"
+  []
+  (go
+    (let [response (<! (http/get (str api-base "/api/session/ui-state")))]
+      (when (:success response)
+        (:body response)))))
+
 ;; Config file operations
 (defn load-config!
   "Load app configuration from settings/config.edn"
@@ -697,6 +1083,7 @@
                                 (fn [idx query]
                                   {:id (inc idx)
                                    :name (:name query)
+                                   :sql (:sql query)
                                    :fields (mapv (fn [field]
                                                    {:name (:name field)
                                                     :type (:type field)
@@ -720,13 +1107,15 @@
                                  {:headers (db-headers)}))]
       (if (:success response)
         (let [functions (get-in response [:body :functions])
-              ;; Add an id and filter to show only vba_ prefixed functions
+              ;; Add an id to each function
               functions-with-ids (map-indexed
                                   (fn [idx func]
                                     {:id (inc idx)
                                      :name (:name func)
                                      :arguments (:arguments func)
-                                     :return-type (:returnType func)})
+                                     :return-type (:returnType func)
+                                     :source (:source func)
+                                     :description (:description func)})
                                   functions)]
           (swap! app-state assoc-in [:objects :modules] (vec functions-with-ids))
           (println "Loaded" (count functions-with-ids) "functions from database")
@@ -794,15 +1183,36 @@
                   (navigate-to-record-by-id! (:record_id nav)))))
             (add-chat-message! "assistant" (str "Error: " (get-in response [:body :error] "Failed to get response")))))))))
 
+(defn check-restore-ui-state!
+  "Check if we should restore UI state (called after each object type loads)"
+  []
+  (when (and @pending-ui-state (not (:loading-objects? @app-state)))
+    ;; All objects loaded, now restore UI state
+    (restore-ui-state! @pending-ui-state)
+    (reset! pending-ui-state nil)
+    (println "UI state restored")))
+
 ;; Initialize - load objects from files and database
 (defn init! []
-  ;; Load available databases first (sets current database, then loads objects)
-  (load-databases!)
+  (go
+    ;; First, load saved UI state
+    (let [saved-ui-state (<! (load-ui-state!))]
+      (when saved-ui-state
+        (println "Found saved UI state:" saved-ui-state)
+        ;; Store for later restoration
+        (reset! pending-ui-state saved-ui-state)
+        ;; If saved state has a database, switch to it
+        (when-let [saved-db-id (:database_id saved-ui-state)]
+          ;; We'll handle this after loading databases
+          (swap! app-state assoc :saved-database-id saved-db-id))))
 
-  ;; Load app configuration
-  (load-config!)
+    ;; Load available databases (sets current database, then loads objects)
+    (load-databases!)
 
-  ;; Load forms from EDN files
-  (load-forms-from-index!)
+    ;; Load app configuration
+    (load-config!)
 
-  (println "Application state initialized - loading from database and EDN files"))
+    ;; Load forms from EDN files
+    (load-forms-from-index!)
+
+    (println "Application state initialized - loading from database and EDN files")))

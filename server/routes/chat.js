@@ -6,6 +6,16 @@
 const express = require('express');
 const router = express.Router();
 
+// Import graph modules for dependency/intent tools
+const { findNode, findNodeById, traverseDependencies } = require('../graph/query');
+const { proposeIntent } = require('../graph/populate');
+const {
+  renderDependenciesToProse,
+  renderIntentsForStructure,
+  renderStructuresForIntent,
+  renderImpactAnalysis
+} = require('../graph/render');
+
 // Tool definitions for the AI
 const tools = [
   {
@@ -69,6 +79,91 @@ const tools = [
   }
 ];
 
+// Graph/dependency tools - always available
+const graphTools = [
+  {
+    name: 'query_dependencies',
+    description: 'Find what depends on or uses a database object (table, column, form, control). Use this when the user asks about dependencies, impact analysis, or what would be affected by changes.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        node_type: {
+          type: 'string',
+          enum: ['table', 'column', 'form', 'control'],
+          description: 'Type of database object to query'
+        },
+        node_name: {
+          type: 'string',
+          description: 'Name of the object (e.g., table name, column name)'
+        },
+        direction: {
+          type: 'string',
+          enum: ['upstream', 'downstream'],
+          description: 'upstream = what this depends on, downstream = what depends on this'
+        },
+        depth: {
+          type: 'integer',
+          description: 'How many levels deep to traverse (default 3, max 5)'
+        }
+      },
+      required: ['node_type', 'node_name']
+    }
+  },
+  {
+    name: 'query_intent',
+    description: 'Find intents a structure serves, or structures serving an intent. Use this to understand the purpose of database objects or find objects related to a business goal.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query_type: {
+          type: 'string',
+          enum: ['intents_for_structure', 'structures_for_intent'],
+          description: 'What to query: intents for a structure, or structures for an intent'
+        },
+        node_name: {
+          type: 'string',
+          description: 'Name of the structure or intent to query'
+        },
+        node_type: {
+          type: 'string',
+          enum: ['table', 'column', 'form', 'control', 'intent'],
+          description: 'Type of node (required for structure queries)'
+        }
+      },
+      required: ['query_type', 'node_name']
+    }
+  },
+  {
+    name: 'propose_intent',
+    description: 'Create a new intent or link structures to an intent. Use this when the user describes what a table or form is for, or when documenting business purposes.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        intent_name: {
+          type: 'string',
+          description: 'Short name for the intent (e.g., "Track Inventory Costs")'
+        },
+        description: {
+          type: 'string',
+          description: 'Longer description of what this intent means'
+        },
+        structures: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              node_type: { type: 'string', enum: ['table', 'column', 'form', 'control'] },
+              name: { type: 'string' }
+            }
+          },
+          description: 'List of structures that serve this intent'
+        }
+      },
+      required: ['intent_name']
+    }
+  }
+];
+
 module.exports = function(pool, secrets) {
   /**
    * POST /api/chat
@@ -110,6 +205,20 @@ module.exports = function(pool, secrets) {
 Use search_records when users want to FIND specific items. Use analyze_data when users want INSIGHTS about the data (how many, total, average, which is biggest, etc).`;
       }
 
+      // Graph tools context
+      const graphContext = `\n\nYou also have dependency graph tools available:
+- query_dependencies: Find what depends on a database object (tables, columns, forms, controls)
+- query_intent: Find the business purpose/intent of structures, or find structures serving a business goal
+- propose_intent: Document the business purpose of database objects
+
+Use these when users ask about dependencies, impact of changes, or what structures are for.`;
+
+      // Combine all available tools
+      const availableTools = [
+        ...(form_context?.record_source ? tools : []),
+        ...graphTools
+      ];
+
       // Call Anthropic API with tools
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -121,8 +230,8 @@ Use search_records when users want to FIND specific items. Use analyze_data when
         body: JSON.stringify({
           model: 'claude-sonnet-4-20250514',
           max_tokens: 1024,
-          tools: form_context?.record_source ? tools : [],
-          system: `You are a helpful assistant for a database application called PolyAccess. You help users understand their data, create forms, write queries, and work with their databases. ${dbContext}${formContext}
+          tools: availableTools,
+          system: `You are a helpful assistant for a database application called PolyAccess. You help users understand their data, create forms, write queries, and work with their databases. ${dbContext}${formContext}${graphContext}
 
 Keep responses concise and helpful. When discussing code or SQL, use markdown code blocks.`,
           messages: [{ role: 'user', content: message }]
@@ -140,12 +249,64 @@ Keep responses concise and helpful. When discussing code or SQL, use markdown co
       // Check if the AI wants to use a tool
       const toolUse = data.content.find(c => c.type === 'tool_use');
 
-      if (toolUse && form_context?.record_source) {
+      if (toolUse) {
         const schema = database_id || 'public';
         let toolResult = null;
         let navigationCommand = null;
 
-        if (toolUse.name === 'search_records') {
+        // Handle graph tools first (always available)
+        if (toolUse.name === 'query_dependencies') {
+          const { node_type, node_name, direction = 'downstream', depth = 3 } = toolUse.input;
+          try {
+            const node = await findNode(pool, node_type, node_name, database_id);
+            if (node) {
+              const prose = await renderDependenciesToProse(pool, node.id, direction, Math.min(depth, 5));
+              toolResult = { prose };
+            } else {
+              toolResult = { error: `${node_type} "${node_name}" not found in the graph` };
+            }
+          } catch (err) {
+            toolResult = { error: err.message };
+          }
+        } else if (toolUse.name === 'query_intent') {
+          const { query_type, node_name, node_type } = toolUse.input;
+          try {
+            if (query_type === 'intents_for_structure') {
+              const node = await findNode(pool, node_type || 'table', node_name, database_id);
+              if (node) {
+                const prose = await renderIntentsForStructure(pool, node.id);
+                toolResult = { prose };
+              } else {
+                toolResult = { error: `${node_type || 'structure'} "${node_name}" not found` };
+              }
+            } else if (query_type === 'structures_for_intent') {
+              const node = await findNode(pool, 'intent', node_name, null);
+              if (node) {
+                const prose = await renderStructuresForIntent(pool, node.id);
+                toolResult = { prose };
+              } else {
+                toolResult = { error: `Intent "${node_name}" not found` };
+              }
+            }
+          } catch (err) {
+            toolResult = { error: err.message };
+          }
+        } else if (toolUse.name === 'propose_intent') {
+          const { intent_name, description, structures = [] } = toolUse.input;
+          try {
+            // Add database_id to structures
+            const structsWithDb = structures.map(s => ({ ...s, database_id }));
+            const result = await proposeIntent(pool, { name: intent_name, description, origin: 'llm' }, structsWithDb);
+            toolResult = {
+              success: true,
+              intent: result.intent.name,
+              linked_structures: result.linked,
+              message: `Created intent "${intent_name}" and linked ${result.linked} structure(s)`
+            };
+          } catch (err) {
+            toolResult = { error: err.message };
+          }
+        } else if (toolUse.name === 'search_records' && form_context?.record_source) {
           const { search_term, field_name } = toolUse.input;
           const table = form_context.record_source;
 
@@ -218,10 +379,16 @@ Keep responses concise and helpful. When discussing code or SQL, use markdown co
           } catch (queryErr) {
             toolResult = { error: queryErr.message };
           }
-        } else if (toolUse.name === 'navigate_to_record') {
+        } else if (toolUse.name === 'navigate_to_record' && form_context?.record_source) {
           const { record_id } = toolUse.input;
           navigationCommand = { action: 'navigate', record_id };
           toolResult = { success: true, navigating_to: record_id };
+        }
+
+        // If no tool was matched, return without followup
+        if (toolResult === null) {
+          const assistantMessage = data.content.find(c => c.type === 'text')?.text || 'No response';
+          return res.json({ message: assistantMessage });
         }
 
         // Send tool result back to AI for final response

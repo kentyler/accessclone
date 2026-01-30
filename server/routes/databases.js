@@ -8,10 +8,35 @@ const router = express.Router();
 
 module.exports = function(pool, logError) {
   // Track current database (server-side state)
-  let currentDatabaseId = 'calculator';
+  // Initialized to null, set on first request or via initializeDefault()
+  let currentDatabaseId = null;
 
   // Getter for current database ID (used by middleware)
   router.getCurrentDatabaseId = () => currentDatabaseId;
+
+  /**
+   * Initialize default database from shared.databases
+   * Called on server startup
+   */
+  router.initializeDefault = async () => {
+    try {
+      // Get the most recently accessed database, or first by name
+      const result = await pool.query(`
+        SELECT database_id FROM shared.databases
+        ORDER BY last_accessed DESC NULLS LAST, name
+        LIMIT 1
+      `);
+
+      if (result.rows.length > 0) {
+        currentDatabaseId = result.rows[0].database_id;
+        console.log(`Default database: ${currentDatabaseId}`);
+      } else {
+        console.log('No databases found in shared.databases');
+      }
+    } catch (err) {
+      console.error('Error initializing default database:', err.message);
+    }
+  };
 
   /**
    * GET /api/databases

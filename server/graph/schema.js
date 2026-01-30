@@ -1,6 +1,6 @@
 /**
- * Graph Schema - CREATE TABLE statements and initialization
- * Defines the unified dependency/intent graph structure
+ * Shared Schema - CREATE TABLE statements and initialization
+ * Defines the graph structure and UI object storage (forms, reports)
  */
 
 const SCHEMA_SQL = `
@@ -54,14 +54,55 @@ CREATE INDEX IF NOT EXISTS idx_edges_from ON shared._edges(from_id);
 CREATE INDEX IF NOT EXISTS idx_edges_to ON shared._edges(to_id);
 CREATE INDEX IF NOT EXISTS idx_edges_rel ON shared._edges(rel_type);
 CREATE INDEX IF NOT EXISTS idx_edges_status ON shared._edges(status) WHERE status IS NOT NULL;
+
+-- ============================================================
+-- Forms - UI form definitions (EDN) with append-only versioning
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.forms (
+    id SERIAL PRIMARY KEY,
+    database_id VARCHAR(100) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    definition TEXT NOT NULL,
+    record_source VARCHAR(255),
+    description TEXT,
+    version INT NOT NULL DEFAULT 1,
+    is_current BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+
+    UNIQUE(database_id, name, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_forms_database ON shared.forms(database_id);
+CREATE INDEX IF NOT EXISTS idx_forms_current ON shared.forms(database_id, name) WHERE is_current = true;
+
+-- ============================================================
+-- Reports - UI report definitions (EDN) with append-only versioning
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.reports (
+    id SERIAL PRIMARY KEY,
+    database_id VARCHAR(100) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    definition TEXT NOT NULL,
+    record_source VARCHAR(255),
+    description TEXT,
+    version INT NOT NULL DEFAULT 1,
+    is_current BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+
+    UNIQUE(database_id, name, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_reports_database ON shared.reports(database_id);
+CREATE INDEX IF NOT EXISTS idx_reports_current ON shared.reports(database_id, name) WHERE is_current = true;
 `;
 
 /**
- * Initialize the graph schema in the database
+ * Initialize the shared schema in the database
+ * Creates graph tables (_nodes, _edges) and UI object tables (forms, reports)
  * @param {Pool} pool - PostgreSQL connection pool
  * @returns {Promise<boolean>} - True if successful
  */
-async function initializeGraph(pool) {
+async function initializeSchema(pool) {
   try {
     // Ensure shared schema exists
     await pool.query('CREATE SCHEMA IF NOT EXISTS shared');
@@ -69,13 +110,16 @@ async function initializeGraph(pool) {
     // Create tables and indexes
     await pool.query(SCHEMA_SQL);
 
-    console.log('Graph schema initialized successfully');
+    console.log('Shared schema initialized (graph, forms, reports)');
     return true;
   } catch (err) {
-    console.error('Error initializing graph schema:', err.message);
+    console.error('Error initializing shared schema:', err.message);
     throw err;
   }
 }
+
+// Alias for backwards compatibility
+const initializeGraph = initializeSchema;
 
 /**
  * Check if graph tables exist
@@ -95,8 +139,28 @@ async function graphTablesExist(pool) {
   }
 }
 
+/**
+ * Check if all shared schema tables exist
+ * @param {Pool} pool - PostgreSQL connection pool
+ * @returns {Promise<boolean>}
+ */
+async function sharedTablesExist(pool) {
+  try {
+    const result = await pool.query(`
+      SELECT COUNT(*) as count FROM information_schema.tables
+      WHERE table_schema = 'shared'
+      AND table_name IN ('_nodes', '_edges', 'forms', 'reports')
+    `);
+    return parseInt(result.rows[0].count) === 4;
+  } catch (err) {
+    return false;
+  }
+}
+
 module.exports = {
-  initializeGraph,
+  initializeSchema,
+  initializeGraph,  // backwards compatibility alias
   graphTablesExist,
+  sharedTablesExist,
   SCHEMA_SQL
 };

@@ -33,7 +33,6 @@ const app = express();
 const PORT = config.server.port;
 
 // Directories
-const FORMS_DIR = path.join(__dirname, '..', 'forms');
 const SETTINGS_DIR = path.join(__dirname, '..', 'settings');
 const UI_PUBLIC_DIR = path.join(__dirname, '..', 'ui', 'resources', 'public');
 
@@ -45,16 +44,19 @@ const pool = new Pool({
   connectionTimeoutMillis: config.database.connectionTimeoutMillis,
 });
 
-// Test database connection and initialize graph on startup
+// Initialize databases router first to get currentDatabaseId getter
+const databasesRouter = databasesRoutes(pool, (source, msg, err) => logError(pool, source, msg, err));
+
+// Test database connection and initialize on startup
 pool.query('SELECT NOW()')
   .then(async () => {
     console.log('Database connected successfully');
 
-    // Initialize graph schema
+    // Initialize shared schema (graph, forms, reports tables)
     try {
       await initializeGraph(pool);
 
-      // Only populate if graph is empty (first run)
+      // Only populate graph if empty (first run)
       const countResult = await pool.query('SELECT COUNT(*) FROM shared._nodes');
       const nodeCount = parseInt(countResult.rows[0].count);
 
@@ -65,7 +67,14 @@ pool.query('SELECT NOW()')
         console.log(`Graph already has ${nodeCount} nodes, skipping population`);
       }
     } catch (err) {
-      console.error('Graph initialization error:', err.message);
+      console.error('Schema initialization error:', err.message);
+    }
+
+    // Initialize default database selection
+    try {
+      await databasesRouter.initializeDefault();
+    } catch (err) {
+      console.error('Database initialization error:', err.message);
     }
   })
   .catch(err => console.error('Database connection error:', err.message));
@@ -88,18 +97,12 @@ app.use(cors());
 app.use(express.json());
 app.use(express.text({ type: 'application/edn' }));
 
-// Serve forms directory as static files
-app.use('/forms', express.static(FORMS_DIR));
-
 // Serve UI static files (CSS, JS)
 app.use(express.static(UI_PUBLIC_DIR));
 
 // ============================================================
 // DATABASE SCHEMA ROUTING MIDDLEWARE
 // ============================================================
-
-// Initialize databases router first to get currentDatabaseId getter
-const databasesRouter = databasesRoutes(pool, (source, msg, err) => logError(pool, source, msg, err));
 
 /**
  * Middleware to set search_path based on X-Database-ID header
@@ -145,7 +148,7 @@ app.use('/api/data', dataRoutes(pool));
 app.use('/api/session', sessionsRoutes(pool));
 app.use('/api/events', eventsRoutes(pool, logEvent));
 app.use('/api/chat', chatRoutes(pool, secrets));
-app.use('/api/forms', formsRoutes(FORMS_DIR, helpers, pool));
+app.use('/api/forms', formsRoutes(pool, helpers));
 app.use('/api/config', configRoutes(SETTINGS_DIR, helpers));
 app.use('/api/lint', lintRoutes(pool, secrets));
 app.use('/api/graph', graphRoutes(pool));
@@ -156,6 +159,6 @@ app.use('/api/graph', graphRoutes(pool));
 
 app.listen(PORT, () => {
   console.log(`PolyAccess backend running on http://localhost:${PORT}`);
-  console.log(`Forms directory: ${FORMS_DIR}`);
   console.log(`Database: ${config.database.connectionString.replace(/:[^:@]+@/, ':****@')}`);
+  console.log(`Forms: stored in shared.forms table`);
 });

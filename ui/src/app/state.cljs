@@ -8,6 +8,11 @@
 
 (def api-base "http://localhost:3001")
 
+;; Forward declarations for functions used before definition
+(declare load-tables! load-queries! load-functions! save-ui-state!
+         save-current-record! save-form! save-form-to-file!
+         get-record-source-fields run-query!)
+
 ;; Application state atom
 (defonce app-state
   (r/atom {;; Database selection
@@ -84,6 +89,11 @@
 
 (defn clear-error! []
   (swap! app-state assoc :error nil))
+
+;; Helper to get current database headers for API calls
+(defn- db-headers []
+  (when-let [db-id (:database_id (:current-database @app-state))]
+    {"X-Database-ID" db-id}))
 
 ;; Event logging
 (defn log-event!
@@ -551,14 +561,42 @@
   ;; Auto-save current form definition if dirty before loading new one
   (when (get-in @app-state [:form-editor :dirty?])
     (save-form!))
-  (swap! app-state assoc :form-editor
-         {:form-id (:id form)
-          :dirty? false
-          :original (:definition form)
-          :current (:definition form)
-          :selected-control nil})
-  ;; Default to Form View and load data
-  (set-view-mode! :view))
+  ;; Check if definition is already loaded
+  (if (:definition form)
+    ;; Definition already loaded, use it
+    (do
+      (swap! app-state assoc :form-editor
+             {:form-id (:id form)
+              :dirty? false
+              :original (:definition form)
+              :current (:definition form)
+              :selected-control nil})
+      (set-view-mode! :view))
+    ;; Need to fetch definition from API
+    (go
+      (let [response (<! (http/get (str api-base "/api/forms/" (:filename form))
+                                    {:headers (db-headers)}))]
+        (if (:success response)
+          (let [form-data (:body response)  ;; Already parsed by cljs-http
+                definition (dissoc form-data :id :name)]
+            (println "Loaded form definition, keys:" (keys definition))
+            ;; Update form in objects list with definition
+            (swap! app-state update-in [:objects :forms]
+                   (fn [forms]
+                     (mapv (fn [f]
+                             (if (= (:id f) (:id form))
+                               (assoc f :definition definition)
+                               f))
+                           forms)))
+            ;; Set up form editor
+            (swap! app-state assoc :form-editor
+                   {:form-id (:id form)
+                    :dirty? false
+                    :original definition
+                    :current definition
+                    :selected-control nil})
+            (set-view-mode! :view))
+          (println "Error loading form:" (:filename form)))))))
 
 (defn select-control! [idx]
   (swap! app-state assoc-in [:form-editor :selected-control] idx))
@@ -951,12 +989,9 @@
   (go
     (let [response (<! (http/get (str api-base "/api/config")))]
       (if (:success response)
-        (try
-          (let [config (reader/read-string (:body response))]
-            (swap! app-state assoc :config config)
-            (println "Config loaded:" config))
-          (catch :default e
-            (println "Error parsing config:" e)))
+        (let [config (:body response)]  ;; Already parsed by cljs-http
+          (swap! app-state assoc :config config)
+          (println "Config loaded:" config))
         (println "Could not load config - using defaults")))))
 
 (defn save-config!
@@ -972,38 +1007,36 @@
           (println "Error saving config:" (:body response))
           (log-error! "Failed to save configuration" "save-config" {:response (:body response)}))))))
 
-;; Form file operations
-(defn load-form-file!
-  "Load a single form from an EDN file"
-  [filename]
-  (go
-    (let [response (<! (http/get (str "/forms/" filename ".edn")))]
-      (when (:success response)
-        (try
-          (let [form-data (reader/read-string (:body response))]
-            ;; Add to forms list, using filename as fallback for missing fields
-            (swap! app-state update-in [:objects :forms] conj
-                   {:id (:id form-data)
-                    :name (:name form-data)
-                    :filename filename
-                    :definition (dissoc form-data :id :name)}))
-          (catch :default e
-            (println "Error parsing form" filename ":" e)))))))
+;; Form operations (load from database via API)
 
-(defn load-forms-from-index!
-  "Load all forms listed in _index.edn"
+(defn- filename->display-name
+  "Convert filename to display name: recipe_calculator -> Recipe Calculator"
+  [filename]
+  (->> (str/split filename #"_")
+       (map str/capitalize)
+       (str/join " ")))
+
+(defn load-forms!
+  "Load all forms for current database from API"
   []
   (go
-    (let [response (<! (http/get "/forms/_index.edn"))]
+    (let [response (<! (http/get (str api-base "/api/forms")
+                                  {:headers (db-headers)}))]
       (if (:success response)
-        (try
-          (let [form-names (reader/read-string (:body response))]
-            (println "Loading forms:" form-names)
-            (doseq [form-name form-names]
-              (load-form-file! form-name)))
-          (catch :default e
-            (println "Error parsing form index:" e)))
-        (println "Could not load form index - using empty forms list")))))
+        (let [forms-data (get-in response [:body :forms] [])
+              details (get-in response [:body :details] [])]
+          (println "Loading forms:" forms-data)
+          ;; Build forms list from API response
+          (swap! app-state assoc-in [:objects :forms]
+                 (vec (map-indexed
+                        (fn [idx form-name]
+                          (let [detail (nth details idx nil)]
+                            {:id (inc idx)
+                             :name (filename->display-name form-name)
+                             :filename form-name
+                             :record-source (:record_source detail)}))
+                        forms-data))))
+        (println "Could not load forms from API")))))
 
 (defn save-form-to-file!
   "Save a form to its EDN file via backend API"
@@ -1032,11 +1065,6 @@
           (do
             (println "Error saving form:" (:body response))
             (log-error! (str "Failed to save form: " (get-in response [:body :error])) "save-form" {:response (:body response)})))))))
-
-;; Helper to get current database headers
-(defn- db-headers []
-  (when-let [db-id (:database_id (:current-database @app-state))]
-    {"X-Database-ID" db-id}))
 
 ;; Load tables from database API
 (defn load-tables!
@@ -1213,6 +1241,6 @@
     (load-config!)
 
     ;; Load forms from EDN files
-    (load-forms-from-index!)
+    (load-forms!)
 
     (println "Application state initialized - loading from database and EDN files")))

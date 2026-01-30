@@ -1,6 +1,6 @@
 # PolyAccess Project Status
 
-Last updated: 2026-01-28
+Last updated: 2026-01-29
 
 ## What This Is
 
@@ -29,7 +29,10 @@ ui/                    ClojureScript/Reagent frontend
     state.cljs         State management, API calls, CRUD operations
     views/
       form_editor.cljs Form designer and data entry
-      main.cljs        Main layout, sidebar, tabs
+      table_viewer.cljs Table datasheet and design views
+      query_viewer.cljs Query results and SQL editor
+      module_viewer.cljs Read-only function display
+      main.cljs        Main layout, sidebar, chat panel
 
 server/                Node.js/Express backend
   index.js             Main server, schema routing middleware
@@ -73,6 +76,11 @@ settings/              App configuration
 - [x] Chat panel with LLM integration
 - [x] Dependency/intent graph (tables, columns, forms, controls, intents)
 - [x] LLM tools for querying dependencies and proposing intents
+- [x] Table viewer with datasheet (editable) and design views
+- [x] Query viewer with results and SQL views
+- [x] Module viewer (read-only function display)
+- [x] Context-aware chat prompts based on active object
+- [x] UI state persistence (remembers open tabs across sessions)
 
 ### Not Yet Implemented:
 - [ ] Report designer (banded reports like Access)
@@ -177,25 +185,58 @@ All share: forms + database + scripting. Same conversion pattern applies.
 |------|---------|
 | `ui/src/app/state.cljs` | All state management, API calls, save/load logic |
 | `ui/src/app/views/form_editor.cljs` | Form designer and view components |
+| `ui/src/app/views/table_viewer.cljs` | Table datasheet editing and design view |
+| `ui/src/app/views/query_viewer.cljs` | Query results and SQL editor |
+| `ui/src/app/views/module_viewer.cljs` | Read-only PostgreSQL function display |
+| `ui/src/app/views/main.cljs` | Main layout, chat panel with context-aware prompts |
 | `server/index.js` | Express server, schema routing middleware |
 | `server/routes/data.js` | CRUD endpoints for records |
+| `server/routes/sessions.js` | UI state persistence endpoints |
 | `server/graph/` | Dependency/intent graph (schema, query, populate, render) |
 | `skills/form-design.md` | LLM guidance for form creation |
 | `CLAUDE.md` | Project instructions for Claude |
 
 ## Recent Session Summary (2026-01-29)
 
+### Morning Session
 1. Implemented unified dependency/intent graph
    - `shared._nodes` for tables, columns, forms, controls, intents
    - `shared._edges` for relationships (contains, references, bound_to, serves)
    - Populates once on first startup, incremental updates on form save
    - REST API at `/api/graph/*`
 2. Added LLM tools for graph: `query_dependencies`, `query_intent`, `propose_intent`
-3. Graph enables impact analysis ("what depends on this table?") and intent tracking
+
+### Evening Session
+3. Built Table Viewer
+   - Datasheet view with inline cell editing
+   - Design view showing table structure
+   - Right-click context menu (New Record, Delete, Cut, Copy, Paste)
+   - Cell navigation with Tab/Shift+Tab
+
+4. Built Query Viewer
+   - Results view runs query and displays data
+   - SQL view for editing with Run button
+   - Safety: only SELECT queries allowed
+
+5. Built Module Viewer
+   - Read-only display of PostgreSQL function source
+   - Shows signature (arguments, return type, description)
+   - Editing via AI chat only
+
+6. Added context-aware chat prompts
+   - Forms: "I can help with records, data, or form design..."
+   - Tables: "I can help with queries, columns, or structure..."
+   - Queries: "I can help modify SQL or explain what it does..."
+   - Modules: "I can help edit or create functions..."
+
+7. Added UI state persistence
+   - Saves open tabs, active tab, and database to `app_config`
+   - Restores on page refresh or app reopen
+   - Auto-saves when opening/closing tabs or switching databases
 
 ## Next Session Priorities
 
-1. Test graph population with real database
-2. Test LLM tools via chat ("What depends on the ingredient table?")
-3. Work out incremental update strategy for schema changes in practice
-4. Continue with Phase 3-6 of multi-database plan if desired
+1. Test all viewers with real database data
+2. Add syntax highlighting to SQL and module code views
+3. Consider subform support for master-detail relationships
+4. Report designer (banded reports)

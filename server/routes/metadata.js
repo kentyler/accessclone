@@ -1,19 +1,83 @@
 /**
  * Database metadata routes
  * Lists tables, queries (views), and functions
+ * Also handles special "_access_import" database for Access file browsing
  */
 
 const express = require('express');
 const router = express.Router();
+const path = require('path');
+const fs = require('fs').promises;
+const { spawn } = require('child_process');
+
+// Access Import helpers
+const DEFAULT_SCAN_LOCATIONS = [
+  'C:\\Users\\Ken\\Desktop',
+  'C:\\Users\\Ken\\Documents'
+];
+
+async function scanForAccessDatabases() {
+  const results = [];
+
+  async function scanDir(dirPath) {
+    try {
+      const entries = await fs.readdir(dirPath, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dirPath, entry.name);
+        if (entry.isDirectory()) {
+          if (!entry.name.startsWith('.') && !entry.name.startsWith('$') &&
+              entry.name !== 'node_modules' && entry.name !== 'AppData') {
+            try { await scanDir(fullPath); } catch {}
+          }
+        } else if (entry.name.toLowerCase().endsWith('.accdb') ||
+                   entry.name.toLowerCase().endsWith('.mdb')) {
+          try {
+            const stats = await fs.stat(fullPath);
+            results.push({
+              name: entry.name,
+              path: fullPath,
+              size: stats.size,
+              modified: stats.mtime
+            });
+          } catch {}
+        }
+      }
+    } catch {}
+  }
+
+  for (const loc of DEFAULT_SCAN_LOCATIONS) {
+    await scanDir(loc);
+  }
+  results.sort((a, b) => new Date(b.modified) - new Date(a.modified));
+  return results;
+}
 
 module.exports = function(pool) {
   /**
    * GET /api/tables
    * List all tables with their columns
+   * For _access_import: returns list of Access databases as "tables"
    */
   router.get('/tables', async (req, res) => {
     try {
       const schemaName = req.schemaName || 'public';
+
+      // Special handling for Access Import database
+      if (schemaName === '_access_import') {
+        const accessDatabases = await scanForAccessDatabases();
+        const tables = accessDatabases.map((db, idx) => ({
+          name: db.name,
+          path: db.path,
+          fields: [
+            { name: 'path', type: 'text', isPrimaryKey: true },
+            { name: 'size', type: 'integer' },
+            { name: 'modified', type: 'timestamp' }
+          ],
+          size: db.size,
+          modified: db.modified
+        }));
+        return res.json({ tables });
+      }
 
       // Get all tables from the current database schema
       const tablesResult = await pool.query(`

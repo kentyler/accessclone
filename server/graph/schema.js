@@ -94,6 +94,16 @@ CREATE TABLE IF NOT EXISTS shared.reports (
 
 CREATE INDEX IF NOT EXISTS idx_reports_database ON shared.reports(database_id);
 CREATE INDEX IF NOT EXISTS idx_reports_current ON shared.reports(database_id, name) WHERE is_current = true;
+
+-- ============================================================
+-- App Config - key/value settings storage
+-- ============================================================
+CREATE TABLE IF NOT EXISTS app_config (
+    setting_name VARCHAR(100) PRIMARY KEY,
+    setting_value TEXT,
+    description TEXT,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
 `;
 
 /**

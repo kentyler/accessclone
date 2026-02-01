@@ -1,0 +1,416 @@
+/**
+ * Access Import routes
+ * Handles scanning for and importing Microsoft Access databases
+ */
+
+const express = require('express');
+const router = express.Router();
+const { spawn } = require('child_process');
+const path = require('path');
+const fs = require('fs').promises;
+
+// Default scan locations
+const DEFAULT_SCAN_LOCATIONS = [
+  'C:\\Users\\Ken\\Desktop',
+  'C:\\Users\\Ken\\Documents'
+];
+
+/**
+ * Run a PowerShell script and return the output
+ */
+async function runPowerShell(scriptPath, args = []) {
+  return new Promise((resolve, reject) => {
+    const psArgs = [
+      '-NoProfile',
+      '-ExecutionPolicy', 'Bypass',
+      '-File', scriptPath,
+      ...args
+    ];
+
+    const ps = spawn('powershell.exe', psArgs);
+    let stdout = '';
+    let stderr = '';
+
+    ps.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+
+    ps.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    ps.on('close', (code) => {
+      if (code === 0) {
+        resolve(stdout.trim());
+      } else {
+        reject(new Error(stderr || `PowerShell exited with code ${code}`));
+      }
+    });
+
+    ps.on('error', (err) => {
+      reject(err);
+    });
+  });
+}
+
+/**
+ * Recursively scan a directory for .accdb files
+ */
+async function scanDirectory(dirPath, results = []) {
+  try {
+    const entries = await fs.readdir(dirPath, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const fullPath = path.join(dirPath, entry.name);
+
+      if (entry.isDirectory()) {
+        // Skip system and hidden directories
+        if (!entry.name.startsWith('.') &&
+            !entry.name.startsWith('$') &&
+            entry.name !== 'node_modules' &&
+            entry.name !== 'AppData') {
+          try {
+            await scanDirectory(fullPath, results);
+          } catch (err) {
+            // Skip directories we can't access
+          }
+        }
+      } else if (entry.name.toLowerCase().endsWith('.accdb') ||
+                 entry.name.toLowerCase().endsWith('.mdb')) {
+        try {
+          const stats = await fs.stat(fullPath);
+          results.push({
+            path: fullPath,
+            name: entry.name,
+            size: stats.size,
+            modified: stats.mtime
+          });
+        } catch (err) {
+          // Skip files we can't stat
+        }
+      }
+    }
+  } catch (err) {
+    // Skip directories we can't read
+  }
+
+  return results;
+}
+
+module.exports = function(pool) {
+
+  /**
+   * GET /api/access-import/scan
+   * Scan for Access databases in default or specified locations
+   */
+  router.get('/scan', async (req, res) => {
+    try {
+      const locations = req.query.locations
+        ? req.query.locations.split(',')
+        : DEFAULT_SCAN_LOCATIONS;
+
+      const allFiles = [];
+
+      for (const location of locations) {
+        console.log(`Scanning ${location} for Access databases...`);
+        const files = await scanDirectory(location);
+        allFiles.push(...files);
+      }
+
+      // Sort by modified date, newest first
+      allFiles.sort((a, b) => new Date(b.modified) - new Date(a.modified));
+
+      console.log(`Found ${allFiles.length} Access databases`);
+      res.json({
+        databases: allFiles,
+        locations: locations
+      });
+    } catch (err) {
+      console.error('Error scanning for Access databases:', err);
+      res.status(500).json({ error: 'Failed to scan for databases' });
+    }
+  });
+
+  /**
+   * GET /api/access-import/database/:path
+   * Get details about a specific Access database (tables, forms, reports)
+   */
+  router.get('/database', async (req, res) => {
+    try {
+      const dbPath = req.query.path;
+
+      if (!dbPath) {
+        return res.status(400).json({ error: 'Database path required' });
+      }
+
+      // Check file exists
+      try {
+        await fs.access(dbPath);
+      } catch {
+        return res.status(404).json({ error: 'Database file not found' });
+      }
+
+      const scriptsDir = path.join(__dirname, '..', '..', 'scripts', 'access');
+
+      // Get forms
+      let forms = [];
+      try {
+        const formsScript = path.join(scriptsDir, 'list_forms.ps1');
+        const formsOutput = await runPowerShell(formsScript, ['-DatabasePath', dbPath]);
+        forms = formsOutput ? JSON.parse(formsOutput) : [];
+        if (!Array.isArray(forms)) forms = [forms]; // Handle single item
+      } catch (err) {
+        console.error('Error listing forms:', err.message);
+      }
+
+      // Get reports
+      let reports = [];
+      try {
+        const reportsScript = path.join(scriptsDir, 'list_reports.ps1');
+        const reportsOutput = await runPowerShell(reportsScript, ['-DatabasePath', dbPath]);
+        reports = reportsOutput ? JSON.parse(reportsOutput) : [];
+        if (!Array.isArray(reports)) reports = [reports]; // Handle single item
+      } catch (err) {
+        console.error('Error listing reports:', err.message);
+      }
+
+      // Get tables
+      let tables = [];
+      try {
+        const tablesScript = path.join(scriptsDir, 'list_tables.ps1');
+        const tablesOutput = await runPowerShell(tablesScript, ['-DatabasePath', dbPath]);
+        tables = tablesOutput ? JSON.parse(tablesOutput) : [];
+        if (!Array.isArray(tables)) tables = [tables]; // Handle single item
+      } catch (err) {
+        console.error('Error listing tables:', err.message);
+      }
+
+      // Get queries
+      let queries = [];
+      try {
+        const queriesScript = path.join(scriptsDir, 'list_queries.ps1');
+        const queriesOutput = await runPowerShell(queriesScript, ['-DatabasePath', dbPath]);
+        queries = queriesOutput ? JSON.parse(queriesOutput) : [];
+        if (!Array.isArray(queries)) queries = [queries]; // Handle single item
+      } catch (err) {
+        console.error('Error listing queries:', err.message);
+      }
+
+      // Get modules
+      let modules = [];
+      try {
+        const modulesScript = path.join(scriptsDir, 'list_modules.ps1');
+        const modulesOutput = await runPowerShell(modulesScript, ['-DatabasePath', dbPath]);
+        modules = modulesOutput ? JSON.parse(modulesOutput) : [];
+        if (!Array.isArray(modules)) modules = [modules]; // Handle single item
+      } catch (err) {
+        console.error('Error listing modules:', err.message);
+      }
+
+      res.json({
+        path: dbPath,
+        name: path.basename(dbPath),
+        forms: forms,
+        reports: reports,
+        tables: tables,
+        queries: queries,
+        modules: modules
+      });
+    } catch (err) {
+      console.error('Error getting database details:', err);
+      res.status(500).json({ error: 'Failed to get database details' });
+    }
+  });
+
+  /**
+   * POST /api/access-import/export-form
+   * Export a form from Access to EDN
+   */
+  router.post('/export-form', async (req, res) => {
+    const { databasePath, formName, targetDatabaseId } = req.body;
+
+    // Helper to log import attempt
+    async function logImport(status, errorMessage = null, details = null) {
+      try {
+        await pool.query(`
+          INSERT INTO shared.import_log
+            (source_path, source_object_name, source_object_type, target_database_id, status, error_message, details)
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `, [databasePath, formName, 'form', targetDatabaseId || '_none', status, errorMessage, details ? JSON.stringify(details) : null]);
+      } catch (logErr) {
+        console.error('Error writing to import_log:', logErr);
+      }
+    }
+
+    try {
+      if (!databasePath || !formName) {
+        await logImport('error', 'databasePath and formName required');
+        return res.status(400).json({ error: 'databasePath and formName required' });
+      }
+
+      const scriptsDir = path.join(__dirname, '..', '..', 'scripts', 'access');
+      const exportScript = path.join(scriptsDir, 'export_form_to_edn.ps1');
+
+      // Export to temp file
+      const tempDir = path.join(__dirname, '..', '..', 'temp');
+      await fs.mkdir(tempDir, { recursive: true });
+      const outputPath = path.join(tempDir, `${formName.replace(/[^a-zA-Z0-9]/g, '_')}.edn`);
+
+      await runPowerShell(exportScript, [
+        '-DatabasePath', databasePath,
+        '-FormName', formName,
+        '-OutputPath', outputPath
+      ]);
+
+      // Read the exported EDN
+      const ednContent = await fs.readFile(outputPath, 'utf8');
+
+      // If targetDatabaseId specified, save to shared.forms
+      if (targetDatabaseId) {
+        const recordSourceMatch = ednContent.match(/:record-source\s+"([^"]+)"/);
+        const recordSource = recordSourceMatch ? recordSourceMatch[1] : null;
+
+        await pool.query(`
+          INSERT INTO shared.forms (database_id, name, definition, record_source, version, is_current)
+          VALUES ($1, $2, $3, $4, 1, true)
+          ON CONFLICT (database_id, name, version) DO UPDATE SET
+            definition = EXCLUDED.definition,
+            record_source = EXCLUDED.record_source,
+            is_current = true
+        `, [targetDatabaseId, formName, ednContent, recordSource]);
+      }
+
+      // Clean up temp file
+      await fs.unlink(outputPath).catch(() => {});
+
+      // Log success
+      await logImport('success', null, { edn_length: ednContent.length });
+
+      res.json({
+        success: true,
+        form: formName,
+        saved: !!targetDatabaseId
+      });
+    } catch (err) {
+      console.error('Error exporting form:', err);
+      await logImport('error', err.message);
+      res.status(500).json({ error: err.message || 'Failed to export form' });
+    }
+  });
+
+  /**
+   * POST /api/access-import/export-report
+   * Export a report from Access to EDN
+   */
+  router.post('/export-report', async (req, res) => {
+    const { databasePath, reportName, targetDatabaseId } = req.body;
+
+    // Helper to log import attempt
+    async function logImport(status, errorMessage = null, details = null) {
+      try {
+        await pool.query(`
+          INSERT INTO shared.import_log
+            (source_path, source_object_name, source_object_type, target_database_id, status, error_message, details)
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `, [databasePath, reportName, 'report', targetDatabaseId || '_none', status, errorMessage, details ? JSON.stringify(details) : null]);
+      } catch (logErr) {
+        console.error('Error writing to import_log:', logErr);
+      }
+    }
+
+    try {
+      if (!databasePath || !reportName) {
+        await logImport('error', 'databasePath and reportName required');
+        return res.status(400).json({ error: 'databasePath and reportName required' });
+      }
+
+      const scriptsDir = path.join(__dirname, '..', '..', 'scripts', 'access');
+      const exportScript = path.join(scriptsDir, 'export_report_to_edn.ps1');
+
+      // Export to temp file
+      const tempDir = path.join(__dirname, '..', '..', 'temp');
+      await fs.mkdir(tempDir, { recursive: true });
+      const outputPath = path.join(tempDir, `${reportName.replace(/[^a-zA-Z0-9]/g, '_')}.edn`);
+
+      await runPowerShell(exportScript, [
+        '-DatabasePath', databasePath,
+        '-ReportName', reportName,
+        '-OutputPath', outputPath
+      ]);
+
+      // Read the exported EDN
+      const ednContent = await fs.readFile(outputPath, 'utf8');
+
+      // If targetDatabaseId specified, save to shared.reports
+      if (targetDatabaseId) {
+        const recordSourceMatch = ednContent.match(/:record-source\s+"([^"]+)"/);
+        const recordSource = recordSourceMatch ? recordSourceMatch[1] : null;
+
+        await pool.query(`
+          INSERT INTO shared.reports (database_id, name, definition, record_source, version, is_current)
+          VALUES ($1, $2, $3, $4, 1, true)
+          ON CONFLICT (database_id, name, version) DO UPDATE SET
+            definition = EXCLUDED.definition,
+            record_source = EXCLUDED.record_source,
+            is_current = true
+        `, [targetDatabaseId, reportName, ednContent, recordSource]);
+      }
+
+      // Clean up temp file
+      await fs.unlink(outputPath).catch(() => {});
+
+      // Log success
+      await logImport('success', null, { edn_length: ednContent.length });
+
+      res.json({
+        success: true,
+        report: reportName,
+        saved: !!targetDatabaseId
+      });
+    } catch (err) {
+      console.error('Error exporting report:', err);
+      await logImport('error', err.message);
+      res.status(500).json({ error: err.message || 'Failed to export report' });
+    }
+  });
+
+  /**
+   * GET /api/access-import/history
+   * Get import history, optionally filtered by source path
+   */
+  router.get('/history', async (req, res) => {
+    try {
+      const { source_path, limit = 100 } = req.query;
+
+      let query, params;
+      if (source_path) {
+        query = `
+          SELECT id, created_at, source_path, source_object_name, source_object_type,
+                 target_database_id, status, error_message
+          FROM shared.import_log
+          WHERE source_path = $1
+          ORDER BY created_at DESC
+          LIMIT $2
+        `;
+        params = [source_path, parseInt(limit)];
+      } else {
+        query = `
+          SELECT id, created_at, source_path, source_object_name, source_object_type,
+                 target_database_id, status, error_message
+          FROM shared.import_log
+          ORDER BY created_at DESC
+          LIMIT $1
+        `;
+        params = [parseInt(limit)];
+      }
+
+      const result = await pool.query(query, params);
+      res.json({ history: result.rows });
+    } catch (err) {
+      console.error('Error fetching import history:', err);
+      res.status(500).json({ error: 'Failed to fetch import history' });
+    }
+  });
+
+  return router;
+};

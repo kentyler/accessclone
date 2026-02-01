@@ -9,8 +9,9 @@
 (def api-base "http://localhost:3001")
 
 ;; Forward declarations for functions used before definition
-(declare load-tables! load-queries! load-functions! save-ui-state!
-         save-current-record! save-form! save-form-to-file!
+(declare load-tables! load-queries! load-functions! load-forms!
+         load-access-databases! load-objects-for-database!
+         save-ui-state! save-current-record! save-form! save-form-to-file!
          get-record-source-fields run-query!)
 
 ;; Application state atom
@@ -164,11 +165,8 @@
           ;; Clear the saved-database-id now that we've used it
           (swap! app-state dissoc :saved-database-id)
           (println "Loaded" (count databases) "databases, current:" (:name current-db))
-          ;; Now load objects for the current database
-          (start-loading-objects!)
-          (load-tables!)
-          (load-queries!)
-          (load-functions!))
+          ;; Now load objects for the current database based on its object_types
+          (load-objects-for-database!))
         (do
           (println "Error loading databases:" (:body response))
           (log-error! "Failed to load databases" "load-databases" {:response (:body response)}))))))
@@ -182,19 +180,18 @@
                                   {:json-params {:database_id database-id}}))]
       (set-loading! false)
       (if (:success response)
-        (let [new-db (first (filter #(= (:database_id %) database-id)
-                                    (:available-databases @app-state)))]
+        (let [;; Use database from response (has object_types), fall back to cached
+              new-db (or (get-in response [:body :database])
+                         (first (filter #(= (:database_id %) database-id)
+                                        (:available-databases @app-state))))]
           (set-current-database! new-db)
+          (println "Switched to database:" (:name new-db) "object_types:" (:object_types new-db))
           ;; Clear open tabs when switching databases
           (swap! app-state assoc :open-objects [] :active-tab nil)
           ;; Save cleared UI state
           (save-ui-state!)
-          ;; Reload objects for new database
-          (start-loading-objects!)
-          (load-tables!)
-          (load-queries!)
-          (load-functions!)
-          (println "Switched to database:" (:name new-db)))
+          ;; Reload objects for new database based on its object_types
+          (load-objects-for-database!))
         (do
           (println "Error switching database:" (:body response))
           (log-error! "Failed to switch database" "switch-database" {:response (:body response)}))))))
@@ -1152,6 +1149,56 @@
           (println "Error loading functions:" (:body response))
           (log-error! "Failed to load functions from database" "load-functions" {:response (:body response)})
           (object-load-complete!))))))
+
+;; Load Access databases (for Access Import database)
+(defn load-access-databases!
+  "Load Access database files via backend API"
+  []
+  (go
+    (let [response (<! (http/get (str api-base "/api/tables")
+                                 {:headers (db-headers)}))]
+      (if (:success response)
+        (let [databases (get-in response [:body :tables])
+              ;; Map to access_databases object type
+              dbs-with-ids (map-indexed
+                            (fn [idx db]
+                              {:id (inc idx)
+                               :name (:name db)
+                               :path (:path db)
+                               :size (:size db)
+                               :modified (:modified db)})
+                            databases)]
+          (swap! app-state assoc-in [:objects :access_databases] (vec dbs-with-ids))
+          (println "Loaded" (count dbs-with-ids) "Access databases")
+          (object-load-complete!))
+        (do
+          (println "Error loading Access databases:" (:body response))
+          (object-load-complete!))))))
+
+;; Unified object loading based on database's object_types
+(defn load-objects-for-database!
+  "Load objects based on the current database's object_types"
+  []
+  (let [object-types (or (get-in @app-state [:current-database :object_types])
+                         ["tables" "queries" "forms" "reports" "modules"])]
+    (start-loading-objects!)
+    ;; Clear all object lists first
+    (swap! app-state assoc :objects {:tables []
+                                     :queries []
+                                     :forms []
+                                     :reports []
+                                     :modules []
+                                     :access_databases []})
+    ;; Load each object type
+    (doseq [obj-type object-types]
+      (case obj-type
+        "tables" (load-tables!)
+        "queries" (load-queries!)
+        "forms" (load-forms!)
+        "reports" nil  ;; TODO: load-reports!
+        "modules" (load-functions!)
+        "access_databases" (load-access-databases!)
+        (println "Unknown object type:" obj-type)))))
 
 ;; Chat panel
 (defn toggle-chat-panel! []

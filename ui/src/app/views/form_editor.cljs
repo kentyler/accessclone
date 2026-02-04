@@ -146,10 +146,11 @@
              :on-change #(on-change (js/parseInt (.. % -target -value) 10))}]
 
     :yes-no
-    [:select {:value (if (or value (:default prop)) "Yes" "No")
-              :on-change #(on-change (= (.. % -target -value) "Yes"))}
-     [:option "Yes"]
-     [:option "No"]]
+    (let [v (if (some? value) value (:default prop))]
+      [:select {:value (if (or (= v 1) (true? v)) "1" "0")
+                :on-change #(on-change (js/parseInt (.. % -target -value) 10))}
+       [:option {:value "1"} "Yes"]
+       [:option {:value "0"} "No"]])
 
     :select
     [:select {:value (or value (first (:options prop)))
@@ -527,15 +528,17 @@
       [form-section :header current selected grid-size]
       [form-section :detail current selected grid-size]
       [form-section :footer current selected grid-size]]
-     ;; Record navigation bar
-     [:div.record-nav-bar
-      [:span.nav-label "Record:"]
-      [:button.nav-btn {:title "First"} "|◀"]
-      [:button.nav-btn {:title "Previous"} "◀"]
-      [:span.record-counter "1 of 5"]
-      [:button.nav-btn {:title "Next"} "▶"]
-      [:button.nav-btn {:title "Last"} "▶|"]
-      [:button.nav-btn {:title "New"} "▶*"]]]))
+     ;; Record navigation bar (hidden when navigation-buttons is 0)
+     (when-not (= 0 (:navigation-buttons current))
+       [:div.record-nav-bar
+        [:span.nav-label "Record:"]
+        [:button.nav-btn {:title "First"} "|◀"]
+        [:button.nav-btn {:title "Previous"} "◀"]
+        [:span.record-counter "1 of 5"]
+        [:button.nav-btn {:title "Next"} "▶"]
+        [:button.nav-btn {:title "Last"} "▶|"]
+        [:button.nav-btn {:title "New"} "▶*"]])]))
+
 
 (defn form-view-control
   "Render a single control in view mode"
@@ -681,39 +684,40 @@
              "No records found"
              "Add controls in Design View")
            "Select a record source in Design View")])]
-     ;; Record navigation bar
-     [:div.record-nav-bar
-      [:span.nav-label "Record:"]
-      [:button.nav-btn {:title "First"
-                        :disabled (or (< (:total record-pos) 1) (<= (:current record-pos) 1))
-                        :on-click #(state/navigate-to-record! 1)} "|◀"]
-      [:button.nav-btn {:title "Previous"
-                        :disabled (or (< (:total record-pos) 1) (<= (:current record-pos) 1))
-                        :on-click #(state/navigate-to-record! (dec (:current record-pos)))} "◀"]
-      [:span.record-counter
-       (if (> (:total record-pos) 0)
-         (str (:current record-pos) " of " (:total record-pos))
-         "0 of 0")]
-      [:button.nav-btn {:title "Next"
-                        :disabled (or (< (:total record-pos) 1) (>= (:current record-pos) (:total record-pos)))
-                        :on-click #(state/navigate-to-record! (inc (:current record-pos)))} "▶"]
-      [:button.nav-btn {:title "Last"
-                        :disabled (or (< (:total record-pos) 1) (>= (:current record-pos) (:total record-pos)))
-                        :on-click #(state/navigate-to-record! (:total record-pos))} "▶|"]
-      [:button.nav-btn {:title "New Record"
-                        :on-click #(state/new-record!)} "▶*"]
-      [:button.nav-btn.delete-btn
-       {:title "Delete Record"
-        :disabled (< (:total record-pos) 1)
-        :on-click #(when (js/confirm "Delete this record?")
-                     (state/delete-current-record!))} "✕"]
-      [:span.nav-separator]
-      [:button.nav-btn.save-btn
-       {:title "Save Record"
-        :class (when record-dirty? "dirty")
-        :disabled (not record-dirty?)
-        :on-click #(state/save-current-record!)}
-       "Save"]]]))
+     ;; Record navigation bar (hidden when navigation-buttons is 0)
+     (when-not (= 0 (:navigation-buttons current))
+       [:div.record-nav-bar
+          [:span.nav-label "Record:"]
+          [:button.nav-btn {:title "First"
+                            :disabled (or (< (:total record-pos) 1) (<= (:current record-pos) 1))
+                            :on-click #(state/navigate-to-record! 1)} "|◀"]
+          [:button.nav-btn {:title "Previous"
+                            :disabled (or (< (:total record-pos) 1) (<= (:current record-pos) 1))
+                            :on-click #(state/navigate-to-record! (dec (:current record-pos)))} "◀"]
+          [:span.record-counter
+           (if (> (:total record-pos) 0)
+             (str (:current record-pos) " of " (:total record-pos))
+             "0 of 0")]
+          [:button.nav-btn {:title "Next"
+                            :disabled (or (< (:total record-pos) 1) (>= (:current record-pos) (:total record-pos)))
+                            :on-click #(state/navigate-to-record! (inc (:current record-pos)))} "▶"]
+          [:button.nav-btn {:title "Last"
+                            :disabled (or (< (:total record-pos) 1) (>= (:current record-pos) (:total record-pos)))
+                            :on-click #(state/navigate-to-record! (:total record-pos))} "▶|"]
+          [:button.nav-btn {:title "New Record"
+                            :on-click #(state/new-record!)} "▶*"]
+          [:button.nav-btn.delete-btn
+           {:title "Delete Record"
+            :disabled (< (:total record-pos) 1)
+            :on-click #(when (js/confirm "Delete this record?")
+                         (state/delete-current-record!))} "✕"]
+          [:span.nav-separator]
+          [:button.nav-btn.save-btn
+           {:title "Save Record"
+            :class (when record-dirty? "dirty")
+            :disabled (not record-dirty?)
+            :on-click #(state/save-current-record!)}
+           "Save"]])]))
 
 (defn ask-ai-to-fix-errors!
   "Send lint errors to AI for suggestions"

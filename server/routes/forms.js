@@ -17,7 +17,7 @@ function extractRecordSource(edn) {
   return match ? match[1] : null;
 }
 
-module.exports = function(pool, { jsonToEdn }) {
+function createRouter(pool, { jsonToEdn }) {
   /**
    * GET /api/forms
    * List all current forms for current database
@@ -265,4 +265,7 @@ module.exports = function(pool, { jsonToEdn }) {
   });
 
   return router;
-};
+}
+
+module.exports = createRouter;
+module.exports.extractRecordSource = extractRecordSource;

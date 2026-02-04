@@ -276,39 +276,44 @@ function lintForms(formsDir) {
   return results;
 }
 
-// Main
-const formsDir = path.join(__dirname, '..', 'forms');
+// Export parseEDN for testing
+module.exports = { parseEDN };
 
-console.log('Form Definition Linter');
-console.log('======================\n');
+// Main (only runs when executed directly)
+if (require.main === module) {
+  const formsDir = path.join(__dirname, '..', 'forms');
 
-const results = lintForms(formsDir);
+  console.log('Form Definition Linter');
+  console.log('======================\n');
 
-console.log(`Checked ${results.files} form(s)\n`);
+  const results = lintForms(formsDir);
 
-if (results.errors.length > 0) {
-  console.log('ERRORS:');
-  results.errors.forEach(e => console.log(`  ✗ ${e}`));
-  console.log('');
-}
+  console.log(`Checked ${results.files} form(s)\n`);
 
-if (results.warnings.length > 0) {
-  console.log('WARNINGS:');
-  results.warnings.forEach(w => console.log(`  ⚠ ${w}`));
-  console.log('');
-}
+  if (results.errors.length > 0) {
+    console.log('ERRORS:');
+    results.errors.forEach(e => console.log(`  ✗ ${e}`));
+    console.log('');
+  }
 
-if (results.valid.length > 0) {
-  console.log('VALID:');
-  results.valid.forEach(f => console.log(`  ✓ ${f}`));
-  console.log('');
-}
+  if (results.warnings.length > 0) {
+    console.log('WARNINGS:');
+    results.warnings.forEach(w => console.log(`  ⚠ ${w}`));
+    console.log('');
+  }
 
-// Summary
-if (results.errors.length === 0) {
-  console.log('✓ All forms passed validation');
-  process.exit(0);
-} else {
-  console.log(`✗ ${results.errors.length} error(s) found`);
-  process.exit(1);
+  if (results.valid.length > 0) {
+    console.log('VALID:');
+    results.valid.forEach(f => console.log(`  ✓ ${f}`));
+    console.log('');
+  }
+
+  // Summary
+  if (results.errors.length === 0) {
+    console.log('✓ All forms passed validation');
+    process.exit(0);
+  } else {
+    console.log(`✗ ${results.errors.length} error(s) found`);
+    process.exit(1);
+  }
 }

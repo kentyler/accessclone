@@ -212,7 +212,7 @@ function validateForm(form) {
   return issues;
 }
 
-module.exports = function(pool, secrets) {
+function createRouter(pool, secrets) {
   /**
    * POST /api/lint/form
    * Validate a form definition
@@ -239,4 +239,9 @@ module.exports = function(pool, secrets) {
   });
 
   return router;
-};
+}
+
+module.exports = createRouter;
+module.exports.validateForm = validateForm;
+module.exports.validateControl = validateControl;
+module.exports.normalizeType = normalizeType;

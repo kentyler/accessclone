@@ -15,6 +15,37 @@ The form export uses PowerShell scripts in the `Migration/` folder:
 - `export_form_to_edn.ps1` - Export single form
 - `export_all_forms.ps1` - Batch export all forms
 
+## COM Automation Options
+
+### DAO.DBEngine.120 (Recommended)
+More reliable for reading data, works without full Access UI:
+```powershell
+$daoEngine = New-Object -ComObject DAO.DBEngine.120
+$db = $daoEngine.OpenDatabase($DatabasePath)
+
+# Access tables
+foreach ($table in $db.TableDefs) {
+    if (-not $table.Name.StartsWith("MSys")) {
+        Write-Host $table.Name
+    }
+}
+
+$db.Close()
+[System.Runtime.Interopservices.Marshal]::ReleaseComObject($daoEngine)
+```
+
+### Access.Application
+Required for form design properties (controls, layout):
+```powershell
+$access = New-Object -ComObject Access.Application
+$access.OpenCurrentDatabase($DatabasePath)
+$access.DoCmd.OpenForm($FormName, 1)  # 1 = acDesign
+$form = $access.Forms[$FormName]
+# ... access form properties ...
+$access.DoCmd.Close(2, $FormName, 0)  # 2 = acForm
+$access.Quit()
+```
+
 ## Step 1: List All Forms
 
 ```powershell
@@ -52,17 +83,68 @@ See `form-design.md` for complete details. Basic structure:
 ```clojure
 {:id nil
  :name "Recipe_Calculator"
- :type :form
- :caption "Recipe Calculator"
+ :type "form"
+ :text "Recipe Calculator"
  :record-source "recipe"
- :default-view "single"
- :form-width 15000
- :form-height 10000
- :navigation-buttons false
- :allow-additions true
- :allow-deletions false
- :allow-edits true
- :controls [...]}
+ :default-view "Single Form"
+ :header {:height 40
+          :controls [...]}
+ :detail {:height 30
+          :controls [...]}
+ :footer {:height 20
+          :controls [...]}}
+```
+
+## Critical Transformations
+
+### Twips to Pixels
+Access stores coordinates in twips (1440 per inch). PolyAccess uses pixels. **Divide by 15**:
+```javascript
+:x ${Math.round(parseInt(twips) / 15)}
+:y ${Math.round(parseInt(twips) / 15)}
+:width ${Math.round(parseInt(twips) / 15)}
+:height ${Math.round(parseInt(twips) / 15)}
+```
+
+### Section Organization
+Access controls have a `.Section` property:
+- Section 0 = Detail (main body)
+- Section 1 = Form Header
+- Section 2 = Form Footer
+
+Export must group controls by section:
+```clojure
+{:header {:height 40 :controls [...]}
+ :detail {:height 30 :controls [...]}
+ :footer {:height 20 :controls [...]}}
+```
+
+### Default View Values
+Must match PolyAccess exactly (case-sensitive):
+| Access Value | PolyAccess Value |
+|--------------|------------------|
+| 0 | "Single Form" |
+| 1 | "Continuous Forms" |
+| 2 | "Datasheet" |
+
+### Type Format
+Use string "form" not keyword :form:
+```clojure
+:type "form"  ; correct
+:type :form   ; incorrect
+```
+
+### Caption to Text
+PolyAccess uses `:text` not `:caption`:
+```clojure
+:text "Form Title"  ; correct
+:caption "..."      ; incorrect
+```
+
+### BOM Removal
+PowerShell may add UTF-8 BOM. Remove it:
+```javascript
+result = result.replace(/^\uFEFF/, '');
 ```
 
 ## Control Type Mapping
@@ -87,8 +169,8 @@ See `form-design.md` for complete details. Basic structure:
 
 ### Form Properties
 - `:record-source` - Table or query name
-- `:default-view` - "single", "continuous", "datasheet"
-- `:form-width`, `:form-height` - In twips (1440 = 1 inch)
+- `:default-view` - "Single Form", "Continuous Forms", or "Datasheet" (exact values!)
+- Section heights in pixels (converted from twips)
 - `:navigation-buttons` - Show record nav
 - `:allow-additions`, `:allow-deletions`, `:allow-edits`
 - `:scroll-bars` - `:neither`, `:horizontal`, `:vertical`, `:both`
@@ -166,6 +248,16 @@ The batch export creates this automatically. Format:
 
 This tells the UI which forms are available.
 
+## Standard Button Handlers
+
+PolyAccess recognizes certain button captions and provides built-in functionality:
+
+| Button Text | Action |
+|-------------|--------|
+| "Close" | Closes the current form tab |
+
+Other buttons show an alert until their VBA is translated.
+
 ## Event Handlers
 
 Forms with events need VBA translation (Phase 5). The export flags:
@@ -202,6 +294,24 @@ SELECT log_migration(
     'Review: combo box row sources need conversion'
 );
 ```
+
+## Continuous Forms in PolyAccess
+
+Forms with `:default-view "Continuous Forms"` render as a scrollable list:
+- Header section displays once at top
+- Detail section repeats for each record
+- Footer section displays once at bottom
+- Clicking a row selects that record
+- New records appear at bottom with auto-focus
+- Selected row shows live edits
+
+The `:records` array in form-editor state holds all loaded records. The selected row uses `:current-record` for live editing.
+
+### New Record Handling
+New records are marked with `:__new__ true` to distinguish from existing records. This ensures:
+- INSERT is used instead of UPDATE on save
+- Primary key field is included in INSERT (for non-auto-increment PKs)
+- Auto-focus triggers on the first text-box
 
 ## Common Issues
 

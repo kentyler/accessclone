@@ -539,15 +539,16 @@
 
 (defn form-view-control
   "Render a single control in view mode"
-  [ctrl current-record on-change]
+  [ctrl current-record on-change & [{:keys [auto-focus?]}]]
   (let [;; Check both :field (from drag-drop), :control-source (from Property Sheet), or :label as fallback
         field (or (:field ctrl) (:control-source ctrl))
         ;; Try both keyword and string versions of field name
         value (when field
                 (or (get current-record (keyword field))
                     (get current-record field)
-                    ""))]
-    (println "form-view-control:" {:field field :value value :ctrl-type (:type ctrl) :record-keys (keys current-record)})
+                    ""))
+        ;; Auto-focus new records
+        is-new? (:__new__ current-record)]
     [:div.view-control
      {:style {:left (:x ctrl)
               :top (:y ctrl)
@@ -561,12 +562,21 @@
        [:input.view-input
         {:type "text"
          :value value
+         :auto-focus (and is-new? auto-focus?)
          :on-change #(when field (on-change field (.. % -target -value)))}]
 
        :button
-       [:button.view-button
-        {:on-click #(js/alert (str "Button clicked: " (:text ctrl)))}
-        (or (:text ctrl) (:caption ctrl) "Button")]
+       (let [button-text (or (:text ctrl) (:caption ctrl) "Button")
+             on-click (cond
+                        ;; Close button - close the current tab
+                        (= button-text "Close")
+                        #(let [active (:active-tab @state/app-state)]
+                           (when active
+                             (state/close-tab! (:type active) (:id active))))
+                        ;; Default - show alert
+                        :else
+                        #(js/alert (str "Button clicked: " button-text)))]
+         [:button.view-button {:on-click on-click} button-text])
 
        :check-box
        [:label.view-checkbox
@@ -598,16 +608,39 @@
           ^{:key idx}
           [form-view-control ctrl current-record on-field-change])]])))
 
+(defn form-view-detail-row
+  "Render a single detail row for continuous forms"
+  [idx record form-def selected? on-select on-field-change]
+  (let [height (get-section-height form-def :detail)
+        controls (get-section-controls form-def :detail)
+        ;; Find index of first text-box for auto-focus
+        first-textbox-idx (first (keep-indexed
+                                   (fn [i c] (when (= (:type c) :text-box) i))
+                                   controls))]
+    [:div.view-section.detail.continuous-row
+     {:class (when selected? "selected")
+      :style {:height height}
+      :on-click #(on-select idx)}
+     [:div.view-controls-container
+      (for [[ctrl-idx ctrl] (map-indexed vector controls)]
+        ^{:key ctrl-idx}
+        [form-view-control ctrl record on-field-change
+         {:auto-focus? (and selected? (= ctrl-idx first-textbox-idx))}])]]))
+
 (defn form-view
   "The form in view/data entry mode"
   []
   (let [form-editor (:form-editor @state/app-state)
         current (:current form-editor)
         current-record (or (:current-record form-editor) {})
+        all-records (or (:records form-editor) [])
         record-pos (or (:record-position form-editor) {:current 0 :total 0})
         record-dirty? (:record-dirty? form-editor)
         record-source (:record-source current)
+        default-view (or (:default-view current) "Single Form")
+        continuous? (= default-view "Continuous Forms")
         on-field-change (fn [field value] (state/update-record-field! field value))
+        on-select-record (fn [idx] (state/navigate-to-record! (inc idx)))
         ;; Check if any section has controls
         has-controls? (or (seq (get-section-controls current :header))
                           (seq (get-section-controls current :detail))
@@ -615,14 +648,29 @@
     [:div.form-canvas.view-mode
      [:div.canvas-header
       [:span "Form View"]
+      (when continuous? [:span.view-type-badge " (Continuous)"])
       (when (not record-source)
         [:span.no-source-warning " (No record source selected)"])]
      [:div.canvas-body.view-mode-body
       (if (and record-source (> (:total record-pos) 0))
-        [:div.view-sections-container
-         [form-view-section :header current current-record on-field-change]
-         [form-view-section :detail current current-record on-field-change]
-         [form-view-section :footer current current-record on-field-change]]
+        (if continuous?
+          ;; Continuous forms - render all records
+          [:div.view-sections-container.continuous
+           [form-view-section :header current current-record on-field-change]
+           [:div.continuous-records-container
+            (for [[idx record] (map-indexed vector all-records)]
+              (let [selected? (= (inc idx) (:current record-pos))
+                    ;; Use current-record for selected row to show live edits
+                    display-record (if selected? current-record record)]
+                ^{:key (or (:id record) idx)}
+                [form-view-detail-row idx display-record current
+                 selected? on-select-record on-field-change]))]
+           [form-view-section :footer current current-record on-field-change]]
+          ;; Single form - render one record
+          [:div.view-sections-container
+           [form-view-section :header current current-record on-field-change]
+           [form-view-section :detail current current-record on-field-change]
+           [form-view-section :footer current current-record on-field-change]])
         [:div.no-records
          (if record-source
            (if has-controls?

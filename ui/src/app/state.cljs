@@ -456,17 +456,24 @@
               ;; Check both string and keyword versions of pk
               pk-value (or (get current-record (keyword pk-field-name))
                            (get current-record pk-field-name))
-              is-new? (or (nil? pk-value) (= pk-value ""))
-              ;; Convert record to string keys for API
+              ;; Check for __new__ marker (set by new-record!) or missing pk
+              is-new? (or (:__new__ current-record)
+                          (nil? pk-value)
+                          (= pk-value ""))
+              ;; Convert record to string keys for API, removing internal markers
               record-for-api (reduce-kv
                               (fn [m k v]
-                                (assoc m (if (keyword? k) (name k) k) v))
+                                (if (= k :__new__)
+                                  m  ; skip internal marker
+                                  (assoc m (if (keyword? k) (name k) k) v)))
                               {}
                               current-record)]
           (println "Saving record:" {:pk pk-field-name :pk-value pk-value :is-new? is-new? :data record-for-api})
           (if is-new?
-            ;; Insert new record - remove pk field
-            (let [insert-data (dissoc record-for-api pk-field-name)
+            ;; Insert new record - only remove pk if it's auto-increment "id"
+            (let [insert-data (if (= pk-field-name "id")
+                                (dissoc record-for-api "id")
+                                record-for-api)
                   response (<! (http/post (str api-base "/api/data/" record-source)
                                           {:json-params insert-data
                                            :headers (db-headers)}))]
@@ -474,12 +481,10 @@
                 (do
                   (println "Record inserted successfully")
                   (let [new-record (get-in response [:body :data])]
-                    (swap! app-state update-in [:form-editor :records] conj new-record)
+                    ;; Update the record at current position (already added by new-record!)
+                    (swap! app-state assoc-in [:form-editor :records (dec pos)] new-record)
                     (swap! app-state assoc-in [:form-editor :current-record] new-record)
-                    (swap! app-state assoc-in [:form-editor :record-dirty?] false)
-                    (let [new-total (count (get-in @app-state [:form-editor :records]))]
-                      (swap! app-state assoc-in [:form-editor :record-position]
-                             {:current new-total :total new-total}))))
+                    (swap! app-state assoc-in [:form-editor :record-dirty?] false)))
                 (println "Error inserting record:" (:body response))))
             ;; Update existing record
             (let [update-data (dissoc record-for-api pk-field-name)
@@ -505,8 +510,12 @@
 (defn new-record!
   "Create a new empty record"
   []
-  (let [total (get-in @app-state [:form-editor :record-position :total] 0)]
-    (swap! app-state assoc-in [:form-editor :current-record] {})
+  (let [total (get-in @app-state [:form-editor :record-position :total] 0)
+        ;; Mark as new so save knows to INSERT not UPDATE
+        new-record {:__new__ true}]
+    ;; Add empty record to records array (for continuous forms display)
+    (swap! app-state update-in [:form-editor :records] #(conj (vec %) new-record))
+    (swap! app-state assoc-in [:form-editor :current-record] new-record)
     (swap! app-state assoc-in [:form-editor :record-position] {:current (inc total) :total (inc total)})
     (swap! app-state assoc-in [:form-editor :record-dirty?] true)))
 
@@ -577,9 +586,14 @@
       (let [response (<! (http/get (str api-base "/api/forms/" (:filename form))
                                     {:headers (db-headers)}))]
         (if (:success response)
-          (let [form-data (:body response)  ;; Already parsed by cljs-http
+          (let [body (:body response)
+                ;; Parse EDN if string, otherwise use as-is (cljs-http may have parsed it)
+                form-data (if (string? body)
+                            (reader/read-string body)
+                            body)
                 definition (dissoc form-data :id :name)]
             (println "Loaded form definition, keys:" (keys definition))
+            (println "default-view:" (:default-view definition))
             ;; Update form in objects list with definition
             (swap! app-state update-in [:objects :forms]
                    (fn [forms]

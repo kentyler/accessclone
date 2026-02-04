@@ -640,6 +640,8 @@ body {
   position: relative;
   min-height: 250px;
   overflow: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .form-selector {
@@ -878,6 +880,44 @@ body {
 
 .view-section.detail {
   flex: 1;
+}
+
+/* Continuous forms */
+.view-sections-container.continuous {
+  overflow: hidden;
+}
+
+.continuous-records-container {
+  flex: 1;
+  overflow-y: auto;
+  border-top: 1px solid var(--gray-200);
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.view-section.continuous-row {
+  border-bottom: 1px solid var(--gray-200);
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+
+.view-section.continuous-row:hover {
+  background-color: var(--gray-50);
+}
+
+.view-section.continuous-row.selected {
+  background-color: rgba(37, 99, 235, 0.1);
+  border-left: 3px solid var(--primary);
+}
+
+/* Override min-height for continuous rows */
+.view-section.continuous-row .view-controls-container {
+  min-height: auto;
+}
+
+.view-type-badge {
+  font-size: 0.75rem;
+  color: var(--gray-500);
+  font-style: italic;
 }
 
 .canvas-empty {

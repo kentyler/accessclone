@@ -30,6 +30,9 @@ This is PolyAccess (formerly CloneTemplate), a platform for converting MS Access
 - Form View: Live data entry with record navigation
 - Property Sheet: Access-style tabbed interface (Format/Data/Event/Other/All)
 - Controls bind to database fields via `:field` (drag-drop) or `:control-source` (Property Sheet)
+- Continuous Forms: `:default-view "Continuous Forms"` renders header once, detail per record, footer once
+- New records marked with `:__new__ true` to distinguish INSERT from UPDATE
+- Close button in forms calls `close-tab!` to close current tab
 
 ### Table Viewer (ui/src/app/views/table_viewer.cljs)
 - Datasheet View: Editable grid with inline cell editing
@@ -78,4 +81,21 @@ LLM tools in chat: `query_dependencies`, `query_intent`, `propose_intent`
 See `/skills/` directory for conversion and design guidance:
 - `form-design.md` - Form structure and patterns
 - `conversion.md` - Access database conversion workflow
+- `conversion-forms.md` - Form export from Access (critical transformations documented)
 - `database-patterns.md` - PostgreSQL function patterns
+
+## Known Issues / Debugging Notes
+
+### Form not loading data (returns 0 records)
+If a form's View mode shows no records but the table has data:
+1. Check record-source in Design view Property Sheet matches table name exactly
+2. Open the table directly from sidebar to verify data exists
+3. Check Network tab - look at `/api/data/{table}` response
+4. Check X-Database-ID header is correct
+5. Try deleting and re-importing the form from Access
+
+**Unresolved (2026-02-03)**: List_of_Carriers form returns 0 records even though:
+- Table viewer shows 2 rows in carrier table
+- Record-source is correctly set to "carrier"
+- Other forms (List_of_Measurements, Ingredient_Entry) work fine
+- May need to delete form from shared.forms and re-import

@@ -3,44 +3,21 @@
   (:require [reagent.core :as r]
             [app.state :as state]))
 
-;; Default object types (used if database doesn't specify)
-(def default-object-types
+;; Object types available in the dropdown (like Access navigation pane)
+(def object-types
   [{:id :tables   :label "Tables"}
    {:id :queries  :label "Queries"}
    {:id :forms    :label "Forms"}
    {:id :reports  :label "Reports"}
    {:id :modules  :label "Modules"}])
 
-;; Map of object type id to label
-(def object-type-labels
-  {:tables "Tables"
-   :queries "Queries"
-   :forms "Forms"
-   :reports "Reports"
-   :modules "Modules"
-   :access_databases "Access Databases"})
-
-(defn get-object-types
-  "Get object types for the current database"
-  []
-  (if-let [types (get-in @state/app-state [:current-database :object_types])]
-    (mapv (fn [t]
-            (let [id (keyword t)]
-              {:id id :label (get object-type-labels id (name id))}))
-          types)
-    default-object-types))
-
 (defn object-type-selector
   "Dropdown to select which type of objects to display"
   []
-  (let [selected (:sidebar-object-type @state/app-state)
-        object-types (get-object-types)
-        ;; Default to first available type if current selection isn't available
-        valid-ids (set (map :id object-types))
-        effective-selected (if (valid-ids selected) selected (:id (first object-types)))]
+  (let [selected (:sidebar-object-type @state/app-state)]
     [:div.object-type-selector
      [:select
-      {:value (name (or effective-selected :tables))
+      {:value (name (or selected :forms))
        :on-change #(state/set-sidebar-object-type!
                     (keyword (.. % -target -value)))}
       (for [{:keys [id label]} object-types]

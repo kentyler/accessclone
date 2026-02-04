@@ -45,8 +45,7 @@ module.exports = function(pool, logError) {
   router.get('/', async (req, res) => {
     try {
       const result = await pool.query(`
-        SELECT database_id, name, schema_name, description, last_accessed,
-               COALESCE(object_types, '["tables", "queries", "forms", "reports", "modules"]'::jsonb) as object_types
+        SELECT database_id, name, schema_name, description, last_accessed
         FROM shared.databases
         ORDER BY name
       `);
@@ -71,9 +70,7 @@ module.exports = function(pool, logError) {
     try {
       // Verify database exists
       const result = await pool.query(
-        `SELECT database_id, name, schema_name,
-                COALESCE(object_types, '["tables", "queries", "forms", "reports", "modules"]'::jsonb) as object_types
-         FROM shared.databases WHERE database_id = $1`,
+        'SELECT database_id, name, schema_name FROM shared.databases WHERE database_id = $1',
         [database_id]
       );
 

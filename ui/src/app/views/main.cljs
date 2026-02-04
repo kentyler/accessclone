@@ -5,8 +5,7 @@
             [app.state :as state]
             [app.views.sidebar :as sidebar]
             [app.views.tabs :as tabs]
-            [app.views.form-editor :as form-editor]
-            [app.views.access-database-viewer :as access-db-viewer]))
+            [app.views.form-editor :as form-editor]))
 
 (defn options-dialog
   "Tools > Options dialog for app configuration"
@@ -102,22 +101,12 @@
      "Create New Form"]]])
 
 (defn main-area []
-  (let [active-tab (:active-tab @state/app-state)]
-    [:div.main-area
-     [tabs/tab-bar]
-     [:div.editor-container
-      (cond
-        ;; No tab open - show welcome
-        (nil? active-tab)
-        [welcome-panel]
-
-        ;; Access database selected - show import viewer
-        (= (:type active-tab) :access_databases)
-        [access-db-viewer/access-database-viewer]
-
-        ;; Any other object type - show form editor
-        :else
-        [form-editor/object-editor])]]))
+  [:div.main-area
+   [tabs/tab-bar]
+   [:div.editor-container
+    (if (:active-tab @state/app-state)
+      [form-editor/object-editor]
+      [welcome-panel])]])
 
 (defn chat-message [{:keys [role content]}]
   [:div.chat-message {:class role}

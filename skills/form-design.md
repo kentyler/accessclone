@@ -22,48 +22,44 @@ There is no auto-generation from table metadata - all forms are intentionally de
 
 ## File Storage
 
-Forms are stored as EDN files in the `forms/` directory:
+Forms are stored in the `shared.forms` PostgreSQL table with append-only versioning.
+Each save creates a new version; old versions are preserved for rollback.
 
-```
-CloneTemplate/
-├── forms/
-│   ├── _index.edn           # List of form filenames to load
-│   ├── recipe_calculator.edn
-│   ├── ingredient_entry.edn
-│   └── ...
-```
+Forms are per-database, identified by `database_id` and `name`.
 
-The `_index.edn` file lists all forms to load:
-
-```clojure
-["recipe_calculator"
- "ingredient_entry"
- "inventory_list"]
-```
-
-Each form file contains a complete form definition:
-
-```clojure
-{:id 1
- :name "Recipe Calculator"
- :type :form
- :record-source "recipe"
- :default-view "single"
- :controls [...]}
-```
-
-When distributing the app, include the entire `forms/` directory.
+API endpoints:
+- `GET /api/forms` - List all current forms
+- `GET /api/forms/:name` - Get current version (returns EDN)
+- `PUT /api/forms/:name` - Save new version
+- `GET /api/forms/:name/versions` - List all versions
+- `POST /api/forms/:name/rollback/:version` - Rollback to a version
 
 ---
 
 ## Form Definition Structure
 
+Forms use section-based layout (header/detail/footer) matching Access conventions:
+
 ```clojure
-{:type :form
- :record-source "table_or_query_name"  ; Data source
- :default-view "single"                 ; single or continuous
- :controls [...]}                       ; Array of control definitions
+{:id 3
+ :name "List Of Carriers"
+ :type "form"
+ :record-source "carrier"
+ :default-view "Continuous Forms"    ; "Single Form" or "Continuous Forms"
+
+ :header {:height 56
+          :controls [{:type "label" :text "List of Carriers" :x 4 :y 4 :width 123 :height 20}]}
+
+ :detail {:height 20
+          :controls [{:type "text-box" :field "carrier" :x 0 :y 0 :width 140 :height 20}
+                     {:type "text-box" :field "grams_per_liter" :x 144 :y 0 :width 96 :height 20}]}
+
+ :footer {:height 24
+          :controls []}}
 ```
+
+**Legacy flat structure**: Older examples may show a flat `:controls [...]` array without sections.
+The current implementation uses sections exclusively.
 
 ### Two Form Types Only
 
@@ -226,28 +222,57 @@ Form with filter controls and results list:
 
 ---
 
+## CRITICAL: Type Handling (Keyword vs String)
+
+When forms are saved and reloaded through the `jsonToEdn` round-trip, **keyword values
+become strings**. For example:
+
+- Created in UI: `{:type :text-box}` (keyword value)
+- After save+reload: `{:type "text-box"}` (string value)
+
+The form renderer normalizes types to keywords before matching, so both work.
+**When writing code that checks control types, always handle both keywords and strings:**
+
+```clojure
+;; GOOD - handles both
+(case (keyword (str (:type ctrl)))
+  :text-box [...]
+  :label [...])
+
+;; GOOD - set check
+(when (#{:text-box "text-box"} (:type ctrl)) ...)
+
+;; BAD - only matches keyword, breaks after save+reload
+(case (:type ctrl)
+  :text-box [...])
+```
+
+This applies to any value that starts as a keyword in ClojureScript and goes through
+JSON serialization → `jsonToEdn` → EDN storage → `reader/read-string`.
+
 ## Control Binding
 
 ### Bound Controls
 
-Controls can be bound to database columns using either `:field` or `:control-source`:
+Controls bind to database columns using either `:control-source` or `:field`:
 
-- `:field` - Set automatically when dragging fields from the field list onto the form
 - `:control-source` - Set via the Property Sheet's Data tab (matches Access terminology)
+- `:field` - Set automatically when dragging fields from the field list onto the form
 
-Both work identically - the runtime checks for either property:
+The runtime checks `:control-source` first, then `:field`. Both are **case-insensitive**
+(normalized to lowercase) since PostgreSQL column names are case-insensitive.
 
-{:type :text-box
+{:type "text-box"
  :field "recipe_name"  ; Reads/writes recipe.recipe_name
  :x 20 :y 40 :width 200 :height 24}
 
 Or via Property Sheet:
 
-{:type :text-box
- :control-source "recipe_name"  ; Same effect
+{:type "text-box"
+ :control-source "recipe_name"  ; Same effect, takes priority over :field
  :x 20 :y 40 :width 200 :height 24}
 
-**Important**: The field name must match the actual database column name exactly.
+**Important**: Field names are matched case-insensitively against database columns.
 
 ### Unbound Controls
 

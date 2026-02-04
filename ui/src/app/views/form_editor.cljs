@@ -540,21 +540,25 @@
 (defn form-view-control
   "Render a single control in view mode"
   [ctrl current-record on-change & [{:keys [auto-focus?]}]]
-  (let [;; Check both :field (from drag-drop), :control-source (from Property Sheet), or :label as fallback
-        field (or (:field ctrl) (:control-source ctrl))
+  (let [;; Check both :control-source (from Property Sheet) or :field (from drag-drop)
+        raw-field (or (:control-source ctrl) (:field ctrl))
+        ;; Normalize to lowercase to match database column names
+        field (when raw-field (clojure.string/lower-case raw-field))
         ;; Try both keyword and string versions of field name
         value (when field
                 (or (get current-record (keyword field))
                     (get current-record field)
                     ""))
         ;; Auto-focus new records
-        is-new? (:__new__ current-record)]
+        is-new? (:__new__ current-record)
+        ;; Normalize type to keyword (jsonToEdn round-trip converts keywords to strings)
+        ctrl-type (keyword (clojure.string/replace (str (:type ctrl)) #"^:" ""))]
     [:div.view-control
      {:style {:left (:x ctrl)
               :top (:y ctrl)
               :width (:width ctrl)
               :height (:height ctrl)}}
-     (case (:type ctrl)
+     (case ctrl-type
        :label
        [:span.view-label (or (:text ctrl) (:label ctrl))]
 
@@ -613,9 +617,9 @@
   [idx record form-def selected? on-select on-field-change]
   (let [height (get-section-height form-def :detail)
         controls (get-section-controls form-def :detail)
-        ;; Find index of first text-box for auto-focus
+        ;; Find index of first text-box for auto-focus (handle both keyword and string types)
         first-textbox-idx (first (keep-indexed
-                                   (fn [i c] (when (= (:type c) :text-box) i))
+                                   (fn [i c] (when (#{:text-box "text-box"} (:type c)) i))
                                    controls))]
     [:div.view-section.detail.continuous-row
      {:class (when selected? "selected")

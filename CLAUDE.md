@@ -94,8 +94,12 @@ If a form's View mode shows no records but the table has data:
 4. Check X-Database-ID header is correct
 5. Try deleting and re-importing the form from Access
 
-**Unresolved (2026-02-03)**: List_of_Carriers form returns 0 records even though:
-- Table viewer shows 2 rows in carrier table
-- Record-source is correctly set to "carrier"
-- Other forms (List_of_Measurements, Ingredient_Entry) work fine
-- May need to delete form from shared.forms and re-import
+**Resolved (2026-02-04)**: List_of_Carriers form was not displaying data due to two issues:
+1. The `:field` property had "Carrier" (capital C) but the database column was "carrier" (lowercase).
+   Fix: field lookup is now case-insensitive (normalized to lowercase).
+2. The `:type` property was a string `"text-box"` after save+reload (jsonToEdn round-trip converts
+   keywords to strings), but the `case` statement matched only keywords `:text-box`.
+   Fix: `form-view-control` now normalizes type to keyword before the case statement.
+
+**IMPORTANT**: When checking control types in code, always handle both keywords and strings.
+See `skills/form-design.md` "CRITICAL: Type Handling" section for patterns.

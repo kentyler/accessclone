@@ -352,12 +352,17 @@
   "Lint the form and save if valid"
   []
   (let [current (get-in @app-state [:form-editor :current])
-        form-id (get-in @app-state [:form-editor :form-id])]
+        form-id (get-in @app-state [:form-editor :form-id])
+        ;; Get form name from objects list
+        form-obj (first (filter #(= (:id %) form-id)
+                                (get-in @app-state [:objects :forms])))
+        ;; Merge id and name back into form for lint validation
+        form-with-meta (merge {:id form-id :name (:name form-obj)} current)]
     (when (and form-id current)
       (clear-lint-errors!)
       (go
         (let [response (<! (http/post (str api-base "/api/lint/form")
-                                      {:json-params {:form current}}))]
+                                      {:json-params {:form form-with-meta}}))]
           (if (:success response)
             (let [result (:body response)]
               (if (:valid result)

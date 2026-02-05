@@ -55,10 +55,6 @@
    :width (:width ctrl)
    :height (:height ctrl)})
 
-(defn normalize-ctrl-type
-  "Normalize control type to keyword (handles both :text-box and \"text-box\")"
-  [ctrl]
-  (keyword (clojure.string/replace (str (:type ctrl)) #"^:" "")))
 
 (defn resolve-control-field
   "Get the bound field name from a control, normalized to lowercase.

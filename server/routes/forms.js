@@ -8,16 +8,20 @@ const express = require('express');
 const router = express.Router();
 
 /**
- * Extract record-source from EDN content
- * @param {string} edn - EDN content
+ * Extract record-source from JSON content string
+ * @param {string} json - JSON content
  * @returns {string|null} - record source or null
  */
-function extractRecordSource(edn) {
-  const match = edn.match(/:record-source\s+"([^"]+)"/);
-  return match ? match[1] : null;
+function extractRecordSource(json) {
+  try {
+    const obj = JSON.parse(json);
+    return obj['record-source'] || obj['record_source'] || null;
+  } catch (e) {
+    return null;
+  }
 }
 
-function createRouter(pool, { jsonToEdn }) {
+function createRouter(pool) {
   /**
    * GET /api/forms
    * List all current forms for current database
@@ -60,7 +64,7 @@ function createRouter(pool, { jsonToEdn }) {
         return res.status(404).json({ error: 'Form not found' });
       }
 
-      res.type('application/edn').send(result.rows[0].definition);
+      res.json(JSON.parse(result.rows[0].definition));
     } catch (err) {
       console.error('Error reading form:', err);
       res.status(500).json({ error: 'Failed to read form' });
@@ -110,7 +114,7 @@ function createRouter(pool, { jsonToEdn }) {
         return res.status(404).json({ error: 'Form version not found' });
       }
 
-      res.type('application/edn').send(result.rows[0].definition);
+      res.json(JSON.parse(result.rows[0].definition));
     } catch (err) {
       console.error('Error reading form version:', err);
       res.status(500).json({ error: 'Failed to read form version' });
@@ -130,7 +134,7 @@ function createRouter(pool, { jsonToEdn }) {
       if (typeof req.body === 'string') {
         content = req.body;
       } else {
-        content = jsonToEdn(req.body);
+        content = JSON.stringify(req.body);
       }
 
       const recordSource = extractRecordSource(content);

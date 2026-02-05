@@ -69,7 +69,7 @@
 (defn form-view-control
   "Render a single control in view mode"
   [ctrl current-record on-change & [{:keys [auto-focus?]}]]
-  (let [ctrl-type (fu/normalize-ctrl-type ctrl)
+  (let [ctrl-type (:type ctrl)
         field (fu/resolve-control-field ctrl)
         value (fu/resolve-field-value field current-record)
         is-new? (:__new__ current-record)
@@ -172,9 +172,8 @@
   [idx record form-def selected? on-select on-field-change & [{:keys [show-selectors?]}]]
   (let [height (fu/get-section-height form-def :detail)
         controls (fu/get-section-controls form-def :detail)
-        ;; Find index of first text-box for auto-focus (handle both keyword and string types)
         first-textbox-idx (first (keep-indexed
-                                   (fn [i c] (when (= (fu/normalize-ctrl-type c) :text-box) i))
+                                   (fn [i c] (when (= (:type c) :text-box) i))
                                    controls))]
     [:div.view-section.detail.continuous-row
      {:class (when selected? "selected")

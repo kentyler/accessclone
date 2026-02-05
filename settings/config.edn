@@ -1,8 +1,0 @@
-{;; Form Designer Settings
- :form-designer {:grid-size 8}    ; Grid spacing in pixels (Access default: 8)
-
- ;; Future settings can be added here:
- ;; :default-form-width 640
- ;; :default-form-height 480
- ;; :theme "light"
- }

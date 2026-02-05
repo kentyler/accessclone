@@ -124,50 +124,38 @@ async function populateFromSchemas(pool) {
 }
 
 /**
- * Parse EDN form content (simplified parser for form structure)
- * @param {string} ednContent
+ * Parse JSON form content to extract structure for graph population
+ * @param {string} jsonContent - JSON string of form definition
  * @returns {Object} - { name, record_source, controls: [...] }
  */
-function parseFormEdn(ednContent) {
+function parseFormContent(jsonContent) {
   const form = {
     name: null,
     record_source: null,
     controls: []
   };
 
-  // Extract form name
-  const nameMatch = ednContent.match(/:name\s+"([^"]+)"/);
-  if (nameMatch) form.name = nameMatch[1];
+  try {
+    const obj = typeof jsonContent === 'string' ? JSON.parse(jsonContent) : jsonContent;
 
-  // Extract record source
-  const rsMatch = ednContent.match(/:record-source\s+"([^"]+)"/);
-  if (rsMatch) form.record_source = rsMatch[1];
+    form.name = obj.name || null;
+    form.record_source = obj['record-source'] || obj['record_source'] || null;
 
-  // Extract controls with their bindings
-  // Look for control patterns with :name and :control-source or :field
-  const controlRegex = /\{[^}]*:type\s+:(\w+)[^}]*:name\s+"([^"]+)"[^}]*(?::control-source\s+"([^"]+)"|:field\s+"([^"]+)")?[^}]*\}/g;
-  let match;
-  while ((match = controlRegex.exec(ednContent)) !== null) {
-    const control = {
-      type: match[1],
-      name: match[2],
-      binding: match[3] || match[4] || null
-    };
-    form.controls.push(control);
-  }
-
-  // Also try alternate pattern where field comes before name
-  const altRegex = /\{[^}]*(?::control-source\s+"([^"]+)"|:field\s+"([^"]+)")[^}]*:name\s+"([^"]+)"[^}]*:type\s+:(\w+)[^}]*\}/g;
-  while ((match = altRegex.exec(ednContent)) !== null) {
-    const control = {
-      type: match[4],
-      name: match[3],
-      binding: match[1] || match[2] || null
-    };
-    // Avoid duplicates
-    if (!form.controls.find(c => c.name === control.name)) {
-      form.controls.push(control);
+    // Extract controls from header, detail, and footer sections
+    for (const section of ['header', 'detail', 'footer']) {
+      const controls = obj[section]?.controls;
+      if (Array.isArray(controls)) {
+        for (const ctrl of controls) {
+          form.controls.push({
+            type: ctrl.type || null,
+            name: ctrl.name || null,
+            binding: ctrl['control-source'] || ctrl['control_source'] || ctrl.field || null
+          });
+        }
+      }
     }
+  } catch (e) {
+    console.error('Error parsing form content:', e.message);
   }
 
   return form;
@@ -177,15 +165,15 @@ function parseFormEdn(ednContent) {
  * Populate graph from a form definition
  * @param {Pool} pool
  * @param {string} formName - Name of the form
- * @param {string} ednContent - EDN content of the form
+ * @param {string} content - JSON content of the form
  * @param {string} databaseId - Database ID the form belongs to
  * @returns {Promise<Object>} - { form: node, controls: number, edges: number }
  */
-async function populateFromForm(pool, formName, ednContent, databaseId) {
+async function populateFromForm(pool, formName, content, databaseId) {
   const stats = { form: null, controls: 0, edges: 0 };
 
   try {
-    const parsed = parseFormEdn(ednContent);
+    const parsed = parseFormContent(content);
 
     // Create form node
     const formNode = await upsertNode(pool, {
@@ -329,7 +317,7 @@ async function clearGraph(pool) {
 module.exports = {
   populateFromSchemas,
   populateFromForm,
-  parseFormEdn,
+  parseFormContent,
   proposeIntent,
   confirmIntentLink,
   clearGraph

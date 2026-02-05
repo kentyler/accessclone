@@ -11,7 +11,6 @@ const config = require('./config');
 
 // Load helpers
 const { logEvent, logError } = require('./lib/events');
-const helpers = require('./lib/helpers');
 
 // Load routes
 const databasesRoutes = require('./routes/databases');
@@ -96,7 +95,6 @@ try {
 
 app.use(cors());
 app.use(express.json());
-app.use(express.text({ type: 'application/edn' }));
 
 // Serve UI static files (CSS, JS)
 app.use(express.static(UI_PUBLIC_DIR));
@@ -150,8 +148,8 @@ app.use('/api/data', dataRoutes(pool));
 app.use('/api/session', sessionsRoutes(pool));
 app.use('/api/events', eventsRoutes(pool, logEvent));
 app.use('/api/chat', chatRoutes(pool, secrets));
-app.use('/api/forms', formsRoutes(pool, helpers));
-app.use('/api/config', configRoutes(SETTINGS_DIR, helpers));
+app.use('/api/forms', formsRoutes(pool));
+app.use('/api/config', configRoutes(SETTINGS_DIR));
 app.use('/api/lint', lintRoutes(pool, secrets));
 app.use('/api/graph', graphRoutes(pool));
 app.use('/api/access-import', accessImportRoutes(pool));

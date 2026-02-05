@@ -240,29 +240,15 @@ Form with filter controls and results list:
 
 ---
 
-## CRITICAL: Type Handling (Keyword vs String)
+## Type Handling
 
-When forms are saved and reloaded through the `jsonToEdn` round-trip, **keyword values
-become strings**. For example:
-
-- Created in UI: `{:type :text-box}` (keyword value)
-- After save+reload: `{:type "text-box"}` (string value)
-
-The form renderer normalizes types to keywords before matching, so both work.
-**When writing code that checks control types, always handle both keywords and strings:**
+`normalize-form-definition` in `state.cljs` coerces all control `:type` values to keywords
+on load (along with yes/no and number properties). Code can match keywords directly:
 
 ```clojure
-;; GOOD - handles both
-(case (keyword (str (:type ctrl)))
+(case (:type ctrl)
   :text-box [...]
   :label [...])
-
-;; GOOD - set check
-(when (#{:text-box "text-box"} (:type ctrl)) ...)
-
-;; BAD - only matches keyword, breaks after save+reload
-(case (:type ctrl)
-  :text-box [...])
 ```
 
 This applies to any value that starts as a keyword in ClojureScript and goes through

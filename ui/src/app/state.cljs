@@ -3,7 +3,6 @@
   (:require [reagent.core :as r]
             [cljs-http.client :as http]
             [cljs.core.async :refer [go <!]]
-            [cljs.reader :as reader]
             [clojure.string :as str]))
 
 (def api-base "http://localhost:3001")
@@ -20,7 +19,7 @@
            :current-database nil  ; {:database_id "calculator" :name "Recipe Calculator" ...}
            :loading-objects? false  ; true while loading tables/queries/functions
 
-           ;; App configuration (loaded from settings/config.edn)
+           ;; App configuration (loaded from settings/config.json)
            :config {:form-designer {:grid-size 8}}
 
            ;; UI state
@@ -381,7 +380,7 @@
       ;; Mark as clean
       (swap! app-state assoc-in [:form-editor :dirty?] false)
       (swap! app-state assoc-in [:form-editor :original] current)
-      ;; Save to EDN file
+      ;; Save to file
       (let [form (first (filter #(= (:id %) form-id)
                                 (get-in @app-state [:objects :forms])))]
         (save-form-to-file! form)))))
@@ -726,11 +725,7 @@
                                     {:headers (db-headers)}))]
         (if (:success response)
           (let [body (:body response)
-                ;; Parse EDN if string, otherwise use as-is (cljs-http may have parsed it)
-                form-data (if (string? body)
-                            (reader/read-string body)
-                            body)
-                definition (normalize-form-definition (dissoc form-data :id :name))]
+                definition (normalize-form-definition (dissoc body :id :name))]
             (println "Loaded form definition, keys:" (keys definition))
             (println "default-view:" (:default-view definition))
             ;; Update form in objects list with definition
@@ -856,7 +851,7 @@
 
 ;; Config file operations
 (defn load-config!
-  "Load app configuration from settings/config.edn"
+  "Load app configuration from settings/config.json"
   []
   (go
     (let [response (<! (http/get (str api-base "/api/config")))]
@@ -867,7 +862,7 @@
         (println "Could not load config - using defaults")))))
 
 (defn save-config!
-  "Save app configuration to settings/config.edn"
+  "Save app configuration to settings/config.json"
   []
   (go
     (let [config (:config @app-state)
@@ -911,7 +906,7 @@
         (println "Could not load forms from API")))))
 
 (defn save-form-to-file!
-  "Save a form to its EDN file via backend API"
+  "Save a form to the database via backend API"
   [form]
   (let [filename (or (:filename form)
                      (-> (:name form)
@@ -1126,7 +1121,7 @@
     ;; Load app configuration
     (load-config!)
 
-    ;; Load forms from EDN files
+    ;; Load forms from database
     (load-forms!)
 
-    (println "Application state initialized - loading from database and EDN files")))
+    (println "Application state initialized - loading from database")))

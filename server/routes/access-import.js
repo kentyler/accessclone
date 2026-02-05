@@ -258,9 +258,14 @@ module.exports = function(pool) {
         '-FormName', formName
       ]);
 
-      // Remove BOM if present, parse JSON
+      // Remove BOM if present, then extract JSON object from output
+      // (Write-Host output from PowerShell may precede the JSON)
       const cleanOutput = jsonOutput.replace(/^\uFEFF/, '').trim();
-      const formData = JSON.parse(cleanOutput);
+      const jsonStart = cleanOutput.indexOf('{');
+      if (jsonStart === -1) {
+        throw new Error('No JSON object found in PowerShell output');
+      }
+      const formData = JSON.parse(cleanOutput.substring(jsonStart));
 
       // Log success
       await logImport('success', null, { controls: formData.controls ? formData.controls.length : 0 });

@@ -34,7 +34,7 @@ This is PolyAccess (formerly CloneTemplate), a platform for converting MS Access
 - New records marked with `:__new__ true` to distinguish INSERT from UPDATE
 - Close button in forms calls `close-tab!` to close current tab
 - Popup Forms: `:popup 1` renders as floating window; `:modal 1` adds full-screen backdrop (z-index 900)
-- Yes/no properties (popup, modal, allow-additions, etc.) are normalized to 0/1 integers on load via `normalize-form-definition` in state.cljs — handles nil, booleans, and strings from imports
+- `normalize-form-definition` in state.cljs normalizes form data on load: coerces control `:type` to keyword, yes/no props to 0/1 integers (with defaults), and numeric props to numbers — across form-level and all sections
 
 ### Table Viewer (ui/src/app/views/table_viewer.cljs)
 - Datasheet View: Editable grid with inline cell editing
@@ -99,9 +99,7 @@ If a form's View mode shows no records but the table has data:
 **Resolved (2026-02-04)**: List_of_Carriers form was not displaying data due to two issues:
 1. The `:field` property had "Carrier" (capital C) but the database column was "carrier" (lowercase).
    Fix: field lookup is now case-insensitive (normalized to lowercase).
-2. The `:type` property was a string `"text-box"` after save+reload (jsonToEdn round-trip converts
+2. The `:type` property was a string `"text-box"` after save+reload (JSON round-trip converts
    keywords to strings), but the `case` statement matched only keywords `:text-box`.
-   Fix: `form-view-control` now normalizes type to keyword before the case statement.
-
-**IMPORTANT**: When checking control types in code, always handle both keywords and strings.
-See `skills/form-design.md` "CRITICAL: Type Handling" section for patterns.
+   Fix: `normalize-form-definition` in state.cljs now coerces all control `:type` values to keywords,
+   plus yes/no and number properties, on load. Code can safely match keywords directly.

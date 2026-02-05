@@ -2269,6 +2269,17 @@ body {
   background: var(--gray-100);
 }
 
+.popup-overlay.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 900;
+  padding-top: 4rem;
+}
+
 .popup-window {
   background: white;
   border: 1px solid var(--gray-400);

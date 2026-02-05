@@ -128,7 +128,8 @@
           (state/load-form-for-editing! form)))
       (let [current-def (get-in @state/app-state [:form-editor :current])
             popup? (and (= view-mode :view)
-                        (not= 0 (:popup current-def)))]
+                        (not= 0 (:popup current-def)))
+            modal? (and popup? (not= 0 (:modal current-def)))]
         [:div.form-editor
          [form-toolbar]
          [lint-errors-panel]
@@ -137,7 +138,8 @@
              ;; Popup view mode - floating window
              [:div.editor-body.view-mode
               [:div.popup-overlay
-               {:on-click #(state/hide-context-menu!)}
+               {:class (when modal? "modal")
+                :on-click #(state/hide-context-menu!)}
                [:div.popup-window
                 [:div.popup-title-bar
                  {:on-context-menu (fn [e]

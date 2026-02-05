@@ -221,8 +221,13 @@
                           (seq (fu/get-section-controls current :detail))
                           (seq (fu/get-section-controls current :footer)))]
     [:div.form-canvas.view-mode
-     {:on-click #(state/hide-form-context-menu!)}
+     {:on-click #(do (state/hide-form-context-menu!)
+                     (state/hide-context-menu!))}
      [:div.canvas-header
+      {:on-context-menu (fn [e]
+                          (.preventDefault e)
+                          (.stopPropagation e)
+                          (state/show-context-menu! (.-clientX e) (.-clientY e)))}
       [:span "Form View"]
       (when continuous? [:span.view-type-badge " (Continuous)"])
       (when (not record-source)
@@ -293,4 +298,42 @@
             :disabled (not record-dirty?)
             :on-click #(state/save-current-record!)}
            "Save"]])
-     [form-record-context-menu]]))
+     [form-record-context-menu]
+     ;; Canvas header context menu (Save/Close/View switching)
+     (let [ctx-menu (:context-menu @state/app-state)]
+       (when (:visible? ctx-menu)
+         [:div.context-menu
+          {:style {:left (:x ctx-menu) :top (:y ctx-menu)}}
+          [:div.context-menu-item
+           {:on-click (fn [e]
+                        (.stopPropagation e)
+                        (state/hide-context-menu!)
+                        (state/save-current-record!))}
+           "Save"]
+          [:div.context-menu-item
+           {:on-click (fn [e]
+                        (.stopPropagation e)
+                        (state/hide-context-menu!)
+                        (state/close-current-tab!))}
+           "Close"]
+          [:div.context-menu-item
+           {:on-click (fn [e]
+                        (.stopPropagation e)
+                        (state/hide-context-menu!)
+                        (state/close-all-tabs!))}
+           "Close All"]
+          [:div.context-menu-separator]
+          [:div.context-menu-item
+           {:class (when (= (state/get-view-mode) :view) "active")
+            :on-click (fn [e]
+                        (.stopPropagation e)
+                        (state/hide-context-menu!)
+                        (state/set-view-mode! :view))}
+           "Form View"]
+          [:div.context-menu-item
+           {:class (when (= (state/get-view-mode) :design) "active")
+            :on-click (fn [e]
+                        (.stopPropagation e)
+                        (state/hide-context-menu!)
+                        (state/set-view-mode! :design))}
+           "Design View"]]))]))

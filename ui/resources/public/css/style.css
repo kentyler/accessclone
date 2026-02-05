@@ -2257,3 +2257,59 @@ body {
 .code-display code {
   font-family: inherit;
 }
+
+/* Popup Forms */
+.popup-overlay {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 2rem;
+  background: var(--gray-100);
+}
+
+.popup-window {
+  background: white;
+  border: 1px solid var(--gray-400);
+  border-radius: 4px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  max-height: 80%;
+  min-width: 300px;
+  max-width: 90%;
+  overflow: hidden;
+}
+
+.popup-title-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--gray-700);
+  color: white;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  user-select: none;
+}
+
+.popup-close {
+  background: none;
+  border: none;
+  color: white;
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 0 0.25rem;
+  line-height: 1;
+}
+
+.popup-close:hover {
+  color: var(--error);
+}
+
+.popup-window .form-canvas {
+  border: none;
+  border-radius: 0;
+  min-height: auto;
+}

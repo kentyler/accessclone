@@ -71,6 +71,49 @@
         :on-click state/save-form!}
        "Save"]]]))
 
+(defn popup-context-menu
+  "Context menu for popup title bar and form view canvas header"
+  []
+  (let [ctx-menu (:context-menu @state/app-state)]
+    (when (:visible? ctx-menu)
+      [:div.context-menu
+       {:style {:left (:x ctx-menu) :top (:y ctx-menu)}}
+       [:div.context-menu-item
+        {:on-click (fn [e]
+                     (.stopPropagation e)
+                     (state/hide-context-menu!)
+                     (if (= (state/get-view-mode) :view)
+                       (state/save-current-record!)
+                       (state/save-form!)))}
+        "Save"]
+       [:div.context-menu-item
+        {:on-click (fn [e]
+                     (.stopPropagation e)
+                     (state/hide-context-menu!)
+                     (state/close-current-tab!))}
+        "Close"]
+       [:div.context-menu-item
+        {:on-click (fn [e]
+                     (.stopPropagation e)
+                     (state/hide-context-menu!)
+                     (state/close-all-tabs!))}
+        "Close All"]
+       [:div.context-menu-separator]
+       [:div.context-menu-item
+        {:class (when (= (state/get-view-mode) :view) "active")
+         :on-click (fn [e]
+                     (.stopPropagation e)
+                     (state/hide-context-menu!)
+                     (state/set-view-mode! :view))}
+        "Form View"]
+       [:div.context-menu-item
+        {:class (when (= (state/get-view-mode) :design) "active")
+         :on-click (fn [e]
+                     (.stopPropagation e)
+                     (state/hide-context-menu!)
+                     (state/set-view-mode! :design))}
+        "Design View"]])))
+
 (defn form-editor
   "Main form editor component"
   []
@@ -83,21 +126,39 @@
                                 (get-in @state/app-state [:objects :forms])))]
         (when (and form (not= (:id form) editing-form-id))
           (state/load-form-for-editing! form)))
-      [:div.form-editor
-       [form-toolbar]
-       [lint-errors-panel]
-       (if (= view-mode :view)
-         ;; View mode - just the form, no panels
-         [:div.editor-body.view-mode
-          [:div.editor-center
-           [form-view/form-view]]]
-         ;; Design mode - form with properties and field panels
-         [:div.editor-body
-          [:div.editor-center
-           [form-design/form-canvas]]
-          [:div.editor-right
-           [form-properties/properties-panel]
-           [form-design/field-list]]])])))
+      (let [current-def (get-in @state/app-state [:form-editor :current])
+            popup? (and (= view-mode :view)
+                        (not= 0 (:popup current-def)))]
+        [:div.form-editor
+         [form-toolbar]
+         [lint-errors-panel]
+         (if (= view-mode :view)
+           (if popup?
+             ;; Popup view mode - floating window
+             [:div.editor-body.view-mode
+              [:div.popup-overlay
+               {:on-click #(state/hide-context-menu!)}
+               [:div.popup-window
+                [:div.popup-title-bar
+                 {:on-context-menu (fn [e]
+                                     (.preventDefault e)
+                                     (.stopPropagation e)
+                                     (state/show-context-menu! (.-clientX e) (.-clientY e)))}
+                 [:span.popup-title (or (:caption current-def) (:name current-def) "Form")]
+                 [:button.popup-close {:on-click #(state/close-current-tab!)} "\u2715"]]
+                [form-view/form-view]]
+               [popup-context-menu]]]
+             ;; Inline view mode
+             [:div.editor-body.view-mode
+              [:div.editor-center
+               [form-view/form-view]]])
+           ;; Design mode - form with properties and field panels
+           [:div.editor-body
+            [:div.editor-center
+             [form-design/form-canvas]]
+            [:div.editor-right
+             [form-properties/properties-panel]
+             [form-design/field-list]]])]))))
 
 (defn object-editor
   "Routes to the appropriate editor based on active tab type"

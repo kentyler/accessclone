@@ -1,7 +1,8 @@
 (ns app.views.query-viewer
   "Query viewer - results and SQL views"
   (:require [reagent.core :as r]
-            [app.state :as state]))
+            [app.state :as state]
+            [app.state-query :as state-query]))
 
 ;; ============================================================
 ;; RESULTS VIEW - Datasheet showing query output
@@ -90,13 +91,13 @@
       [:textarea.sql-editor
        {:value sql
         :placeholder (str "SELECT * FROM " (:name query-info))
-        :on-change #(state/update-query-sql! (.. % -target -value))
+        :on-change #(state-query/update-query-sql! (.. % -target -value))
         :on-key-down (fn [e]
                        ;; Ctrl+Enter or Cmd+Enter to run
                        (when (and (= (.-key e) "Enter")
                                   (or (.-ctrlKey e) (.-metaKey e)))
                          (.preventDefault e)
-                         (state/run-query!)))}]]
+                         (state-query/run-query!)))}]]
 
      (when error
        [:div.query-error
@@ -105,7 +106,7 @@
 
      [:div.sql-toolbar
       [:button.primary-btn
-       {:on-click #(state/run-query!)
+       {:on-click #(state-query/run-query!)
         :disabled loading?}
        (if loading? "Running..." "Run Query")]
       [:span.hint "Ctrl+Enter to run"]]]))
@@ -124,16 +125,16 @@
       [:button.toolbar-btn
        {:class (when (= view-mode :results) "active")
         :title "Results View"
-        :on-click #(state/set-query-view-mode! :results)}
+        :on-click #(state-query/set-query-view-mode! :results)}
        "Results"]
       [:button.toolbar-btn
        {:class (when (= view-mode :sql) "active")
         :title "SQL View"
-        :on-click #(state/set-query-view-mode! :sql)}
+        :on-click #(state-query/set-query-view-mode! :sql)}
        "SQL"]]
      [:div.toolbar-right
       [:button.secondary-btn
-       {:on-click #(state/run-query!)
+       {:on-click #(state-query/run-query!)
         :disabled loading?}
        "Run"]]]))
 
@@ -152,7 +153,7 @@
       (let [query (first (filter #(= (:id %) (:id active-tab))
                                  (get-in @state/app-state [:objects :queries])))]
         (when (and query (not= (:id query) current-query-id))
-          (state/load-query-for-viewing! query)))
+          (state-query/load-query-for-viewing! query)))
       [:div.query-viewer
        [query-toolbar]
        (case view-mode

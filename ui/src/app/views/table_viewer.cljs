@@ -1,7 +1,8 @@
 (ns app.views.table-viewer
   "Table viewer - datasheet and design views"
   (:require [reagent.core :as r]
-            [app.state :as state]))
+            [app.state :as state]
+            [app.state-table :as state-table]))
 
 ;; ============================================================
 ;; DESIGN VIEW - Show table structure (columns, types, constraints)
@@ -65,29 +66,29 @@
     (when (:visible menu)
       [:div.context-menu
        {:style {:left (:x menu) :top (:y menu)}
-        :on-mouse-leave #(state/hide-table-context-menu!)}
+        :on-mouse-leave #(state-table/hide-table-context-menu!)}
        [:div.menu-item
-        {:on-click #(do (state/new-table-record!)
-                        (state/hide-table-context-menu!))}
+        {:on-click #(do (state-table/new-table-record!)
+                        (state-table/hide-table-context-menu!))}
         "New Record"]
        [:div.menu-divider]
        [:div.menu-item
-        {:on-click #(do (state/cut-table-cell!)
-                        (state/hide-table-context-menu!))}
+        {:on-click #(do (state-table/cut-table-cell!)
+                        (state-table/hide-table-context-menu!))}
         "Cut"]
        [:div.menu-item
-        {:on-click #(do (state/copy-table-cell!)
-                        (state/hide-table-context-menu!))}
+        {:on-click #(do (state-table/copy-table-cell!)
+                        (state-table/hide-table-context-menu!))}
         "Copy"]
        [:div.menu-item
-        {:on-click #(do (state/paste-table-cell!)
-                        (state/hide-table-context-menu!))}
+        {:on-click #(do (state-table/paste-table-cell!)
+                        (state-table/hide-table-context-menu!))}
         "Paste"]
        [:div.menu-divider]
        [:div.menu-item.danger
         {:on-click #(do (when (js/confirm "Delete this record?")
-                          (state/delete-table-record!))
-                        (state/hide-table-context-menu!))}
+                          (state-table/delete-table-record!))
+                        (state-table/hide-table-context-menu!))}
         "Delete Record"]])))
 
 ;; ============================================================
@@ -122,30 +123,30 @@
              :default-value (if (nil? value) "" (str value))
              :on-blur (fn [e]
                         (let [new-value (.. e -target -value)]
-                          (state/save-table-cell! new-value)
-                          (state/stop-editing-cell!)))
+                          (state-table/save-table-cell! new-value)
+                          (state-table/stop-editing-cell!)))
              :on-key-down (fn [e]
                             (case (.-key e)
                               "Enter" (do
                                         (let [new-value (.. e -target -value)]
-                                          (state/save-table-cell! new-value))
-                                        (state/stop-editing-cell!))
-                              "Escape" (state/stop-editing-cell!)
+                                          (state-table/save-table-cell! new-value))
+                                        (state-table/stop-editing-cell!))
+                              "Escape" (state-table/stop-editing-cell!)
                               "Tab" (do
                                       (.preventDefault e)
                                       (let [new-value (.. e -target -value)]
-                                        (state/save-table-cell! new-value))
-                                      (state/stop-editing-cell!)
-                                      (state/move-to-next-cell! (.-shiftKey e)))
+                                        (state-table/save-table-cell! new-value))
+                                      (state-table/stop-editing-cell!)
+                                      (state-table/move-to-next-cell! (.-shiftKey e)))
                               nil))}]]
           [:td {:class (str (when (nil? value) "null-value ")
                             (when is-selected "selected"))
-                :on-click #(state/select-table-cell! row-idx col-name)
-                :on-double-click #(state/start-editing-cell! row-idx col-name)
+                :on-click #(state-table/select-table-cell! row-idx col-name)
+                :on-double-click #(state-table/start-editing-cell! row-idx col-name)
                 :on-context-menu (fn [e]
                                    (.preventDefault e)
-                                   (state/select-table-cell! row-idx col-name)
-                                   (state/show-table-context-menu! (.-clientX e) (.-clientY e)))}
+                                   (state-table/select-table-cell! row-idx col-name)
+                                   (state-table/show-table-context-menu! (.-clientX e) (.-clientY e)))}
            display-value])))))
 
 (defn data-row
@@ -157,8 +158,8 @@
      [:td.row-number
       {:on-context-menu (fn [e]
                           (.preventDefault e)
-                          (state/select-table-row! row-idx)
-                          (state/show-table-context-menu! (.-clientX e) (.-clientY e)))}
+                          (state-table/select-table-row! row-idx)
+                          (state-table/show-table-context-menu! (.-clientX e) (.-clientY e)))}
       (inc row-idx)]
      (for [{:keys [name type]} fields]
        ^{:key name}
@@ -173,7 +174,7 @@
         loading? (get-in @state/app-state [:table-viewer :loading?])]
     [:div.table-datasheet-view
      {:on-click #(when (= (.-target %) (.-currentTarget %))
-                   (state/hide-table-context-menu!))}
+                   (state-table/hide-table-context-menu!))}
      (cond
        loading?
        [:div.loading-data "Loading data..."]
@@ -220,20 +221,20 @@
       [:button.toolbar-btn
        {:class (when (= view-mode :design) "active")
         :title "Design View"
-        :on-click #(state/set-table-view-mode! :design)}
+        :on-click #(state-table/set-table-view-mode! :design)}
        "Design"]
       [:button.toolbar-btn
        {:class (when (= view-mode :datasheet) "active")
         :title "Datasheet View"
-        :on-click #(state/set-table-view-mode! :datasheet)}
+        :on-click #(state-table/set-table-view-mode! :datasheet)}
        "Datasheet"]]
      [:div.toolbar-right
       (when (= view-mode :datasheet)
         [:button.primary-btn
-         {:on-click #(state/new-table-record!)}
+         {:on-click #(state-table/new-table-record!)}
          "+ New"])
       [:button.secondary-btn
-       {:on-click #(state/refresh-table-data!)}
+       {:on-click #(state-table/refresh-table-data!)}
        "Refresh"]]]))
 
 ;; ============================================================
@@ -251,7 +252,7 @@
       (let [table (first (filter #(= (:id %) (:id active-tab))
                                  (get-in @state/app-state [:objects :tables])))]
         (when (and table (not= (:id table) current-table-id))
-          (state/load-table-for-viewing! table)))
+          (state-table/load-table-for-viewing! table)))
       [:div.table-viewer
        [table-toolbar]
        (case view-mode

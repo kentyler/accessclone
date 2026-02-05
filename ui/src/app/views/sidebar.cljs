@@ -1,7 +1,8 @@
 (ns app.views.sidebar
   "Access-style collapsible sidebar with object navigation"
   (:require [reagent.core :as r]
-            [app.state :as state]))
+            [app.state :as state]
+            [app.views.access-database-viewer :as access-db-viewer]))
 
 ;; Object types available in the dropdown (like Access navigation pane)
 (def object-types
@@ -58,6 +59,34 @@
           (and (= (:type active-tab) object-type)
                (= (:id active-tab) id))]))]))
 
+(defn format-file-size [bytes]
+  (cond
+    (nil? bytes) ""
+    (< bytes 1024) (str bytes " B")
+    (< bytes (* 1024 1024)) (str (.toFixed (/ bytes 1024) 1) " KB")
+    :else (str (.toFixed (/ bytes (* 1024 1024)) 1) " MB")))
+
+(defn access-database-list
+  "List of Access database files found by scanning"
+  []
+  (let [databases (get-in @state/app-state [:objects :access_databases] [])
+        selected-path (:loaded-path @access-db-viewer/viewer-state)]
+    [:div
+     [:div.scan-button-row
+      [:button.scan-btn
+       {:on-click #(state/load-access-databases!)}
+       "Scan"]]
+     [:ul.object-list
+      (if (empty? databases)
+        [:li.empty-list "No databases found. Click Scan."]
+        (for [db databases]
+          ^{:key (:path db)}
+          [:li.object-item
+           {:class (when (= (:path db) selected-path) "active")
+            :on-click #(access-db-viewer/load-access-database-contents! (:path db))}
+           [:span.object-name (:name db)]
+           [:span.access-db-detail (format-file-size (:size db))]]))]]))
+
 (defn collapse-toggle
   "Button to collapse/expand the sidebar"
   []
@@ -70,15 +99,20 @@
 (defn sidebar
   "Main sidebar component"
   []
-  (let [collapsed? (:sidebar-collapsed? @state/app-state)]
+  (let [collapsed? (:sidebar-collapsed? @state/app-state)
+        import-mode? (= (:app-mode @state/app-state) :import)]
     [:aside.sidebar {:class (when collapsed? "collapsed")}
      [:div.sidebar-header
       [collapse-toggle]
       (when-not collapsed?
-        [:span.sidebar-title "Objects"])]
+        [:span.sidebar-title (if import-mode? "Access Databases" "Objects")])]
      (when-not collapsed?
-       [:<>
-        [object-type-selector]
-        [new-object-button]
-        [:div.object-list-container
-         [object-list]]])]))
+       (if import-mode?
+         [:<>
+          [:div.object-list-container
+           [access-database-list]]]
+         [:<>
+          [object-type-selector]
+          [new-object-button]
+          [:div.object-list-container
+           [object-list]]]))]))

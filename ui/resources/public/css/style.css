@@ -2324,3 +2324,367 @@ body {
   border-radius: 0;
   min-height: auto;
 }
+
+/* ============================================================
+   Mode Toggle (Import / Run)
+   ============================================================ */
+.mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: 1rem;
+  background: var(--gray-100);
+  border-radius: 4px;
+  padding: 2px;
+}
+
+.mode-option {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.625rem;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  border-radius: 3px;
+  color: var(--gray-500);
+  transition: all 0.15s;
+  user-select: none;
+}
+
+.mode-option input[type="radio"] {
+  display: none;
+}
+
+.mode-option.active {
+  background: white;
+  color: var(--gray-900);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+/* ============================================================
+   Access Database Import UI
+   ============================================================ */
+.scan-button-row {
+  padding: 0.5rem;
+}
+
+.scan-btn {
+  width: 100%;
+  padding: 0.375rem 0.75rem;
+  background: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.scan-btn:hover {
+  background: var(--primary-hover);
+}
+
+.access-db-detail {
+  font-size: 0.75rem;
+  color: var(--gray-500);
+  margin-left: auto;
+}
+
+/* Access Database Viewer */
+.access-database-viewer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: auto;
+}
+
+.access-database-viewer .welcome-panel {
+  padding: 2rem;
+}
+
+.viewer-header {
+  padding: 1rem;
+  border-bottom: 1px solid var(--gray-200);
+  background: white;
+}
+
+.viewer-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.viewer-header h2 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.target-db-selector {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.target-db-selector select {
+  padding: 0.375rem 0.75rem;
+  border: 1px solid var(--gray-300);
+  border-radius: 4px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  background: white;
+}
+
+.viewer-header .db-path {
+  font-size: 0.75rem;
+  color: var(--gray-500);
+  font-family: monospace;
+}
+
+.viewer-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.viewer-main {
+  flex: 1;
+  padding: 1rem;
+  overflow: auto;
+}
+
+.viewer-sidebar {
+  width: 300px;
+  border-left: 1px solid var(--gray-200);
+  overflow: auto;
+}
+
+/* Access Object Type Selector */
+.access-object-type-selector {
+  margin-bottom: 0.75rem;
+}
+
+.access-object-type-selector select {
+  padding: 0.375rem 0.75rem;
+  border: 1px solid var(--gray-200);
+  border-radius: 4px;
+  font-size: 0.875rem;
+}
+
+/* Access Toolbar */
+.access-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.selection-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.selection-count {
+  font-size: 0.8125rem;
+  color: var(--gray-500);
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--primary);
+  cursor: pointer;
+  font-size: 0.8125rem;
+  padding: 0;
+}
+
+.btn-link:hover {
+  text-decoration: underline;
+}
+
+.import-actions {
+  display: flex;
+  align-items: center;
+}
+
+.import-to {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.import-to select {
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--gray-200);
+  border-radius: 4px;
+  font-size: 0.8125rem;
+}
+
+.btn-primary {
+  padding: 0.375rem 0.75rem;
+  background: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.btn-primary:hover {
+  background: var(--primary-hover);
+}
+
+/* Import List */
+.import-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.import-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  border-bottom: 1px solid var(--gray-100);
+}
+
+.import-item:hover {
+  background: var(--gray-50);
+}
+
+.import-item.selected {
+  background: #eff6ff;
+}
+
+.import-item input[type="checkbox"] {
+  flex-shrink: 0;
+}
+
+.import-item .item-name {
+  flex: 1;
+  font-size: 0.875rem;
+}
+
+.import-item .item-detail {
+  font-size: 0.75rem;
+  color: var(--gray-500);
+}
+
+.import-item.imported {
+  opacity: 0.7;
+}
+
+.imported-badge {
+  font-size: 0.6875rem;
+  color: var(--success);
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  padding: 0 5px;
+  border-radius: 3px;
+  margin-left: 0.5rem;
+  flex-shrink: 0;
+}
+
+/* Import Log Panel */
+.import-log-panel {
+  padding: 0.75rem;
+}
+
+.log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.log-header h4 {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.importing-indicator {
+  font-size: 0.75rem;
+  color: var(--primary);
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.log-entries {
+  max-height: 400px;
+  overflow: auto;
+}
+
+.log-empty {
+  font-size: 0.8125rem;
+  color: var(--gray-500);
+  padding: 1rem 0;
+}
+
+.log-entry {
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--gray-100);
+  font-size: 0.8125rem;
+}
+
+.log-entry.success {
+  border-left: 3px solid var(--success);
+}
+
+.log-entry.error {
+  border-left: 3px solid var(--error);
+}
+
+.log-entry-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.log-object-type {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  color: var(--gray-500);
+  background: var(--gray-100);
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+.log-object-name {
+  font-weight: 500;
+}
+
+.log-status {
+  margin-left: auto;
+  font-size: 0.75rem;
+}
+
+.log-status.success { color: var(--success); }
+.log-status.error { color: var(--error); }
+
+.log-entry-details {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--gray-500);
+}
+
+.log-error {
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--error);
+}

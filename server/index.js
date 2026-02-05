@@ -24,6 +24,7 @@ const formsRoutes = require('./routes/forms');
 const configRoutes = require('./routes/config');
 const lintRoutes = require('./routes/lint');
 const graphRoutes = require('./routes/graph');
+const accessImportRoutes = require('./routes/access-import');
 
 // Load graph modules
 const { initializeGraph } = require('./graph/schema');
@@ -108,8 +109,9 @@ app.use(express.static(UI_PUBLIC_DIR));
  * Middleware to set search_path based on X-Database-ID header
  */
 app.use('/api', async (req, res, next) => {
-  // Skip for /api/databases endpoint (needs to query shared schema)
-  if (req.path === '/databases' || req.path.startsWith('/databases')) {
+  // Skip for endpoints that query shared schema or don't need database context
+  if (req.path === '/databases' || req.path.startsWith('/databases') ||
+      req.path.startsWith('/access-import')) {
     return next();
   }
 
@@ -152,6 +154,7 @@ app.use('/api/forms', formsRoutes(pool, helpers));
 app.use('/api/config', configRoutes(SETTINGS_DIR, helpers));
 app.use('/api/lint', lintRoutes(pool, secrets));
 app.use('/api/graph', graphRoutes(pool));
+app.use('/api/access-import', accessImportRoutes(pool));
 
 // ============================================================
 // START SERVER

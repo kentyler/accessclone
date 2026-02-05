@@ -5,7 +5,8 @@
             [app.state :as state]
             [app.views.sidebar :as sidebar]
             [app.views.tabs :as tabs]
-            [app.views.form-editor :as form-editor]))
+            [app.views.form-editor :as form-editor]
+            [app.views.access-database-viewer :as access-db-viewer]))
 
 (defn options-dialog
   "Tools > Options dialog for app configuration"
@@ -67,10 +68,32 @@
      (when loading?
        [:span.loading-indicator "Loading..."])]))
 
+(defn mode-toggle
+  "Radio buttons to switch between Import and Run modes"
+  []
+  (let [mode (:app-mode @state/app-state)]
+    [:div.mode-toggle
+     [:label.mode-option
+      {:class (when (= mode :import) "active")}
+      [:input {:type "radio"
+               :name "app-mode"
+               :checked (= mode :import)
+               :on-change #(do (state/set-app-mode! :import)
+                               (state/load-access-databases!))}]
+      "Import"]
+     [:label.mode-option
+      {:class (when (= mode :run) "active")}
+      [:input {:type "radio"
+               :name "app-mode"
+               :checked (= mode :run)
+               :on-change #(state/set-app-mode! :run)}]
+      "Run"]]))
+
 (defn header []
   [:header.header
    [:div.header-content
     [database-selector]
+    [mode-toggle]
     [:nav.header-nav
      [:div.menu-bar
       [:div.menu-item
@@ -101,12 +124,16 @@
      "Create New Form"]]])
 
 (defn main-area []
-  [:div.main-area
-   [tabs/tab-bar]
-   [:div.editor-container
-    (if (:active-tab @state/app-state)
-      [form-editor/object-editor]
-      [welcome-panel])]])
+  (let [mode (:app-mode @state/app-state)]
+    (if (= mode :import)
+      [:div.main-area
+       [access-db-viewer/access-database-viewer]]
+      [:div.main-area
+       [tabs/tab-bar]
+       [:div.editor-container
+        (if (:active-tab @state/app-state)
+          [form-editor/object-editor]
+          [welcome-panel])]])))
 
 (defn chat-message [{:keys [role content]}]
   [:div.chat-message {:class role}

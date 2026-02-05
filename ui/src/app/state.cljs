@@ -9,8 +9,8 @@
 (def api-base "http://localhost:3001")
 
 ;; Forward declarations for functions used before definition
-(declare load-tables! load-queries! load-functions! save-ui-state!
-         save-current-record! save-form! save-form-to-file!
+(declare load-tables! load-queries! load-functions! load-access-databases!
+         save-ui-state! save-current-record! save-form! save-form-to-file!
          get-record-source-fields delete-current-record!)
 
 ;; Application state atom
@@ -27,6 +27,7 @@
            :loading? false
            :error nil
            :options-dialog-open? false
+           :app-mode :run  ; :run or :import
 
            ;; Sidebar state
            :sidebar-collapsed? false
@@ -205,6 +206,10 @@
 
 (defn set-sidebar-object-type! [object-type]
   (swap! app-state assoc :sidebar-object-type object-type))
+
+;; App mode (Import / Run)
+(defn set-app-mode! [mode]
+  (swap! app-state assoc :app-mode mode))
 
 ;; Objects
 (defn set-objects! [object-type objects]
@@ -611,6 +616,22 @@
   {:popup 0 :modal 0 :allow-additions 1 :allow-deletions 1 :allow-edits 1
    :navigation-buttons 1 :record-selectors 1 :dividing-lines 1 :data-entry 0})
 
+(def ^:private yes-no-control-props
+  "Control properties that use yes/no (1/0) values."
+  [:visible :enabled :locked :tab-stop])
+
+(def ^:private yes-no-control-defaults
+  "Default values for yes/no control properties."
+  {:visible 1 :enabled 1 :locked 0 :tab-stop 1})
+
+(def ^:private number-form-props
+  "Form properties that should be numbers."
+  [:width])
+
+(def ^:private number-control-props
+  "Control properties that should be numbers."
+  [:width :height :x :y :font-size :tab-index])
+
 (defn- coerce-yes-no
   "Coerce any truthy/falsy value to 1 or 0."
   [v]
@@ -621,15 +642,65 @@
     (string? v)          (if (#{"true" "yes" "1"} (.toLowerCase v)) 1 0)
     :else                1))
 
+(defn- coerce-to-number
+  "Coerce a value to number. nil->nil, number->number, string->parseFloat, else->nil."
+  [v]
+  (cond
+    (nil? v)    nil
+    (number? v) v
+    (string? v) (let [n (js/parseFloat v)]
+                  (when-not (js/isNaN n) n))
+    :else       nil))
+
+(defn- coerce-to-keyword
+  "Coerce a value to keyword. nil->nil, keyword->keyword, string->keyword, else->passthrough."
+  [v]
+  (cond
+    (nil? v)     nil
+    (keyword? v) v
+    (string? v)  (keyword (clojure.string/replace v #"^:" ""))
+    :else        v))
+
+(defn- normalize-control
+  "Normalize a single control: keywordize :type, coerce yes/no and number props."
+  [ctrl]
+  (-> (reduce (fn [c prop]
+                (let [v (get c prop)]
+                  (if (nil? v)
+                    (assoc c prop (get yes-no-control-defaults prop 0))
+                    (assoc c prop (coerce-yes-no v)))))
+              (update ctrl :type coerce-to-keyword)
+              yes-no-control-props)
+      (#(reduce (fn [c prop]
+                  (if (contains? c prop)
+                    (assoc c prop (coerce-to-number (get c prop)))
+                    c))
+                % number-control-props))))
+
+(defn- normalize-section
+  "Normalize all controls in a form section (header/detail/footer)."
+  [section]
+  (if (:controls section)
+    (update section :controls #(mapv normalize-control %))
+    section))
+
 (defn- normalize-form-definition [definition]
-  "Apply defaults and normalize yes/no properties to 0/1 integers."
-  (reduce (fn [def prop]
-            (let [v (get def prop)]
-              (if (nil? v)
-                (assoc def prop (get yes-no-defaults prop 0))
-                (assoc def prop (coerce-yes-no v)))))
-          definition
-          yes-no-form-props))
+  "Apply defaults and normalize types across the full form tree."
+  (-> (reduce (fn [def prop]
+                (let [v (get def prop)]
+                  (if (nil? v)
+                    (assoc def prop (get yes-no-defaults prop 0))
+                    (assoc def prop (coerce-yes-no v)))))
+              definition
+              yes-no-form-props)
+      (#(reduce (fn [d prop]
+                  (if (contains? d prop)
+                    (assoc d prop (coerce-to-number (get d prop)))
+                    d))
+                % number-form-props))
+      (update :header normalize-section)
+      (update :detail normalize-section)
+      (update :footer normalize-section)))
 
 (defn load-form-for-editing! [form]
   ;; Auto-save dirty record before switching forms
@@ -953,6 +1024,20 @@
           (println "Error loading functions:" (:body response))
           (log-error! "Failed to load functions from database" "load-functions" {:response (:body response)})
           (object-load-complete!))))))
+
+;; Load Access databases (scan for .accdb files)
+(defn load-access-databases!
+  "Scan for Access database files on disk"
+  []
+  (go
+    (let [response (<! (http/get (str api-base "/api/access-import/scan")))]
+      (if (:success response)
+        (let [databases (get-in response [:body :databases] [])]
+          (swap! app-state assoc-in [:objects :access_databases] databases)
+          (println "Found" (count databases) "Access databases"))
+        (do
+          (println "Error scanning for Access databases:" (:body response))
+          (log-error! "Failed to scan for Access databases" "load-access-databases"))))))
 
 ;; Chat panel
 (defn toggle-chat-panel! []

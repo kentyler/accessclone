@@ -94,6 +94,21 @@ CREATE TABLE IF NOT EXISTS shared.reports (
 
 CREATE INDEX IF NOT EXISTS idx_reports_database ON shared.reports(database_id);
 CREATE INDEX IF NOT EXISTS idx_reports_current ON shared.reports(database_id, name) WHERE is_current = true;
+
+-- ============================================================
+-- Import Log - tracks Access database import operations
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.import_log (
+    id SERIAL PRIMARY KEY,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    source_path TEXT,
+    source_object_name TEXT,
+    source_object_type TEXT,
+    target_database_id TEXT,
+    status TEXT,
+    error_message TEXT,
+    details JSONB
+);
 `;
 
 /**

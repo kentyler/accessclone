@@ -61,6 +61,24 @@ Forms use section-based layout (header/detail/footer) matching Access convention
 **Legacy flat structure**: Older examples may show a flat `:controls [...]` array without sections.
 The current implementation uses sections exclusively.
 
+### Popup and Modal Forms
+
+Forms can render as floating popup windows with an optional modal backdrop:
+
+- `:popup 1` — Form renders as a floating window (title bar + close button) instead of inline
+- `:modal 1` — Adds a semi-transparent dark backdrop (`z-index: 900`) that blocks interaction with the rest of the app (sidebar, tabs, toolbar). Only meaningful when `:popup 1` is also set.
+
+Set these in Design View → Property Sheet → Other tab.
+
+```clojure
+{:type "form"
+ :record-source "settings"
+ :popup 1    ; Floating window
+ :modal 1    ; Blocks background interaction
+ :caption "Settings"
+ :controls [...]}
+```
+
 ### Two Form Types Only
 
 | Type | Purpose | Data Loading |
@@ -249,6 +267,26 @@ The form renderer normalizes types to keywords before matching, so both work.
 
 This applies to any value that starts as a keyword in ClojureScript and goes through
 JSON serialization → `jsonToEdn` → EDN storage → `reader/read-string`.
+
+### Yes/No Property Normalization
+
+Yes/no form properties (`:popup`, `:modal`, `:allow-additions`, `:allow-deletions`,
+`:allow-edits`, `:navigation-buttons`, `:record-selectors`, `:dividing-lines`, `:data-entry`)
+can arrive as booleans (`true`/`false`), strings (`"true"`/`"false"`), integers (`1`/`0`),
+or `nil` depending on whether the form was imported from Access or saved through the UI.
+
+`normalize-form-definition` in `state.cljs` coerces all of these to `0` or `1` on load.
+Defaults match Access conventions (e.g., `allow-additions` defaults to `1`, `popup` defaults to `0`).
+
+**When writing code that checks yes/no properties, assume integer 0/1 values:**
+
+```clojure
+;; GOOD - normalized values are always 0 or 1
+(when (not= 0 (:popup current-def)) ...)
+
+;; BAD - checking for truthy/falsy, may break with 0 vs nil
+(when (:popup current-def) ...)
+```
 
 ## Control Binding
 

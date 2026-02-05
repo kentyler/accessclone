@@ -33,6 +33,8 @@ This is PolyAccess (formerly CloneTemplate), a platform for converting MS Access
 - Continuous Forms: `:default-view "Continuous Forms"` renders header once, detail per record, footer once
 - New records marked with `:__new__ true` to distinguish INSERT from UPDATE
 - Close button in forms calls `close-tab!` to close current tab
+- Popup Forms: `:popup 1` renders as floating window; `:modal 1` adds full-screen backdrop (z-index 900)
+- Yes/no properties (popup, modal, allow-additions, etc.) are normalized to 0/1 integers on load via `normalize-form-definition` in state.cljs — handles nil, booleans, and strings from imports
 
 ### Table Viewer (ui/src/app/views/table_viewer.cljs)
 - Datasheet View: Editable grid with inline cell editing

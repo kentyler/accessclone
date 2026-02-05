@@ -224,7 +224,8 @@ module.exports = function(pool) {
 
   /**
    * POST /api/access-import/export-form
-   * Export a form from Access to EDN
+   * Export a form from Access as JSON (raw metadata)
+   * The frontend converts JSON -> form definition and saves via /api/forms
    */
   router.post('/export-form', async (req, res) => {
     const { databasePath, formName, targetDatabaseId } = req.body;
@@ -249,47 +250,25 @@ module.exports = function(pool) {
       }
 
       const scriptsDir = path.join(__dirname, '..', '..', 'scripts', 'access');
-      const exportScript = path.join(scriptsDir, 'export_form_to_edn.ps1');
+      const exportScript = path.join(scriptsDir, 'export_form.ps1');
 
-      // Export to temp file
-      const tempDir = path.join(__dirname, '..', '..', 'temp');
-      await fs.mkdir(tempDir, { recursive: true });
-      const outputPath = path.join(tempDir, `${formName.replace(/[^a-zA-Z0-9]/g, '_')}.edn`);
-
-      await runPowerShell(exportScript, [
+      // Run PowerShell - it outputs JSON to stdout
+      const jsonOutput = await runPowerShell(exportScript, [
         '-DatabasePath', databasePath,
-        '-FormName', formName,
-        '-OutputPath', outputPath
+        '-FormName', formName
       ]);
 
-      // Read the exported EDN
-      const ednContent = await fs.readFile(outputPath, 'utf8');
-
-      // If targetDatabaseId specified, save to shared.forms
-      if (targetDatabaseId) {
-        const recordSourceMatch = ednContent.match(/:record-source\s+"([^"]+)"/);
-        const recordSource = recordSourceMatch ? recordSourceMatch[1] : null;
-
-        await pool.query(`
-          INSERT INTO shared.forms (database_id, name, definition, record_source, version, is_current)
-          VALUES ($1, $2, $3, $4, 1, true)
-          ON CONFLICT (database_id, name, version) DO UPDATE SET
-            definition = EXCLUDED.definition,
-            record_source = EXCLUDED.record_source,
-            is_current = true
-        `, [targetDatabaseId, formName, ednContent, recordSource]);
-      }
-
-      // Clean up temp file
-      await fs.unlink(outputPath).catch(() => {});
+      // Remove BOM if present, parse JSON
+      const cleanOutput = jsonOutput.replace(/^\uFEFF/, '').trim();
+      const formData = JSON.parse(cleanOutput);
 
       // Log success
-      await logImport('success', null, { edn_length: ednContent.length });
+      await logImport('success', null, { controls: formData.controls ? formData.controls.length : 0 });
 
+      // Return raw JSON to frontend for conversion
       res.json({
         success: true,
-        form: formName,
-        saved: !!targetDatabaseId
+        formData: formData
       });
     } catch (err) {
       console.error('Error exporting form:', err);

@@ -86,10 +86,17 @@ function Export-Control {
     }
 
     # Position and size
-    $lines += (Add-EdnProp $inner "x" $ctl.Left)
-    $lines += (Add-EdnProp $inner "y" $ctl.Top)
-    $lines += (Add-EdnProp $inner "width" $ctl.Width)
-    $lines += (Add-EdnProp $inner "height" $ctl.Height)
+    try {
+        $lines += (Add-EdnProp $inner "x" ([int]$ctl.Left))
+        $lines += (Add-EdnProp $inner "y" ([int]$ctl.Top))
+        $lines += (Add-EdnProp $inner "width" ([int]$ctl.Width))
+        $lines += (Add-EdnProp $inner "height" ([int]$ctl.Height))
+    } catch {
+        $lines += (Add-EdnProp $inner "x" 0)
+        $lines += (Add-EdnProp $inner "y" 0)
+        $lines += (Add-EdnProp $inner "width" 100)
+        $lines += (Add-EdnProp $inner "height" 20)
+    }
 
     # Font properties
     try {
@@ -408,10 +415,9 @@ try {
     if (-not $viewType) { $viewType = "single" }
     $edn += (' :default-view "' + $viewType + '"')
 
-    # Form dimensions
+    # Form width
     try {
         $edn += (Add-EdnProp " " "form-width" $form.Width)
-        $edn += (Add-EdnProp " " "form-height" $form.Section(0).Height)  # Detail section height
     } catch {}
 
     # Form navigation/editing options
@@ -477,10 +483,6 @@ try {
         } catch {}
     }
 
-    # Controls
-    $edn += " :controls"
-    $edn += " ["
-
     # Track which controls are inside tab pages
     $tabPageControls = @{}
 
@@ -497,14 +499,64 @@ try {
         }
     }
 
-    # Export all controls
+    # Sort controls into sections (0=Detail, 1=Header, 2=Footer)
+    $headerControls = @()
+    $detailControls = @()
+    $footerControls = @()
+
     foreach ($ctl in $form.Controls) {
-        $parentPage = $tabPageControls[$ctl.Name]
-        $ctlLines = Export-Control -ctl $ctl -indent 2 -parentPage $parentPage
-        $edn += ($ctlLines -join "`n")
+        try {
+            $parentPage = $tabPageControls[$ctl.Name]
+            $ctlLines = Export-Control -ctl $ctl -indent 3 -parentPage $parentPage
+            $ctlEdn = $ctlLines -join "`n"
+
+            $section = 0  # Default to detail
+            try { $section = [int]$ctl.Section } catch {}
+
+            switch ($section) {
+                1 { $headerControls += $ctlEdn }
+                2 { $footerControls += $ctlEdn }
+                default { $detailControls += $ctlEdn }
+            }
+        } catch {
+            Write-Host "Warning: Could not export control $($ctl.Name): $_" -ForegroundColor Yellow
+        }
     }
 
-    $edn += " ]"
+    Write-Host "Controls by section - Header: $($headerControls.Count), Detail: $($detailControls.Count), Footer: $($footerControls.Count)" -ForegroundColor Cyan
+
+    # Section heights
+    $headerHeight = 0
+    $detailHeight = 0
+    $footerHeight = 0
+    try { $headerHeight = $form.Section(1).Height } catch {}
+    try { $detailHeight = $form.Section(0).Height } catch {}
+    try { $footerHeight = $form.Section(2).Height } catch {}
+
+    # Header section
+    $edn += " :header"
+    $edn += "  {:height $headerHeight"
+    $edn += "   :controls"
+    $edn += "   ["
+    foreach ($c in $headerControls) { $edn += $c }
+    $edn += "   ]}"
+
+    # Detail section
+    $edn += " :detail"
+    $edn += "  {:height $detailHeight"
+    $edn += "   :controls"
+    $edn += "   ["
+    foreach ($c in $detailControls) { $edn += $c }
+    $edn += "   ]}"
+
+    # Footer section
+    $edn += " :footer"
+    $edn += "  {:height $footerHeight"
+    $edn += "   :controls"
+    $edn += "   ["
+    foreach ($c in $footerControls) { $edn += $c }
+    $edn += "   ]}"
+
     $edn += "}"
 
     $output = $edn -join "`n"

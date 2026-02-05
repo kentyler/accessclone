@@ -3,11 +3,178 @@
   (:require [reagent.core :as r]
             [app.state :as state]
             [cljs-http.client :as http]
-            [cljs.core.async :refer [go <!]]))
+            [cljs.core.async :refer [go <!]]
+            [clojure.string :as str]))
 
 (def api-base "http://localhost:3001")
 
 (declare get-item-name)
+
+;; ============================================================
+;; Access JSON → PolyAccess Form Definition Converter
+;; ============================================================
+
+(def twips-per-pixel 15)
+
+(defn twips->px [twips]
+  (js/Math.round (/ (or twips 0) twips-per-pixel)))
+
+(defn access-color->hex
+  "Convert Access BGR long integer to #RRGGBB hex string"
+  [color]
+  (when (and color (>= color 0))
+    (let [b (bit-and (bit-shift-right color 16) 0xFF)
+          g (bit-and (bit-shift-right color 8) 0xFF)
+          r (bit-and color 0xFF)]
+      (str "#"
+           (.padStart (.toString r 16) 2 "0")
+           (.padStart (.toString g 16) 2 "0")
+           (.padStart (.toString b 16) 2 "0")))))
+
+(def default-view-map
+  {0 "Single Form"
+   1 "Continuous Forms"
+   2 "Datasheet"})
+
+(def scroll-bars-map
+  {0 :neither
+   1 :horizontal
+   2 :vertical
+   3 :both})
+
+(defn convert-control
+  "Convert a single Access control JSON object to PolyAccess format"
+  [ctrl]
+  (let [base {:type (keyword (:type ctrl))
+              :name (:name ctrl)
+              :x (twips->px (:left ctrl))
+              :y (twips->px (:top ctrl))
+              :width (twips->px (:width ctrl))
+              :height (twips->px (:height ctrl))}]
+    (cond-> base
+      ;; Font
+      (:fontName ctrl)      (assoc :font-name (:fontName ctrl))
+      (:fontSize ctrl)      (assoc :font-size (:fontSize ctrl))
+      (:fontBold ctrl)      (assoc :font-bold true)
+      (:fontItalic ctrl)    (assoc :font-italic true)
+      (:fontUnderline ctrl) (assoc :font-underline true)
+
+      ;; Colors
+      (:foreColor ctrl)   (assoc :fore-color (access-color->hex (:foreColor ctrl)))
+      (:backColor ctrl)   (assoc :back-color (access-color->hex (:backColor ctrl)))
+      (:borderColor ctrl) (assoc :border-color (access-color->hex (:borderColor ctrl)))
+
+      ;; Data binding
+      (:controlSource ctrl) (assoc :field (:controlSource ctrl))
+
+      ;; Caption → text (PolyAccess convention)
+      (:caption ctrl) (assoc :text (:caption ctrl))
+
+      ;; Other properties
+      (:defaultValue ctrl)   (assoc :default-value (:defaultValue ctrl))
+      (:format ctrl)         (assoc :format (:format ctrl))
+      (:inputMask ctrl)      (assoc :input-mask (:inputMask ctrl))
+      (:validationRule ctrl) (assoc :validation-rule (:validationRule ctrl))
+      (:validationText ctrl) (assoc :validation-text (:validationText ctrl))
+      (:tooltip ctrl)        (assoc :tooltip (:tooltip ctrl))
+      (:tag ctrl)            (assoc :tag (:tag ctrl))
+      (:tabIndex ctrl)       (assoc :tab-index (:tabIndex ctrl))
+      (:parentPage ctrl)     (assoc :parent-page (:parentPage ctrl))
+
+      ;; States
+      (false? (:enabled ctrl)) (assoc :enabled false)
+      (:locked ctrl)           (assoc :locked true)
+      (false? (:visible ctrl)) (assoc :visible false)
+
+      ;; Combo/List box
+      (:rowSource ctrl)    (assoc :row-source (:rowSource ctrl))
+      (:boundColumn ctrl)  (assoc :bound-column (:boundColumn ctrl))
+      (:columnCount ctrl)  (assoc :column-count (:columnCount ctrl))
+      (:columnWidths ctrl) (assoc :column-widths (:columnWidths ctrl))
+      (:limitToList ctrl)  (assoc :limit-to-list true)
+
+      ;; Subform
+      (:sourceForm ctrl)      (assoc :source-form (:sourceForm ctrl))
+      (:linkChildFields ctrl) (assoc :link-child-fields [(:linkChildFields ctrl)])
+      (:linkMasterFields ctrl)(assoc :link-master-fields [(:linkMasterFields ctrl)])
+
+      ;; Tab control
+      (:pages ctrl)     (assoc :pages (:pages ctrl))
+      (:pageIndex ctrl) (assoc :page-index (:pageIndex ctrl))
+
+      ;; Image
+      (:picture ctrl)  (assoc :picture (:picture ctrl))
+      (:sizeMode ctrl) (assoc :size-mode (keyword (:sizeMode ctrl)))
+
+      ;; Events
+      (:hasClickEvent ctrl)        (assoc :has-click-event true)
+      (:hasDblClickEvent ctrl)     (assoc :has-dblclick-event true)
+      (:hasChangeEvent ctrl)       (assoc :has-change-event true)
+      (:hasEnterEvent ctrl)        (assoc :has-enter-event true)
+      (:hasExitEvent ctrl)         (assoc :has-exit-event true)
+      (:hasBeforeUpdateEvent ctrl) (assoc :has-before-update-event true)
+      (:hasAfterUpdateEvent ctrl)  (assoc :has-after-update-event true)
+      (:hasGotFocusEvent ctrl)     (assoc :has-gotfocus-event true)
+      (:hasLostFocusEvent ctrl)    (assoc :has-lostfocus-event true))))
+
+(defn extract-record-source
+  "Extract table name from record source (may be a SELECT query)"
+  [record-source]
+  (when record-source
+    (if-let [match (re-find #"(?i)^SELECT .+ FROM (\w+)" record-source)]
+      (second match)
+      record-source)))
+
+(defn convert-access-form
+  "Convert Access form JSON metadata to PolyAccess form definition"
+  [form-data]
+  (let [controls (or (:controls form-data) [])
+        ;; Group controls by section (0=detail, 1=header, 2=footer)
+        by-section (group-by #(or (:section %) 0) controls)
+        header-ctrls (mapv convert-control (get by-section 1 []))
+        detail-ctrls (mapv convert-control (get by-section 0 []))
+        footer-ctrls (mapv convert-control (get by-section 2 []))
+        sections (or (:sections form-data) {})
+        record-source (extract-record-source (:recordSource form-data))]
+    (cond-> {:name (:name form-data)
+             :record-source record-source
+             :default-view (get default-view-map (:defaultView form-data) "Single Form")
+             :form-width (twips->px (:formWidth form-data))
+             :header {:height (twips->px (:headerHeight sections))
+                      :controls header-ctrls}
+             :detail {:height (twips->px (:detailHeight sections))
+                      :controls detail-ctrls}
+             :footer {:height (twips->px (:footerHeight sections))
+                      :controls footer-ctrls}
+             :navigation-buttons (if (false? (:navigationButtons form-data)) 0 1)
+             :record-selectors (if (false? (:recordSelectors form-data)) 0 1)
+             :allow-additions (if (false? (:allowAdditions form-data)) 0 1)
+             :allow-deletions (if (false? (:allowDeletions form-data)) 0 1)
+             :allow-edits (if (false? (:allowEdits form-data)) 0 1)
+             :dividing-lines (if (false? (:dividingLines form-data)) 0 1)}
+
+      ;; Caption
+      (:caption form-data) (assoc :text (:caption form-data))
+
+      ;; Scroll bars
+      (:scrollBars form-data) (assoc :scroll-bars (get scroll-bars-map (:scrollBars form-data) :both))
+
+      ;; Popup / Modal
+      (:popup form-data) (assoc :popup 1)
+      (:modal form-data) (assoc :modal 1)
+
+      ;; Events
+      (:hasLoadEvent form-data)         (assoc :has-load-event true)
+      (:hasOpenEvent form-data)         (assoc :has-open-event true)
+      (:hasCloseEvent form-data)        (assoc :has-close-event true)
+      (:hasCurrentEvent form-data)      (assoc :has-current-event true)
+      (:hasBeforeInsertEvent form-data) (assoc :has-before-insert-event true)
+      (:hasAfterInsertEvent form-data)  (assoc :has-after-insert-event true)
+      (:hasBeforeUpdateEvent form-data) (assoc :has-before-update-event true)
+      (:hasAfterUpdateEvent form-data)  (assoc :has-after-update-event true)
+      (:hasDeleteEvent form-data)       (assoc :has-delete-event true))))
+
+;; ============================================================
 
 ;; Local state for the viewer
 (defonce viewer-state
@@ -123,33 +290,59 @@
 (defn select-none! []
   (swap! viewer-state assoc :selected #{}))
 
+(defn import-form!
+  "Import a single form: get JSON from Access, convert, save to target database"
+  [access-db-path form-name target-database-id]
+  (go
+    ;; Step 1: Get JSON metadata from Access via PowerShell
+    (let [response (<! (http/post (str api-base "/api/access-import/export-form")
+                                  {:json-params {:databasePath access-db-path
+                                                 :formName form-name
+                                                 :targetDatabaseId target-database-id}}))]
+      (if (and (:success response) (get-in response [:body :formData]))
+        ;; Step 2: Convert JSON to PolyAccess form definition
+        (let [form-data (get-in response [:body :formData])
+              form-def (convert-access-form form-data)
+              _ (println "Converted form:" form-name
+                         "- controls:" (+ (count (get-in form-def [:header :controls]))
+                                          (count (get-in form-def [:detail :controls]))
+                                          (count (get-in form-def [:footer :controls]))))
+              ;; Step 3: Save to target database via forms API
+              save-response (<! (http/put (str api-base "/api/forms/" form-name)
+                                         {:json-params form-def
+                                          :headers {"X-Database-ID" target-database-id}}))]
+          (if (:success save-response)
+            (do (println "Saved form:" form-name "to" target-database-id)
+                true)
+            (do (println "Failed to save form:" form-name (get-in save-response [:body :error]))
+                false)))
+        (do (println "Failed to export form:" form-name (get-in response [:body :error]))
+            false)))))
+
 (defn import-selected!
   "Import selected forms/reports to the current PolyAccess database"
   [access-db-path target-database-id]
   (let [obj-type (:object-type @viewer-state)
-        selected (:selected @viewer-state)
-        endpoint (if (= obj-type :forms)
-                   "/api/access-import/export-form"
-                   "/api/access-import/export-report")]
+        selected (:selected @viewer-state)]
     (swap! viewer-state assoc :importing? true)
     (go
       (doseq [item-name selected]
-        (let [params (if (= obj-type :forms)
-                       {:databasePath access-db-path
-                        :formName item-name
-                        :targetDatabaseId target-database-id}
-                       {:databasePath access-db-path
-                        :reportName item-name
-                        :targetDatabaseId target-database-id})
-              response (<! (http/post (str api-base endpoint)
-                                      {:json-params params}))]
-          ;; Refresh history after each import to show progress
-          (<! (load-import-history! access-db-path))
-          (if (:success response)
-            (println "Imported:" item-name)
-            (println "Failed to import:" item-name (get-in response [:body :error])))))
+        (if (= obj-type :forms)
+          ;; Forms: JSON export + CLJS conversion
+          (<! (import-form! access-db-path item-name target-database-id))
+          ;; Reports: still use old endpoint for now
+          (let [response (<! (http/post (str api-base "/api/access-import/export-report")
+                                        {:json-params {:databasePath access-db-path
+                                                       :reportName item-name
+                                                       :targetDatabaseId target-database-id}}))]
+            (if (:success response)
+              (println "Imported report:" item-name)
+              (println "Failed to import report:" item-name (get-in response [:body :error])))))
+        ;; Refresh history after each import
+        (<! (load-import-history! access-db-path)))
       (swap! viewer-state assoc :importing? false :selected #{})
-      ;; Refresh the forms/reports list in the target database
+      ;; Refresh badges and the forms/reports list in the target database
+      (load-target-existing! target-database-id)
       (state/load-forms!))))
 
 (defn object-type-dropdown []
@@ -218,6 +411,7 @@
                 :on-click #(toggle-selection! item-name)}
                [:input {:type "checkbox"
                         :checked (contains? selected item-name)
+                        :on-click #(.stopPropagation %)
                         :on-change #(toggle-selection! item-name)}]
                [:span.item-name item-name]
                (when imported?

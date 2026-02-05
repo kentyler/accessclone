@@ -1,75 +1,88 @@
 (ns app.views.form-view
   "Form view mode - live data entry with record navigation"
-  (:require [clojure.string]
-            [app.state :as state]
-            [app.views.form-utils :as form-utils]))
+  (:require [app.state :as state]
+            [app.views.form-utils :as fu]))
+
+;; --- Individual control renderers ---
+;; Each takes the control definition, resolved field name, resolved value,
+;; and an on-change callback. Parameters like width/height are already
+;; handled by the wrapping div's control-style.
+
+(defn render-label
+  "Render a static label control"
+  [ctrl _field _value _on-change _opts]
+  [:span.view-label (fu/display-text ctrl)])
+
+(defn render-textbox
+  "Render a text input control"
+  [ctrl field value on-change {:keys [auto-focus? is-new?]}]
+  [:input.view-input
+   {:type "text"
+    :value value
+    :auto-focus (and is-new? auto-focus?)
+    :on-change #(when field (on-change field (.. % -target -value)))}])
+
+(defn render-button
+  "Render a button control"
+  [ctrl _field _value _on-change _opts]
+  (let [button-text (or (:text ctrl) (:caption ctrl) "Button")
+        on-click (if (= button-text "Close")
+                   #(let [active (:active-tab @state/app-state)]
+                      (when active
+                        (state/close-tab! (:type active) (:id active))))
+                   #(js/alert (str "Button clicked: " button-text)))]
+    [:button.view-button {:on-click on-click} button-text]))
+
+(defn render-checkbox
+  "Render a checkbox control"
+  [ctrl field value on-change _opts]
+  [:label.view-checkbox
+   [:input {:type "checkbox"
+            :checked (boolean value)
+            :on-change #(when field (on-change field (.. % -target -checked)))}]
+   (or (:text ctrl) (:caption ctrl))])
+
+(defn render-combobox
+  "Render a combo box (dropdown) control"
+  [_ctrl field value on-change _opts]
+  [:select.view-select
+   {:value value
+    :on-change #(when field (on-change field (.. % -target -value)))}
+   [:option ""]])
+
+(defn render-default
+  "Render fallback for unknown control types"
+  [ctrl _field _value _on-change _opts]
+  [:span (fu/display-text ctrl)])
+
+;; --- Control type dispatch ---
+
+(def control-renderers
+  {:label     render-label
+   :text-box  render-textbox
+   :button    render-button
+   :check-box render-checkbox
+   :combo-box render-combobox})
 
 (defn form-view-control
   "Render a single control in view mode"
   [ctrl current-record on-change & [{:keys [auto-focus?]}]]
-  (let [;; Check both :control-source (from Property Sheet) or :field (from drag-drop)
-        raw-field (or (:control-source ctrl) (:field ctrl))
-        ;; Normalize to lowercase to match database column names
-        field (when raw-field (clojure.string/lower-case raw-field))
-        ;; Try both keyword and string versions of field name
-        value (when field
-                (or (get current-record (keyword field))
-                    (get current-record field)
-                    ""))
-        ;; Auto-focus new records
+  (let [ctrl-type (fu/normalize-ctrl-type ctrl)
+        field (fu/resolve-control-field ctrl)
+        value (fu/resolve-field-value field current-record)
         is-new? (:__new__ current-record)
-        ;; Normalize type to keyword (jsonToEdn round-trip converts keywords to strings)
-        ctrl-type (keyword (clojure.string/replace (str (:type ctrl)) #"^:" ""))]
+        renderer (get control-renderers ctrl-type render-default)]
     [:div.view-control
-     {:style {:left (:x ctrl)
-              :top (:y ctrl)
-              :width (:width ctrl)
-              :height (:height ctrl)}}
-     (case ctrl-type
-       :label
-       [:span.view-label (or (:text ctrl) (:label ctrl))]
+     {:style (fu/control-style ctrl)}
+     [renderer ctrl field value on-change {:auto-focus? auto-focus? :is-new? is-new?}]]))
 
-       :text-box
-       [:input.view-input
-        {:type "text"
-         :value value
-         :auto-focus (and is-new? auto-focus?)
-         :on-change #(when field (on-change field (.. % -target -value)))}]
-
-       :button
-       (let [button-text (or (:text ctrl) (:caption ctrl) "Button")
-             on-click (cond
-                        ;; Close button - close the current tab
-                        (= button-text "Close")
-                        #(let [active (:active-tab @state/app-state)]
-                           (when active
-                             (state/close-tab! (:type active) (:id active))))
-                        ;; Default - show alert
-                        :else
-                        #(js/alert (str "Button clicked: " button-text)))]
-         [:button.view-button {:on-click on-click} button-text])
-
-       :check-box
-       [:label.view-checkbox
-        [:input {:type "checkbox"
-                 :checked (boolean value)
-                 :on-change #(when field (on-change field (.. % -target -checked)))}]
-        (or (:text ctrl) (:caption ctrl))]
-
-       :combo-box
-       [:select.view-select
-        {:value value
-         :on-change #(when field (on-change field (.. % -target -value)))}
-        [:option ""]]
-
-       ;; Default - just show text
-       [:span (or (:text ctrl) (:label ctrl) "")])]))
+;; --- Section and form rendering ---
 
 (defn form-view-section
   "Render a section in view mode"
   [section form-def current-record on-field-change]
-  (let [height (form-utils/get-section-height form-def section)
-        controls (form-utils/get-section-controls form-def section)]
+  (let [height (fu/get-section-height form-def section)
+        controls (fu/get-section-controls form-def section)]
     (when (seq controls)
       [:div.view-section
        {:class (name section)
@@ -82,11 +95,11 @@
 (defn form-view-detail-row
   "Render a single detail row for continuous forms"
   [idx record form-def selected? on-select on-field-change]
-  (let [height (form-utils/get-section-height form-def :detail)
-        controls (form-utils/get-section-controls form-def :detail)
+  (let [height (fu/get-section-height form-def :detail)
+        controls (fu/get-section-controls form-def :detail)
         ;; Find index of first text-box for auto-focus (handle both keyword and string types)
         first-textbox-idx (first (keep-indexed
-                                   (fn [i c] (when (#{:text-box "text-box"} (:type c)) i))
+                                   (fn [i c] (when (= (fu/normalize-ctrl-type c) :text-box) i))
                                    controls))]
     [:div.view-section.detail.continuous-row
      {:class (when selected? "selected")
@@ -113,9 +126,9 @@
         on-field-change (fn [field value] (state/update-record-field! field value))
         on-select-record (fn [idx] (state/navigate-to-record! (inc idx)))
         ;; Check if any section has controls
-        has-controls? (or (seq (form-utils/get-section-controls current :header))
-                          (seq (form-utils/get-section-controls current :detail))
-                          (seq (form-utils/get-section-controls current :footer)))]
+        has-controls? (or (seq (fu/get-section-controls current :header))
+                          (seq (fu/get-section-controls current :detail))
+                          (seq (fu/get-section-controls current :footer)))]
     [:div.form-canvas.view-mode
      [:div.canvas-header
       [:span "Form View"]

@@ -1,6 +1,7 @@
 (ns app.views.form-utils
   "Shared utility functions for the form editor"
-  (:require [app.state :as state]))
+  (:require [clojure.string]
+            [app.state :as state]))
 
 (defn snap-to-grid
   "Snap a coordinate to the nearest grid point.
@@ -43,3 +44,39 @@
     :detail :header
     :footer :detail
     nil))
+
+;; --- Shared control utilities ---
+
+(defn control-style
+  "Position and size style map for a control"
+  [ctrl]
+  {:left (:x ctrl)
+   :top (:y ctrl)
+   :width (:width ctrl)
+   :height (:height ctrl)})
+
+(defn normalize-ctrl-type
+  "Normalize control type to keyword (handles both :text-box and \"text-box\")"
+  [ctrl]
+  (keyword (clojure.string/replace (str (:type ctrl)) #"^:" "")))
+
+(defn resolve-control-field
+  "Get the bound field name from a control, normalized to lowercase.
+   Checks :control-source (Property Sheet) then :field (drag-drop)."
+  [ctrl]
+  (when-let [raw-field (or (:control-source ctrl) (:field ctrl))]
+    (clojure.string/lower-case raw-field)))
+
+(defn resolve-field-value
+  "Look up a field's value from the current record.
+   Handles both keyword and string keys."
+  [field current-record]
+  (when field
+    (or (get current-record (keyword field))
+        (get current-record field)
+        "")))
+
+(defn display-text
+  "Get display text from a control, checking common text keys"
+  [ctrl]
+  (or (:text ctrl) (:label ctrl) (:caption ctrl) ""))

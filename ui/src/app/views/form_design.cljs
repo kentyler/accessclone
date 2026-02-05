@@ -111,11 +111,8 @@
                             (.setData (.-dataTransfer e) "application/x-section" (name section))
                             (.setData (.-dataTransfer e) "application/x-offset"
                                       (js/JSON.stringify (clj->js {:x offset-x :y offset-y})))))
-         :style {:left (:x ctrl)
-                 :top (:y ctrl)
-                 :width (:width ctrl)
-                 :height (:height ctrl)}}
-        (or (:text ctrl) (:label ctrl))
+         :style (form-utils/control-style ctrl)}
+        (form-utils/display-text ctrl)
         [:button.control-delete
          {:on-click (fn [e]
                       (.stopPropagation e)

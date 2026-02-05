@@ -17,12 +17,13 @@
 
 (defn render-textbox
   "Render a text input control"
-  [ctrl field value on-change {:keys [auto-focus? is-new?]}]
+  [ctrl field value on-change {:keys [auto-focus? is-new? allow-edits?]}]
   [:input.view-input
    {:type "text"
     :value value
+    :read-only (not allow-edits?)
     :auto-focus (and is-new? auto-focus?)
-    :on-change #(when field (on-change field (.. % -target -value)))}])
+    :on-change #(when (and field allow-edits?) (on-change field (.. % -target -value)))}])
 
 (defn render-button
   "Render a button control"
@@ -37,19 +38,21 @@
 
 (defn render-checkbox
   "Render a checkbox control"
-  [ctrl field value on-change _opts]
+  [ctrl field value on-change {:keys [allow-edits?]}]
   [:label.view-checkbox
    [:input {:type "checkbox"
             :checked (boolean value)
-            :on-change #(when field (on-change field (.. % -target -checked)))}]
+            :disabled (not allow-edits?)
+            :on-change #(when (and field allow-edits?) (on-change field (.. % -target -checked)))}]
    (or (:text ctrl) (:caption ctrl))])
 
 (defn render-combobox
   "Render a combo box (dropdown) control"
-  [_ctrl field value on-change _opts]
+  [_ctrl field value on-change {:keys [allow-edits?]}]
   [:select.view-select
    {:value value
-    :on-change #(when field (on-change field (.. % -target -value)))}
+    :disabled (not allow-edits?)
+    :on-change #(when (and field allow-edits?) (on-change field (.. % -target -value)))}
    [:option ""]])
 
 (defn render-default
@@ -68,7 +71,7 @@
 
 (defn form-view-control
   "Render a single control in view mode"
-  [ctrl current-record on-change & [{:keys [auto-focus?]}]]
+  [ctrl current-record on-change & [{:keys [auto-focus? allow-edits?]}]]
   (let [ctrl-type (:type ctrl)
         field (fu/resolve-control-field ctrl)
         value (fu/resolve-field-value field current-record)
@@ -77,7 +80,7 @@
     [:div.view-control
      {:style (fu/control-style ctrl)
       :on-context-menu show-record-menu}
-     [renderer ctrl field value on-change {:auto-focus? auto-focus? :is-new? is-new?}]]))
+     [renderer ctrl field value on-change {:auto-focus? auto-focus? :is-new? is-new? :allow-edits? allow-edits?}]]))
 
 ;; --- Record context menu ---
 
@@ -90,15 +93,17 @@
   []
   (let [menu (get-in @state/app-state [:form-editor :context-menu])
         has-clipboard? (some? @state/form-clipboard)
+        allow-edits? (not= 0 (get-in @state/app-state [:form-editor :current :allow-edits]))
         allow-additions? (not= 0 (get-in @state/app-state [:form-editor :current :allow-additions]))
+        allow-deletions? (not= 0 (get-in @state/app-state [:form-editor :current :allow-deletions]))
         has-record? (> (get-in @state/app-state [:form-editor :record-position :total] 0) 0)]
     (when (:visible menu)
       [:div.context-menu
        {:style {:left (:x menu) :top (:y menu)}
         :on-mouse-leave #(state/hide-form-context-menu!)}
        [:div.menu-item
-        {:class (when-not has-record? "disabled")
-         :on-click #(when has-record?
+        {:class (when-not (and has-record? allow-edits? allow-deletions?) "disabled")
+         :on-click #(when (and has-record? allow-edits? allow-deletions?)
                       (state/cut-form-record!)
                       (state/hide-form-context-menu!))}
         "Cut"]
@@ -122,8 +127,8 @@
                       (state/hide-form-context-menu!))}
         "New Record"]
        [:div.menu-item.danger
-        {:class (when-not has-record? "disabled")
-         :on-click #(when has-record?
+        {:class (when-not (and has-record? allow-deletions?) "disabled")
+         :on-click #(when (and has-record? allow-deletions?)
                       (when (js/confirm "Delete this record?")
                         (state/delete-current-record!))
                       (state/hide-form-context-menu!))}
@@ -145,7 +150,7 @@
 
 (defn form-view-section
   "Render a section in view mode"
-  [section form-def current-record on-field-change & [{:keys [show-selectors?]}]]
+  [section form-def current-record on-field-change & [{:keys [show-selectors? allow-edits?]}]]
   (let [height (fu/get-section-height form-def section)
         controls (fu/get-section-controls form-def section)]
     (when (seq controls)
@@ -158,18 +163,18 @@
           [:div.view-controls-container
            (for [[idx ctrl] (map-indexed vector controls)]
              ^{:key idx}
-             [form-view-control ctrl current-record on-field-change])]]]
+             [form-view-control ctrl current-record on-field-change {:allow-edits? allow-edits?}])]]]
         [:div.view-section
          {:class (name section)
           :style {:height height}}
          [:div.view-controls-container
           (for [[idx ctrl] (map-indexed vector controls)]
             ^{:key idx}
-            [form-view-control ctrl current-record on-field-change])]]))))
+            [form-view-control ctrl current-record on-field-change {:allow-edits? allow-edits?}])]]))))
 
 (defn form-view-detail-row
   "Render a single detail row for continuous forms"
-  [idx record form-def selected? on-select on-field-change & [{:keys [show-selectors?]}]]
+  [idx record form-def selected? on-select on-field-change & [{:keys [show-selectors? allow-edits?]}]]
   (let [height (fu/get-section-height form-def :detail)
         controls (fu/get-section-controls form-def :detail)
         first-textbox-idx (first (keep-indexed
@@ -185,7 +190,8 @@
       (for [[ctrl-idx ctrl] (map-indexed vector controls)]
         ^{:key ctrl-idx}
         [form-view-control ctrl record on-field-change
-         {:auto-focus? (and selected? (= ctrl-idx first-textbox-idx))}])]]))
+         {:auto-focus? (and selected? (= ctrl-idx first-textbox-idx))
+          :allow-edits? allow-edits?}])]]))
 
 (defn tentative-new-row
   "Render the * placeholder row at the bottom of continuous forms"
@@ -213,14 +219,19 @@
         on-field-change (fn [field value] (state/update-record-field! field value))
         on-select-record (fn [idx] (state/navigate-to-record! (inc idx)))
         show-selectors? (not= 0 (:record-selectors current))
+        allow-edits? (not= 0 (:allow-edits current))
         allow-additions? (not= 0 (:allow-additions current))
+        allow-deletions? (not= 0 (:allow-deletions current))
+        dividing-lines? (not= 0 (:dividing-lines current))
         has-new-record? (some :__new__ all-records)
         ;; Check if any section has controls
+        back-color (:back-color current)
         has-controls? (or (seq (fu/get-section-controls current :header))
                           (seq (fu/get-section-controls current :detail))
                           (seq (fu/get-section-controls current :footer)))]
     [:div.form-canvas.view-mode
-     {:on-click #(do (state/hide-form-context-menu!)
+     {:style (when back-color {:background-color back-color})
+      :on-click #(do (state/hide-form-context-menu!)
                      (state/hide-context-menu!))}
      [:div.canvas-header
       {:on-context-menu (fn [e]
@@ -237,7 +248,8 @@
         (if continuous?
           ;; Continuous forms - render all records
           [:div.view-sections-container.continuous
-           [form-view-section :header current current-record on-field-change]
+           {:class (when-not dividing-lines? "no-dividing-lines")}
+           [form-view-section :header current current-record on-field-change {:allow-edits? allow-edits?}]
            [:div.continuous-records-container
             (for [[idx record] (map-indexed vector all-records)]
               (let [selected? (= (inc idx) (:current record-pos))
@@ -246,16 +258,16 @@
                 ^{:key (or (:id record) idx)}
                 [form-view-detail-row idx display-record current
                  selected? on-select-record on-field-change
-                 {:show-selectors? show-selectors?}]))
+                 {:show-selectors? show-selectors? :allow-edits? allow-edits?}]))
             (when (and allow-additions? (not has-new-record?))
               [tentative-new-row current show-selectors?])]
-           [form-view-section :footer current current-record on-field-change]]
+           [form-view-section :footer current current-record on-field-change {:allow-edits? allow-edits?}]]
           ;; Single form - render one record
           [:div.view-sections-container
-           [form-view-section :header current current-record on-field-change]
+           [form-view-section :header current current-record on-field-change {:allow-edits? allow-edits?}]
            [form-view-section :detail current current-record on-field-change
-            {:show-selectors? show-selectors?}]
-           [form-view-section :footer current current-record on-field-change]])
+            {:show-selectors? show-selectors? :allow-edits? allow-edits?}]
+           [form-view-section :footer current current-record on-field-change {:allow-edits? allow-edits?}]])
         [:div.no-records
          (if record-source
            (if has-controls?
@@ -287,7 +299,7 @@
                             :on-click #(state/new-record!)} "▶*"]
           [:button.nav-btn.delete-btn
            {:title "Delete Record"
-            :disabled (< (:total record-pos) 1)
+            :disabled (or (< (:total record-pos) 1) (not allow-deletions?))
             :on-click #(when (js/confirm "Delete this record?")
                          (state/delete-current-record!))} "✕"]
           [:span.nav-separator]

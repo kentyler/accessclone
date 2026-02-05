@@ -163,6 +163,12 @@
       (:popup form-data) (assoc :popup 1)
       (:modal form-data) (assoc :modal 1)
 
+      ;; Data entry
+      (:dataEntry form-data) (assoc :data-entry 1)
+
+      ;; Background color
+      (:backColor form-data) (assoc :back-color (access-color->hex (:backColor form-data)))
+
       ;; Events
       (:hasLoadEvent form-data)         (assoc :has-load-event true)
       (:hasOpenEvent form-data)         (assoc :has-open-event true)

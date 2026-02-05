@@ -426,26 +426,40 @@
     (swap! app-state assoc-in [:form-editor :view-mode] mode)
     ;; When switching to view mode, load data
     (when (= mode :view)
-      (let [record-source (get-in @app-state [:form-editor :current :record-source])]
+      (let [record-source (get-in @app-state [:form-editor :current :record-source])
+            data-entry? (not= 0 (get-in @app-state [:form-editor :current :data-entry] 0))]
         (when record-source
-          ;; Trigger data load
-          (go
-            (let [response (<! (http/get (str api-base "/api/data/" record-source)
-                                         {:query-params {:limit 1000}
-                                          :headers (db-headers)}))]
-              (if (:success response)
-                (let [data (get-in response [:body :data])
-                      total (get-in response [:body :pagination :totalCount] (count data))]
-                  (println "Loaded" (count data) "records from" record-source)
-                  (when (seq data)
-                    (println "First record keys:" (keys (first data)))
-                    (println "First record:" (first data)))
-                  (swap! app-state assoc-in [:form-editor :records] (vec data))
-                  (swap! app-state assoc-in [:form-editor :record-position] {:current 1 :total total})
-                  (swap! app-state assoc-in [:form-editor :record-dirty?] false)
-                  (when (seq data)
-                    (swap! app-state assoc-in [:form-editor :current-record] (first data))))
-                (println "Error loading data:" (:body response))))))))))
+          (if data-entry?
+            ;; Data entry mode: start with a blank new record, don't load existing
+            (let [new-record {:__new__ true}]
+              (swap! app-state assoc-in [:form-editor :records] [new-record])
+              (swap! app-state assoc-in [:form-editor :current-record] new-record)
+              (swap! app-state assoc-in [:form-editor :record-position] {:current 1 :total 1})
+              (swap! app-state assoc-in [:form-editor :record-dirty?] true))
+            ;; Normal mode: fetch records from API
+            (go
+              (let [order-by (get-in @app-state [:form-editor :current :order-by])
+                    query-params (cond-> {:limit 1000}
+                                   order-by (merge (let [parts (str/split (str/trim order-by) #"\s+")]
+                                                     (cond-> {:orderBy (first parts)}
+                                                       (= "DESC" (str/upper-case (or (second parts) "")))
+                                                       (assoc :orderDir "desc")))))
+                    response (<! (http/get (str api-base "/api/data/" record-source)
+                                           {:query-params query-params
+                                            :headers (db-headers)}))]
+                (if (:success response)
+                  (let [data (get-in response [:body :data])
+                        total (get-in response [:body :pagination :totalCount] (count data))]
+                    (println "Loaded" (count data) "records from" record-source)
+                    (when (seq data)
+                      (println "First record keys:" (keys (first data)))
+                      (println "First record:" (first data)))
+                    (swap! app-state assoc-in [:form-editor :records] (vec data))
+                    (swap! app-state assoc-in [:form-editor :record-position] {:current 1 :total total})
+                    (swap! app-state assoc-in [:form-editor :record-dirty?] false)
+                    (when (seq data)
+                      (swap! app-state assoc-in [:form-editor :current-record] (first data))))
+                  (println "Error loading data:" (:body response)))))))))))
 
 (defn get-view-mode []
   (get-in @app-state [:form-editor :view-mode] :design))

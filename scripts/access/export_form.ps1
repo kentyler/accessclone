@@ -275,6 +275,16 @@ try {
     # Dividing lines
     $formObj.dividingLines = [bool](Safe-GetProperty $form "DividingLines" $true)
 
+    # Data entry mode
+    $formObj.dataEntry = [bool](Safe-GetProperty $form "DataEntry" $false)
+
+    # Colors
+    $backColor = Safe-GetProperty $form "Section(0).BackColor"
+    if ($null -eq $backColor) {
+        try { $backColor = $form.Section(0).BackColor } catch {}
+    }
+    if ($null -ne $backColor -and $backColor -ge 0) { $formObj.backColor = [long]$backColor }
+
     # Form-level events
     $formEvents = @(
         @("OnLoad", "hasLoadEvent"),

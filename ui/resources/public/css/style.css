@@ -901,6 +901,10 @@ body {
   transition: background-color 0.1s ease;
 }
 
+.no-dividing-lines .view-section.continuous-row {
+  border-bottom: none;
+}
+
 .view-section.continuous-row:hover {
   background-color: var(--gray-50);
 }

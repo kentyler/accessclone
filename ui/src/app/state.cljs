@@ -601,6 +601,36 @@
           query (first (filter #(= (:name %) record-source) queries))]
       (or (:fields table) (:fields query) []))))
 
+(def ^:private yes-no-form-props
+  "Form properties that use yes/no (1/0) values."
+  [:popup :modal :allow-additions :allow-deletions :allow-edits
+   :navigation-buttons :record-selectors :dividing-lines :data-entry])
+
+(def ^:private yes-no-defaults
+  "Default values for yes/no form properties (matching Access defaults)."
+  {:popup 0 :modal 0 :allow-additions 1 :allow-deletions 1 :allow-edits 1
+   :navigation-buttons 1 :record-selectors 1 :dividing-lines 1 :data-entry 0})
+
+(defn- coerce-yes-no
+  "Coerce any truthy/falsy value to 1 or 0."
+  [v]
+  (cond
+    (nil? v)             nil
+    (number? v)          (if (zero? v) 0 1)
+    (boolean? v)         (if v 1 0)
+    (string? v)          (if (#{"true" "yes" "1"} (.toLowerCase v)) 1 0)
+    :else                1))
+
+(defn- normalize-form-definition [definition]
+  "Apply defaults and normalize yes/no properties to 0/1 integers."
+  (reduce (fn [def prop]
+            (let [v (get def prop)]
+              (if (nil? v)
+                (assoc def prop (get yes-no-defaults prop 0))
+                (assoc def prop (coerce-yes-no v)))))
+          definition
+          yes-no-form-props))
+
 (defn load-form-for-editing! [form]
   ;; Auto-save dirty record before switching forms
   (when (get-in @app-state [:form-editor :record-dirty?])
@@ -611,12 +641,12 @@
   ;; Check if definition is already loaded
   (if (:definition form)
     ;; Definition already loaded, use it
-    (do
+    (let [def-with-defaults (normalize-form-definition (:definition form))]
       (swap! app-state assoc :form-editor
              {:form-id (:id form)
               :dirty? false
-              :original (:definition form)
-              :current (:definition form)
+              :original def-with-defaults
+              :current def-with-defaults
               :selected-control nil})
       (set-view-mode! :view))
     ;; Need to fetch definition from API
@@ -629,7 +659,7 @@
                 form-data (if (string? body)
                             (reader/read-string body)
                             body)
-                definition (dissoc form-data :id :name)]
+                definition (normalize-form-definition (dissoc form-data :id :name))]
             (println "Loaded form definition, keys:" (keys definition))
             (println "default-view:" (:default-view definition))
             ;; Update form in objects list with definition

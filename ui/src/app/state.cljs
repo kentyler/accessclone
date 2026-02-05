@@ -208,7 +208,8 @@
 
 ;; App mode (Import / Run)
 (defn set-app-mode! [mode]
-  (swap! app-state assoc :app-mode mode))
+  (swap! app-state assoc :app-mode mode)
+  (save-ui-state!))
 
 ;; Objects
 (defn set-objects! [object-type objects]
@@ -802,7 +803,7 @@
 ;; ============================================================
 
 (defn save-ui-state!
-  "Save current UI state (open tabs, active tab, database) to server"
+  "Save current UI state (open tabs, active tab, database, app mode) to server"
   []
   (let [current-db (:current-database @app-state)
         open-objects (:open-objects @app-state)
@@ -810,7 +811,8 @@
         ui-state {:database_id (:database_id current-db)
                   :open_objects (vec (map #(select-keys % [:type :id :name]) open-objects))
                   :active_tab (when active-tab
-                                (select-keys active-tab [:type :id]))}]
+                                (select-keys active-tab [:type :id]))
+                  :app_mode (name (or (:app-mode @app-state) :run))}]
     (go
       (<! (http/put (str api-base "/api/session/ui-state")
                     {:json-params ui-state})))))
@@ -1110,6 +1112,9 @@
         (println "Found saved UI state:" saved-ui-state)
         ;; Store for later restoration
         (reset! pending-ui-state saved-ui-state)
+        ;; Restore app mode (import/run)
+        (when-let [saved-mode (:app_mode saved-ui-state)]
+          (swap! app-state assoc :app-mode (keyword saved-mode)))
         ;; If saved state has a database, switch to it
         (when-let [saved-db-id (:database_id saved-ui-state)]
           ;; We'll handle this after loading databases

@@ -8,7 +8,7 @@
 
 (def api-base "http://localhost:3001")
 
-(declare get-item-name)
+(declare get-item-name load-access-database-contents! load-target-existing!)
 
 ;; ============================================================
 ;; Access JSON → PolyAccess Form Definition Converter
@@ -193,6 +193,34 @@
            :import-log []       ;; Recent import history
            :importing? false})) ;; True while import is in progress
 
+(defn save-import-state!
+  "Persist import viewer state to server"
+  []
+  (let [{:keys [loaded-path object-type target-database-id]} @viewer-state]
+    (go
+      (<! (http/put (str api-base "/api/session/import-state")
+                    {:json-params {:loaded_path loaded-path
+                                   :object_type (when object-type (name object-type))
+                                   :target_database_id target-database-id}})))))
+
+(defn restore-import-state!
+  "Load saved import state from server and restore viewer position"
+  []
+  (go
+    (let [response (<! (http/get (str api-base "/api/session/import-state")))]
+      (when (and (:success response) (seq (:body response)))
+        (let [{:keys [loaded_path object_type target_database_id]} (:body response)]
+          (when object_type
+            (swap! viewer-state assoc :object-type (keyword object_type)))
+          (when target_database_id
+            (swap! viewer-state assoc :target-database-id target_database_id)
+            (load-target-existing! target_database_id))
+          ;; Load the Access DB contents last (triggers the main view)
+          (when loaded_path
+            (state/load-access-databases!)
+            (load-access-database-contents! loaded_path))
+          (println "Import state restored:" loaded_path))))))
+
 (defn load-target-existing!
   "Load existing object names from the target database to flag already-imported items"
   [database-id]
@@ -255,6 +283,8 @@
   "Load forms, reports, tables, queries, and modules from the selected Access database"
   [db-path]
   (swap! viewer-state assoc :loading? true :error nil :loaded-path db-path)
+  ;; Persist import state
+  (save-import-state!)
   ;; Load history in parallel
   (load-import-history! db-path)
   (go
@@ -353,7 +383,8 @@
        :on-change #(do
                      (swap! viewer-state assoc
                             :object-type (keyword (.. % -target -value))
-                            :selected #{}))}
+                            :selected #{})
+                     (save-import-state!))}
       [:option {:value "tables"} "Tables"]
       [:option {:value "queries"} "Queries"]
       [:option {:value "forms"} "Forms"]
@@ -466,7 +497,8 @@
       {:value (or effective-id "")
        :on-change #(let [new-id (.. % -target -value)]
                      (swap! viewer-state assoc :target-database-id new-id)
-                     (load-target-existing! new-id))}
+                     (load-target-existing! new-id)
+                     (save-import-state!))}
       (for [db available-dbs]
         ^{:key (:database_id db)}
         [:option {:value (:database_id db)} (:name db)])]]))
@@ -487,13 +519,22 @@
 (defn access-database-viewer
   "Main viewer component for an Access database"
   []
-  (let [{:keys [loading? error loaded-path]} @viewer-state
-        ;; Find the database info from the scanned list
-        access-db (when loaded-path
-                    (first (filter #(= (:path %) loaded-path)
-                                   (get-in @state/app-state [:objects :access_databases]))))]
+  ;; Restore saved import state on first mount if nothing is loaded
+  (let [restored? (r/atom false)]
+    (r/create-class
+     {:component-did-mount
+      (fn [_]
+        (when (and (not @restored?) (nil? (:loaded-path @viewer-state)))
+          (reset! restored? true)
+          (restore-import-state!)))
+      :reagent-render
+      (fn []
+        (let [{:keys [loading? error loaded-path]} @viewer-state
+              access-db (when loaded-path
+                          (first (filter #(= (:path %) loaded-path)
+                                         (get-in @state/app-state [:objects :access_databases]))))]
 
-    [:div.access-database-viewer
+          [:div.access-database-viewer
      (if-not loaded-path
        [:div.welcome-panel
         [:h2 "Access Database Import"]
@@ -523,4 +564,4 @@
              [object-list]])]
 
          [:div.viewer-sidebar
-          [import-log-panel]]]])]))
+          [import-log-panel]]]])]))})))

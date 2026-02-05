@@ -49,6 +49,47 @@ module.exports = function(pool) {
   });
 
   /**
+   * GET /api/import-state
+   * Get saved import state (selected Access DB, object type, target database)
+   */
+  router.get('/import-state', async (req, res) => {
+    try {
+      const result = await pool.query(
+        "SELECT setting_value FROM app_config WHERE setting_name = 'import_state'"
+      );
+      if (result.rows.length > 0 && result.rows[0].setting_value) {
+        res.json(JSON.parse(result.rows[0].setting_value));
+      } else {
+        res.json({});
+      }
+    } catch (err) {
+      console.error('Error fetching import state:', err);
+      res.json({});
+    }
+  });
+
+  /**
+   * PUT /api/import-state
+   * Save import state (selected Access DB, object type, target database)
+   */
+  router.put('/import-state', async (req, res) => {
+    try {
+      const stateJson = JSON.stringify(req.body);
+      await pool.query(
+        `INSERT INTO app_config (setting_name, setting_value, description)
+         VALUES ('import_state', $1, 'Saved import state - Access DB path, object type, target database')
+         ON CONFLICT (setting_name)
+         DO UPDATE SET setting_value = $1`,
+        [stateJson]
+      );
+      res.json({ success: true });
+    } catch (err) {
+      console.error('Error saving import state:', err);
+      res.status(500).json({ error: 'Failed to save import state' });
+    }
+  });
+
+  /**
    * POST /api/session
    * Create a new session for function execution
    */

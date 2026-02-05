@@ -79,7 +79,7 @@
                :name "app-mode"
                :checked (= mode :import)
                :on-change #(do (state/set-app-mode! :import)
-                               (state/load-access-databases!))}]
+                               (access-db-viewer/restore-import-state!))}]
       "Import"]
      [:label.mode-option
       {:class (when (= mode :run) "active")}

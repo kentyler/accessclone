@@ -14,7 +14,7 @@ The form editor now includes:
 
 ## Core Concept
 
-Forms are defined as data (EDN), not code. Forms are explicitly created via:
+Forms are defined as data (JSON), not code. Forms are explicitly created via:
 - The visual form designer (drag fields, position controls)
 - LLM assistance (describe what you want, get a form definition)
 
@@ -29,7 +29,7 @@ Forms are per-database, identified by `database_id` and `name`.
 
 API endpoints:
 - `GET /api/forms` - List all current forms
-- `GET /api/forms/:name` - Get current version (returns EDN)
+- `GET /api/forms/:name` - Get current version (returns JSON)
 - `PUT /api/forms/:name` - Save new version
 - `GET /api/forms/:name/versions` - List all versions
 - `POST /api/forms/:name/rollback/:version` - Rollback to a version
@@ -252,7 +252,7 @@ on load (along with yes/no and number properties). Code can match keywords direc
 ```
 
 This applies to any value that starts as a keyword in ClojureScript and goes through
-JSON serialization → `jsonToEdn` → EDN storage → `reader/read-string`.
+JSON serialization → JSON storage in PostgreSQL → auto-parsed on load.
 
 ### Yes/No Property Normalization
 

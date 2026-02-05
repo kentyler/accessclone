@@ -13,7 +13,7 @@ Converting an Access database involves multiple phases, each handled by a specia
 | 1. Setup | `conversion-setup.md` | Create database, install infrastructure, create project folder |
 | 2. Tables | `conversion-tables.md` | Migrate table structures and data |
 | 3. Queries | `conversion-queries.md` | Convert queries to views/functions |
-| 4. Forms | `conversion-forms.md` | Export forms to EDN format |
+| 4. Forms | `conversion-forms.md` | Import forms via UI (stored as JSON in PostgreSQL) |
 | 5. VBA | `conversion-vba.md` | Translate VBA to PostgreSQL functions |
 | 6. Wiring | Manual | Connect forms to functions, test |
 
@@ -110,8 +110,8 @@ Inputs needed:
 - Target project forms/ folder
 
 Outputs:
-- EDN files for each form
-- `_index.edn` listing all forms
+- Forms stored as JSON in `shared.forms` PostgreSQL table
+- Each form versioned with append-only history
 
 ### Phase 5: VBA
 

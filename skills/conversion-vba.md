@@ -361,7 +361,7 @@ $$ LANGUAGE plpgsql;
 
 ## Step 5: Wire Events to Functions
 
-Update form EDN files with function calls:
+Update form definitions with function calls:
 
 ```clojure
 {:type :button

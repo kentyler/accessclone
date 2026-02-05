@@ -23,7 +23,7 @@ Returns: `{ "forms": ["recipe_calculator", "ingredient_entry", ...] }`
 ```
 GET /api/forms/:name
 ```
-Returns: EDN content of the form file
+Returns: JSON form definition
 
 ### Save Form
 ```
@@ -39,21 +39,20 @@ Content-Type: application/json
   "controls": [...]
 }
 ```
-- Creates or updates the form file
-- Automatically adds to `_index.edn` if new
+- Creates a new version in `shared.forms` table
+- Old versions preserved for rollback
 
 ### Delete Form
 ```
 DELETE /api/forms/:name
 ```
-- Deletes the form file
-- Removes from `_index.edn`
+- Deletes all versions of the form
 
 ### Read Config
 ```
 GET /api/config
 ```
-Returns: EDN content of `settings/config.edn`
+Returns: JSON content of `settings/config.json`
 
 ### Save Config
 ```
@@ -66,7 +65,7 @@ Content-Type: application/json
   }
 }
 ```
-- Saves app configuration to `settings/config.edn`
+- Saves app configuration to `settings/config.json`
 
 ### Graph API (Dependency/Intent Graph)
 
@@ -112,18 +111,18 @@ POST /api/graph/populate   # Re-scan schemas (use after schema changes)
 POST /api/graph/clear      # Clear all graph data (dangerous!)
 ```
 
-## File Structure
+## Data Storage
 
-The server reads/writes to `../forms/`:
+Forms are stored as JSON in the `shared.forms` PostgreSQL table with append-only versioning.
+Config is stored as JSON in `settings/config.json`.
 
 ```
 CloneTemplate/
-├── forms/
-│   ├── _index.edn           # List of form names
-│   ├── recipe_calculator.edn
-│   └── ...
+├── settings/
+│   └── config.json          # App configuration
 └── server/
     ├── index.js             # Main server
+    ├── routes/              # API route handlers
     └── graph/               # Dependency/intent graph
         ├── schema.js        # Table creation
         ├── query.js         # CRUD operations

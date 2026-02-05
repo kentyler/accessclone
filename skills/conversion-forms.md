@@ -1,19 +1,19 @@
 # Conversion Forms Skill
 
-Phase 4 of the conversion process. Exports Access forms to EDN format for use with CloneTemplate UI.
+Phase 4 of the conversion process. Imports Access forms into PolyAccess via the Import UI or API.
 
 ## Prerequisites
 
 - Phase 1-3 completed
 - Access database accessible via COM automation
-- Project `forms/` folder exists
+- Target database configured in PolyAccess
 
 ## Tools
 
-The form export uses PowerShell scripts in the `Migration/` folder:
+Form import uses PowerShell scripts in the `scripts/access/` folder:
 
-- `export_form_to_edn.ps1` - Export single form
-- `export_all_forms.ps1` - Batch export all forms
+- `export_form.ps1` - Export single form as JSON via COM automation
+- `list_forms.ps1` - List all forms in an Access database
 
 ## COM Automation Options
 
@@ -60,23 +60,18 @@ $access.CloseCurrentDatabase()
 $access.Quit()
 ```
 
-## Step 2: Export Individual Form
+## Step 2: Import Forms via UI
 
-```powershell
-.\export_form_to_edn.ps1 -DatabasePath "C:\path\to\database.accdb" -FormName "Recipe_Calculator" -OutputPath "forms\Recipe_Calculator.edn"
-```
+Use the Import mode in the PolyAccess UI:
+1. Switch to Import mode (radio toggle in header)
+2. Select an Access database from the scan results
+3. Select "Forms" as the object type
+4. Choose the target database
+5. Click Import on individual forms
 
-## Step 3: Batch Export All Forms
+The API endpoint `POST /api/access-import/export-form` handles the PowerShell export and returns JSON.
 
-```powershell
-.\export_all_forms.ps1 -DatabasePath "C:\path\to\database.accdb" -OutputFolder "forms"
-```
-
-This creates:
-- One `.edn` file per form
-- `_index.edn` listing all form filenames
-
-## EDN Form Structure
+## JSON Form Structure
 
 See `form-design.md` for complete details. Basic structure:
 
@@ -149,7 +144,7 @@ result = result.replace(/^\uFEFF/, '');
 
 ## Control Type Mapping
 
-| Access Type | EDN Type | Notes |
+| Access Type | JSON Type | Notes |
 |-------------|----------|-------|
 | Label | `:label` | Static text |
 | TextBox | `:text-box` | Text input |
@@ -234,19 +229,15 @@ Convert to valid PostgreSQL. Usually just syntax cleanup:
 - Fix string quotes: `"text"` → `'text'`
 - Fix booleans: `True` → `true`
 
-## Step 7: Create _index.edn
+## Step 7: Verify Forms in Database
 
-The batch export creates this automatically. Format:
+After import, verify forms are stored correctly:
 
-```clojure
-[
-  "Recipe_Calculator.edn"
-  "Ingredient_Entry.edn"
-  "Product_List.edn"
-]
+```sql
+SELECT name, version, is_current FROM shared.forms WHERE database_id = 'your_db';
 ```
 
-This tells the UI which forms are available.
+The UI lists all current forms in the sidebar automatically.
 
 ## Standard Button Handlers
 
@@ -288,7 +279,7 @@ SELECT log_migration(
     'Recipe_Calculator',
     NULL,
     '{"controls": 45, "has_subforms": true}'::jsonb,
-    '{"edn_file": "Recipe_Calculator.edn"}'::jsonb,
+    '{"controls": 45}'::jsonb,
     NULL,
     'completed',
     'Review: combo box row sources need conversion'
@@ -317,9 +308,9 @@ New records are marked with `:__new__ true` to distinguish from existing records
 
 ### Unicode/Special Characters
 
-EDN files should be UTF-8. If Access has special characters, ensure PowerShell exports correctly:
-```powershell
-$edn | Out-File -FilePath $path -Encoding UTF8
+JSON output should be UTF-8. PowerShell may add a BOM that needs stripping:
+```javascript
+result = result.replace(/^\uFEFF/, '');
 ```
 
 ### Missing Controls
@@ -336,8 +327,8 @@ Expressions like `=[Form]![SubForm].[Form]![Total]` need translation to session 
 ## Outputs
 
 After this phase:
-- `forms/` folder populated with EDN files
-- `forms/_index.edn` listing all forms
+- Forms stored as JSON in `shared.forms` PostgreSQL table
+- Each form versioned with append-only history
 - Record sources identified for review
 - Event handlers flagged for VBA translation
 

@@ -56,7 +56,7 @@ ${process.env.PGDATABASE || 'calculator'}
 
 1. **Tables** - Create tables in PostgreSQL matching Access structure
 2. **Queries** - Convert to PostgreSQL views/functions
-3. **Forms** - Export from Access using `export_form_to_edn.ps1`, place in `forms/`
+3. **Forms** - Import from Access via the Import UI (stored as JSON in PostgreSQL)
 4. **VBA Code** - Translate to PostgreSQL functions using session-state pattern
 
 ### Naming Convention
@@ -494,27 +494,16 @@ The UI layer:
 
 ## Form Designer Integration
 
-The CloneTemplate UI includes a visual form designer that generates form definitions as EDN data.
+The CloneTemplate UI includes a visual form designer that generates form definitions as JSON data.
 
 ### Form Definition Storage
 
-Forms are stored as EDN files in the `forms/` directory (not in the database):
+Forms are stored as JSON in the `shared.forms` PostgreSQL table with append-only versioning:
+- Each save creates a new version; old versions preserved for rollback
+- Forms are per-database, identified by `database_id` and `name`
+- `is_current` flag marks the active version
 
-```
-forms/
-├── _index.edn           # List of form filenames
-├── recipe_calculator.edn
-├── ingredient_entry.edn
-└── inventory_list.edn
-```
-
-This approach:
-- Makes forms version-controllable with git
-- Allows distribution by copying the forms directory
-- Keeps forms separate from runtime data
-- Enables LLMs to directly read/write form definitions
-
-Forms are explicitly created via the form designer or LLM assistance - there is no auto-generation from table metadata.
+Forms are explicitly created via the form designer, imported from Access, or created with LLM assistance - there is no auto-generation from table metadata.
 
 ### Form Controls and Data Binding
 
@@ -589,27 +578,16 @@ AND table_name = 'ingredient_with_total_grams_on_hand';
 ### See Also
 
 - `CloneTemplate/skills/form-design.md` - Form definition structure and patterns
-- `CloneTemplate/ui/README.md` - UI architecture and form designer usage
 
 ---
 
 ## Access Form Export
 
-Forms can be extracted from Microsoft Access databases and converted to EDN format using the `export_form_to_edn.ps1` script in the Migration folder.
-
-### Usage
-
-```powershell
-# Export single form to console
-.\export_form_to_edn.ps1 -DatabasePath "C:\path\to\db.accdb" -FormName "FormName"
-
-# Export to file
-.\export_form_to_edn.ps1 -DatabasePath "C:\path\to\db.accdb" -FormName "FormName" -OutputPath "output.edn"
-```
+Forms can be imported from Microsoft Access databases via the Import UI or the `POST /api/access-import/export-form` API endpoint. The PowerShell scripts in `scripts/access/` handle COM automation.
 
 ### Access Control Type Mapping
 
-| Type Code | EDN Type | Description |
+| Type Code | JSON Type | Description |
 |-----------|----------|-------------|
 | 100 | `:label` | Static text |
 | 101 | `:rectangle` | Shape |
@@ -629,7 +607,7 @@ Forms can be extracted from Microsoft Access databases and converted to EDN form
 | 123 | `:tab-control` | Tab container |
 | 124 | `:page` | Tab page |
 
-### Exported EDN Structure
+### Exported JSON Structure
 
 ```clojure
 {:id nil

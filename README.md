@@ -55,7 +55,7 @@ clonetemplate/
 ├── ui/                  # ClojureScript frontend
 │   ├── src/app/         # Application source
 │   └── resources/public/  # Static files and compiled JS
-├── forms/               # Form definitions (EDN files)
+├── forms/               # (legacy, unused - forms stored in PostgreSQL)
 ├── skills/              # LLM guidance for conversions
 ├── install.ps1          # Install dependencies
 ├── setup.ps1            # Setup project
@@ -69,7 +69,7 @@ See `skills/conversion.md` for the complete conversion workflow:
 1. **Setup** - Create database and project folder
 2. **Tables** - Migrate table structures and data
 3. **Queries** - Convert queries to views/functions
-4. **Forms** - Export forms to EDN format
+4. **Forms** - Import forms via the UI (stored as JSON in PostgreSQL)
 5. **VBA** - Translate VBA to PostgreSQL functions
 
 ## Requirements

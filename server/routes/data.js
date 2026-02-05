@@ -10,7 +10,7 @@ module.exports = function(pool) {
   /**
    * GET /api/data/:source
    * Fetch records from a table or view
-   * Query params: limit, offset, orderBy, orderDir
+   * Query params: limit, offset, orderBy, orderDir, filter (JSON object of column=value pairs)
    */
   router.get('/:source', async (req, res) => {
     try {
@@ -26,15 +26,59 @@ module.exports = function(pool) {
       }
 
       let query = `SELECT * FROM "${source}"`;
+      const params = [];
+      let paramIdx = 1;
+
+      // Build WHERE clause from filter (JSON object of column=value pairs)
+      if (req.query.filter) {
+        try {
+          const filter = JSON.parse(req.query.filter);
+          const conditions = [];
+          for (const [col, val] of Object.entries(filter)) {
+            // Validate column name to prevent injection
+            if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(col)) {
+              conditions.push(`"${col}" = $${paramIdx}`);
+              params.push(val);
+              paramIdx++;
+            }
+          }
+          if (conditions.length > 0) {
+            query += ` WHERE ${conditions.join(' AND ')}`;
+          }
+        } catch (e) {
+          // Invalid filter JSON, ignore
+        }
+      }
+
       if (orderBy && /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(orderBy)) {
         query += ` ORDER BY "${orderBy}" ${orderDir}`;
       }
-      query += ` LIMIT $1 OFFSET $2`;
+      query += ` LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`;
+      params.push(limit, offset);
 
-      const result = await pool.query(query, [limit, offset]);
+      const result = await pool.query(query, params);
 
-      // Get total count
-      const countResult = await pool.query(`SELECT COUNT(*) FROM "${source}"`);
+      // Get total count (with same filter)
+      let countQuery = `SELECT COUNT(*) FROM "${source}"`;
+      const countParams = [];
+      if (req.query.filter) {
+        try {
+          const filter = JSON.parse(req.query.filter);
+          const conditions = [];
+          let ci = 1;
+          for (const [col, val] of Object.entries(filter)) {
+            if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(col)) {
+              conditions.push(`"${col}" = $${ci}`);
+              countParams.push(val);
+              ci++;
+            }
+          }
+          if (conditions.length > 0) {
+            countQuery += ` WHERE ${conditions.join(' AND ')}`;
+          }
+        } catch (e) {}
+      }
+      const countResult = await pool.query(countQuery, countParams);
       const totalCount = parseInt(countResult.rows[0].count);
 
       res.json({

@@ -439,11 +439,21 @@
             ;; Normal mode: fetch records from API
             (go
               (let [order-by (get-in @app-state [:form-editor :current :order-by])
+                    filter-str (get-in @app-state [:form-editor :current :filter])
+                    ;; Parse Access-style filter like "[col]='val' AND col2='val2'" into {col val}
+                    filter-map (when (and filter-str (not (str/blank? filter-str)))
+                                 (let [parts (str/split filter-str #"(?i)\s+AND\s+")]
+                                   (reduce (fn [m part]
+                                             (if-let [[_ col val] (re-matches #"\s*\[?(\w+)\]?\s*=\s*[\"']?([^\"']*)[\"']?\s*" part)]
+                                               (assoc m col val)
+                                               m))
+                                           {} parts)))
                     query-params (cond-> {:limit 1000}
                                    order-by (merge (let [parts (str/split (str/trim order-by) #"\s+")]
                                                      (cond-> {:orderBy (first parts)}
                                                        (= "DESC" (str/upper-case (or (second parts) "")))
-                                                       (assoc :orderDir "desc")))))
+                                                       (assoc :orderDir "desc"))))
+                                   (seq filter-map) (assoc :filter (.stringify js/JSON (clj->js filter-map))))
                     response (<! (http/get (str api-base "/api/data/" record-source)
                                            {:query-params query-params
                                             :headers (db-headers)}))]

@@ -226,6 +226,8 @@
         has-new-record? (some :__new__ all-records)
         ;; Check if any section has controls
         back-color (:back-color current)
+        scroll-bars (or (:scroll-bars current) :both)
+        form-width (or (:width current) (:form-width current))
         has-controls? (or (seq (fu/get-section-controls current :header))
                           (seq (fu/get-section-controls current :detail))
                           (seq (fu/get-section-controls current :footer)))]
@@ -243,12 +245,16 @@
       (when (not record-source)
         [:span.no-source-warning " (No record source selected)"])]
      [:div.canvas-body.view-mode-body
+      {:style (cond-> {}
+                (#{:neither :vertical} scroll-bars) (assoc :overflow-x "hidden")
+                (#{:neither :horizontal} scroll-bars) (assoc :overflow-y "hidden"))}
       (if (and record-source (or (> (:total record-pos) 0)
                                   (and continuous? allow-additions?)))
         (if continuous?
           ;; Continuous forms - render all records
           [:div.view-sections-container.continuous
-           {:class (when-not dividing-lines? "no-dividing-lines")}
+           {:class (when-not dividing-lines? "no-dividing-lines")
+            :style (when form-width {:max-width form-width})}
            [form-view-section :header current current-record on-field-change {:allow-edits? allow-edits?}]
            [:div.continuous-records-container
             (for [[idx record] (map-indexed vector all-records)]
@@ -264,6 +270,7 @@
            [form-view-section :footer current current-record on-field-change {:allow-edits? allow-edits?}]]
           ;; Single form - render one record
           [:div.view-sections-container
+           {:style (when form-width {:max-width form-width})}
            [form-view-section :header current current-record on-field-change {:allow-edits? allow-edits?}]
            [form-view-section :detail current current-record on-field-change
             {:show-selectors? show-selectors? :allow-edits? allow-edits?}]

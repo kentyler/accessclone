@@ -156,6 +156,14 @@
       ;; Caption
       (:caption form-data) (assoc :text (:caption form-data))
 
+      ;; Filter (only if FilterOn is true)
+      (and (:filter form-data) (:filterOn form-data))
+      (assoc :filter (:filter form-data))
+
+      ;; Order By (only if OrderByOn is true)
+      (and (:orderBy form-data) (:orderByOn form-data))
+      (assoc :order-by (:orderBy form-data))
+
       ;; Scroll bars
       (:scrollBars form-data) (assoc :scroll-bars (get scroll-bars-map (:scrollBars form-data) :both))
 

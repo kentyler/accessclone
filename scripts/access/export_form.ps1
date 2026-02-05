@@ -249,6 +249,19 @@ try {
     # Default view (0=Single, 1=Continuous, 2=Datasheet)
     $formObj.defaultView = [int](Safe-GetProperty $form "DefaultView" 0)
 
+    # Filter and OrderBy
+    $filter = Safe-GetProperty $form "Filter"
+    if ($filter) { $formObj.filter = $filter }
+
+    $filterOn = Safe-GetProperty $form "FilterOn" $false
+    if ($filterOn) { $formObj.filterOn = $true }
+
+    $orderBy = Safe-GetProperty $form "OrderBy"
+    if ($orderBy) { $formObj.orderBy = $orderBy }
+
+    $orderByOn = Safe-GetProperty $form "OrderByOn" $false
+    if ($orderByOn) { $formObj.orderByOn = $true }
+
     # Form width (twips)
     $formObj.formWidth = [int](Safe-GetProperty $form "Width" 10000)
 

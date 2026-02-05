@@ -3,6 +3,8 @@
   (:require [app.state :as state]
             [app.views.form-utils :as fu]))
 
+(declare show-record-menu)
+
 ;; --- Individual control renderers ---
 ;; Each takes the control definition, resolved field name, resolved value,
 ;; and an on-change callback. Parameters like width/height are already
@@ -73,28 +75,101 @@
         is-new? (:__new__ current-record)
         renderer (get control-renderers ctrl-type render-default)]
     [:div.view-control
-     {:style (fu/control-style ctrl)}
+     {:style (fu/control-style ctrl)
+      :on-context-menu show-record-menu}
      [renderer ctrl field value on-change {:auto-focus? auto-focus? :is-new? is-new?}]]))
+
+;; --- Record context menu ---
+
+(defn show-record-menu [e]
+  (.preventDefault e)
+  (state/show-form-context-menu! (.-clientX e) (.-clientY e)))
+
+(defn form-record-context-menu
+  "Right-click context menu for form view records"
+  []
+  (let [menu (get-in @state/app-state [:form-editor :context-menu])
+        has-clipboard? (some? @state/form-clipboard)
+        allow-additions? (not= 0 (get-in @state/app-state [:form-editor :current :allow-additions]))
+        has-record? (> (get-in @state/app-state [:form-editor :record-position :total] 0) 0)]
+    (when (:visible menu)
+      [:div.context-menu
+       {:style {:left (:x menu) :top (:y menu)}
+        :on-mouse-leave #(state/hide-form-context-menu!)}
+       [:div.menu-item
+        {:class (when-not has-record? "disabled")
+         :on-click #(when has-record?
+                      (state/cut-form-record!)
+                      (state/hide-form-context-menu!))}
+        "Cut"]
+       [:div.menu-item
+        {:class (when-not has-record? "disabled")
+         :on-click #(when has-record?
+                      (state/copy-form-record!)
+                      (state/hide-form-context-menu!))}
+        "Copy"]
+       [:div.menu-item
+        {:class (when-not (and has-clipboard? allow-additions?) "disabled")
+         :on-click #(when (and has-clipboard? allow-additions?)
+                      (state/paste-form-record!)
+                      (state/hide-form-context-menu!))}
+        "Paste"]
+       [:div.menu-divider]
+       [:div.menu-item
+        {:class (when-not allow-additions? "disabled")
+         :on-click #(when allow-additions?
+                      (state/new-record!)
+                      (state/hide-form-context-menu!))}
+        "New Record"]
+       [:div.menu-item.danger
+        {:class (when-not has-record? "disabled")
+         :on-click #(when has-record?
+                      (when (js/confirm "Delete this record?")
+                        (state/delete-current-record!))
+                      (state/hide-form-context-menu!))}
+        "Delete Record"]])))
+
+;; --- Record selector ---
+
+(defn record-selector [selected? new-record?]
+  [:div.record-selector
+   {:class [(when selected? "current") (when new-record? "new-record")]
+    :on-context-menu show-record-menu}
+   (cond
+     (and selected? new-record?) "\u25B6*"
+     selected? "\u25B6"
+     new-record? "*"
+     :else "\u00A0")])
 
 ;; --- Section and form rendering ---
 
 (defn form-view-section
   "Render a section in view mode"
-  [section form-def current-record on-field-change]
+  [section form-def current-record on-field-change & [{:keys [show-selectors?]}]]
   (let [height (fu/get-section-height form-def section)
         controls (fu/get-section-controls form-def section)]
     (when (seq controls)
-      [:div.view-section
-       {:class (name section)
-        :style {:height height}}
-       [:div.view-controls-container
-        (for [[idx ctrl] (map-indexed vector controls)]
-          ^{:key idx}
-          [form-view-control ctrl current-record on-field-change])]])))
+      (if (and show-selectors? (= section :detail))
+        [:div.single-form-row
+         [record-selector true false]
+         [:div.view-section
+          {:class (name section)
+           :style {:height height :flex 1}}
+          [:div.view-controls-container
+           (for [[idx ctrl] (map-indexed vector controls)]
+             ^{:key idx}
+             [form-view-control ctrl current-record on-field-change])]]]
+        [:div.view-section
+         {:class (name section)
+          :style {:height height}}
+         [:div.view-controls-container
+          (for [[idx ctrl] (map-indexed vector controls)]
+            ^{:key idx}
+            [form-view-control ctrl current-record on-field-change])]]))))
 
 (defn form-view-detail-row
   "Render a single detail row for continuous forms"
-  [idx record form-def selected? on-select on-field-change]
+  [idx record form-def selected? on-select on-field-change & [{:keys [show-selectors?]}]]
   (let [height (fu/get-section-height form-def :detail)
         controls (fu/get-section-controls form-def :detail)
         ;; Find index of first text-box for auto-focus (handle both keyword and string types)
@@ -105,11 +180,24 @@
      {:class (when selected? "selected")
       :style {:height height}
       :on-click #(on-select idx)}
+     (when show-selectors?
+       [record-selector selected? (:__new__ record)])
      [:div.view-controls-container
       (for [[ctrl-idx ctrl] (map-indexed vector controls)]
         ^{:key ctrl-idx}
         [form-view-control ctrl record on-field-change
          {:auto-focus? (and selected? (= ctrl-idx first-textbox-idx))}])]]))
+
+(defn tentative-new-row
+  "Render the * placeholder row at the bottom of continuous forms"
+  [form-def show-selectors?]
+  (let [height (fu/get-section-height form-def :detail)]
+    [:div.view-section.detail.continuous-row.tentative-row
+     {:style {:height height}
+      :on-click #(state/new-record!)}
+     (when show-selectors?
+       [record-selector false true])
+     [:div.view-controls-container]]))
 
 (defn form-view
   "The form in view/data entry mode"
@@ -125,18 +213,23 @@
         continuous? (= default-view "Continuous Forms")
         on-field-change (fn [field value] (state/update-record-field! field value))
         on-select-record (fn [idx] (state/navigate-to-record! (inc idx)))
+        show-selectors? (not= 0 (:record-selectors current))
+        allow-additions? (not= 0 (:allow-additions current))
+        has-new-record? (some :__new__ all-records)
         ;; Check if any section has controls
         has-controls? (or (seq (fu/get-section-controls current :header))
                           (seq (fu/get-section-controls current :detail))
                           (seq (fu/get-section-controls current :footer)))]
     [:div.form-canvas.view-mode
+     {:on-click #(state/hide-form-context-menu!)}
      [:div.canvas-header
       [:span "Form View"]
       (when continuous? [:span.view-type-badge " (Continuous)"])
       (when (not record-source)
         [:span.no-source-warning " (No record source selected)"])]
      [:div.canvas-body.view-mode-body
-      (if (and record-source (> (:total record-pos) 0))
+      (if (and record-source (or (> (:total record-pos) 0)
+                                  (and continuous? allow-additions?)))
         (if continuous?
           ;; Continuous forms - render all records
           [:div.view-sections-container.continuous
@@ -148,12 +241,16 @@
                     display-record (if selected? current-record record)]
                 ^{:key (or (:id record) idx)}
                 [form-view-detail-row idx display-record current
-                 selected? on-select-record on-field-change]))]
+                 selected? on-select-record on-field-change
+                 {:show-selectors? show-selectors?}]))
+            (when (and allow-additions? (not has-new-record?))
+              [tentative-new-row current show-selectors?])]
            [form-view-section :footer current current-record on-field-change]]
           ;; Single form - render one record
           [:div.view-sections-container
            [form-view-section :header current current-record on-field-change]
-           [form-view-section :detail current current-record on-field-change]
+           [form-view-section :detail current current-record on-field-change
+            {:show-selectors? show-selectors?}]
            [form-view-section :footer current current-record on-field-change]])
         [:div.no-records
          (if record-source
@@ -182,6 +279,7 @@
                             :disabled (or (< (:total record-pos) 1) (>= (:current record-pos) (:total record-pos)))
                             :on-click #(state/navigate-to-record! (:total record-pos))} "▶|"]
           [:button.nav-btn {:title "New Record"
+                            :disabled (not allow-additions?)
                             :on-click #(state/new-record!)} "▶*"]
           [:button.nav-btn.delete-btn
            {:title "Delete Record"
@@ -194,4 +292,5 @@
             :class (when record-dirty? "dirty")
             :disabled (not record-dirty?)
             :on-click #(state/save-current-record!)}
-           "Save"]])]))
+           "Save"]])
+     [form-record-context-menu]]))

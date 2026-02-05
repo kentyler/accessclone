@@ -895,6 +895,7 @@ body {
 }
 
 .view-section.continuous-row {
+  display: flex;
   border-bottom: 1px solid var(--gray-200);
   cursor: pointer;
   transition: background-color 0.1s ease;
@@ -906,12 +907,52 @@ body {
 
 .view-section.continuous-row.selected {
   background-color: rgba(37, 99, 235, 0.1);
-  border-left: 3px solid var(--primary);
 }
 
 /* Override min-height for continuous rows */
 .view-section.continuous-row .view-controls-container {
+  flex: 1;
   min-height: auto;
+}
+
+/* Record selectors */
+.record-selector {
+  width: 20px;
+  flex-shrink: 0;
+  background: var(--gray-200);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--gray-500);
+  cursor: pointer;
+  user-select: none;
+  border-right: 1px solid var(--gray-300);
+}
+
+.record-selector.current {
+  background: var(--gray-700);
+  color: white;
+}
+
+.record-selector.new-record {
+  color: var(--gray-600);
+  font-size: 9px;
+}
+
+/* Tentative new-record row */
+.view-section.continuous-row.tentative-row {
+  opacity: 0.5;
+}
+
+.view-section.continuous-row.tentative-row:hover {
+  opacity: 0.8;
+}
+
+/* Single form selector + detail wrapper */
+.single-form-row {
+  display: flex;
+  flex: 1;
 }
 
 .view-type-badge {

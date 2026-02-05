@@ -11,7 +11,7 @@
 ;; Forward declarations for functions used before definition
 (declare load-tables! load-queries! load-functions! save-ui-state!
          save-current-record! save-form! save-form-to-file!
-         get-record-source-fields)
+         get-record-source-fields delete-current-record!)
 
 ;; Application state atom
 (defonce app-state
@@ -298,6 +298,39 @@
 
 (defn hide-context-menu! []
   (swap! app-state assoc-in [:context-menu :visible?] false))
+
+;; Form-view record context menu & clipboard
+(def form-clipboard (atom nil))
+
+(defn show-form-context-menu! [x y]
+  (swap! app-state assoc-in [:form-editor :context-menu]
+         {:visible true :x x :y y}))
+
+(defn hide-form-context-menu! []
+  (swap! app-state assoc-in [:form-editor :context-menu :visible] false))
+
+(defn copy-form-record!
+  "Copy the current record to the form clipboard"
+  []
+  (let [record (get-in @app-state [:form-editor :current-record])]
+    (reset! form-clipboard (dissoc record :__new__ :id))))
+
+(defn cut-form-record!
+  "Copy the current record to clipboard, then delete it"
+  []
+  (copy-form-record!)
+  (delete-current-record!))
+
+(defn paste-form-record!
+  "Create a new record pre-filled with clipboard values"
+  []
+  (when-let [data @form-clipboard]
+    (let [total (get-in @app-state [:form-editor :record-position :total] 0)
+          new-record (assoc data :__new__ true)]
+      (swap! app-state update-in [:form-editor :records] #(conj (vec %) new-record))
+      (swap! app-state assoc-in [:form-editor :current-record] new-record)
+      (swap! app-state assoc-in [:form-editor :record-position] {:current (inc total) :total (inc total)})
+      (swap! app-state assoc-in [:form-editor :record-dirty?] true))))
 
 ;; Form creation
 (defn create-new-form! []

@@ -679,10 +679,17 @@
           (when-not abort?
             ;; Find primary key - check for pk flag or common names
             (let [fields (get-record-source-fields record-source)
-                  pk-field-name (or (some #(when (:pk %) (:name %)) fields)
-                                    "id")
+                  pk-from-fields (some #(when (:pk %) (:name %)) fields)
+                  pk-field-name (or pk-from-fields "id")
                   pk-value (or (get current-record (keyword pk-field-name))
                                (get current-record pk-field-name))
+                  ;; Guard: if we fell back to "id" but record has no id key,
+                  ;; and this isn't an explicitly new record, abort to prevent
+                  ;; creating duplicates in tables without a primary key
+                  no-pk? (and (nil? pk-from-fields)
+                              (not (contains? current-record :id))
+                              (not (contains? current-record "id"))
+                              (not (:__new__ current-record)))
                   is-new? (or (:__new__ current-record)
                               (nil? pk-value)
                               (= pk-value ""))
@@ -693,8 +700,15 @@
                                       (assoc m (if (keyword? k) (name k) k) v)))
                                   {}
                                   current-record)]
-              (println "Saving record:" {:pk pk-field-name :pk-value pk-value :is-new? is-new? :data record-for-api})
-              (if is-new?
+              (if no-pk?
+                (do
+                  (println "ERROR: No primary key detected for table" record-source
+                           "- aborting save to prevent duplicate records.")
+                  (js/alert (str "Cannot save: table \"" record-source "\" has no primary key. "
+                                 "Add a primary key to this table before editing records.")))
+                (do
+                  (println "Saving record:" {:pk pk-field-name :pk-value pk-value :is-new? is-new? :data record-for-api})
+                  (if is-new?
                 ;; Insert new record
                 (let [insert-data (if (= pk-field-name "id")
                                     (dissoc record-for-api "id")
@@ -728,7 +742,7 @@
                         (swap! app-state assoc-in [:form-editor :records (dec pos)] updated-record)
                         (swap! app-state assoc-in [:form-editor :current-record] updated-record)
                         (swap! app-state assoc-in [:form-editor :record-dirty?] false)))
-                    (println "Error updating record:" (:body response)))))))))
+                    (println "Error updating record:" (:body response)))))))))))
       (println "Save skipped - conditions not met"))))
 
 (defn new-record!
@@ -1390,13 +1404,21 @@
                                (fn [idx table]
                                  {:id (inc idx)
                                   :name (:name table)
+                                  :description (:description table)
                                   :fields (mapv (fn [field]
                                                   {:name (:name field)
                                                    :type (:type field)
                                                    :pk (:isPrimaryKey field)
                                                    :fk (when (:isForeignKey field)
                                                          (:foreignTable field))
-                                                   :nullable (:nullable field)})
+                                                   :nullable (:nullable field)
+                                                   :default (:default field)
+                                                   :max-length (:maxLength field)
+                                                   :precision (:precision field)
+                                                   :scale (:scale field)
+                                                   :description (:description field)
+                                                   :indexed (:indexed field)
+                                                   :check-constraint (:checkConstraint field)})
                                                 (:fields table))})
                                tables)]
           (swap! app-state assoc-in [:objects :tables] (vec tables-with-ids))

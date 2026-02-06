@@ -33,6 +33,10 @@ module.exports = function(pool) {
             c.data_type,
             c.is_nullable,
             c.column_default,
+            c.character_maximum_length,
+            c.numeric_precision,
+            c.numeric_scale,
+            c.ordinal_position,
             CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END as is_primary_key,
             CASE WHEN fk.column_name IS NOT NULL THEN true ELSE false END as is_foreign_key,
             fk.foreign_table_name
@@ -42,7 +46,9 @@ module.exports = function(pool) {
             FROM information_schema.table_constraints tc
             JOIN information_schema.key_column_usage kcu
               ON tc.constraint_name = kcu.constraint_name
+              AND tc.table_schema = kcu.table_schema
             WHERE tc.table_name = $1
+              AND tc.table_schema = $2
               AND tc.constraint_type = 'PRIMARY KEY'
           ) pk ON c.column_name = pk.column_name
           LEFT JOIN (
@@ -52,9 +58,11 @@ module.exports = function(pool) {
             FROM information_schema.table_constraints tc
             JOIN information_schema.key_column_usage kcu
               ON tc.constraint_name = kcu.constraint_name
+              AND tc.table_schema = kcu.table_schema
             JOIN information_schema.constraint_column_usage ccu
               ON tc.constraint_name = ccu.constraint_name
             WHERE tc.table_name = $1
+              AND tc.table_schema = $2
               AND tc.constraint_type = 'FOREIGN KEY'
           ) fk ON c.column_name = fk.column_name
           WHERE c.table_name = $1
@@ -62,8 +70,64 @@ module.exports = function(pool) {
           ORDER BY c.ordinal_position
         `, [row.table_name, schemaName]);
 
+        // Get column descriptions from pg_description
+        const descResult = await pool.query(`
+          SELECT a.attnum as ordinal, d.description
+          FROM pg_description d
+          JOIN pg_class cls ON d.objoid = cls.oid
+          JOIN pg_namespace n ON cls.relnamespace = n.oid
+          JOIN pg_attribute a ON a.attrelid = cls.oid AND a.attnum = d.objsubid
+          WHERE cls.relname = $1 AND n.nspname = $2 AND d.objsubid > 0
+        `, [row.table_name, schemaName]);
+        const descMap = {};
+        descResult.rows.forEach(r => { descMap[r.ordinal] = r.description; });
+
+        // Get table description
+        const tableDescResult = await pool.query(`
+          SELECT d.description
+          FROM pg_description d
+          JOIN pg_class cls ON d.objoid = cls.oid
+          JOIN pg_namespace n ON cls.relnamespace = n.oid
+          WHERE cls.relname = $1 AND n.nspname = $2 AND d.objsubid = 0
+        `, [row.table_name, schemaName]);
+        const tableDescription = tableDescResult.rows.length > 0 ? tableDescResult.rows[0].description : null;
+
+        // Get check constraints
+        const checkResult = await pool.query(`
+          SELECT conname, pg_get_constraintdef(c.oid) as def
+          FROM pg_constraint c
+          JOIN pg_class cls ON c.conrelid = cls.oid
+          JOIN pg_namespace n ON cls.relnamespace = n.oid
+          WHERE cls.relname = $1 AND n.nspname = $2 AND c.contype = 'c'
+        `, [row.table_name, schemaName]);
+        const constraintMap = {};
+        checkResult.rows.forEach(r => { constraintMap[r.conname] = r.def; });
+
+        // Get indexes
+        const indexResult = await pool.query(`
+          SELECT indexname, indexdef
+          FROM pg_indexes
+          WHERE tablename = $1 AND schemaname = $2
+        `, [row.table_name, schemaName]);
+        // Build map: column_name -> "unique" | "yes"
+        const indexedMap = {};
+        indexResult.rows.forEach(r => {
+          const isUnique = r.indexdef.toUpperCase().includes('UNIQUE');
+          // Extract column names from indexdef (simple single-column detection)
+          const colMatch = r.indexdef.match(/\(([^)]+)\)/);
+          if (colMatch) {
+            const cols = colMatch[1].split(',').map(c => c.trim().replace(/"/g, ''));
+            cols.forEach(col => {
+              if (!indexedMap[col] || isUnique) {
+                indexedMap[col] = isUnique ? 'unique' : 'yes';
+              }
+            });
+          }
+        });
+
         tables.push({
           name: row.table_name,
+          description: tableDescription,
           fields: columnsResult.rows.map(col => ({
             name: col.column_name,
             type: col.data_type,
@@ -71,7 +135,13 @@ module.exports = function(pool) {
             default: col.column_default,
             isPrimaryKey: col.is_primary_key,
             isForeignKey: col.is_foreign_key,
-            foreignTable: col.foreign_table_name
+            foreignTable: col.foreign_table_name,
+            maxLength: col.character_maximum_length,
+            precision: col.numeric_precision,
+            scale: col.numeric_scale,
+            description: descMap[col.ordinal_position] || null,
+            indexed: indexedMap[col.column_name] || null,
+            checkConstraint: constraintMap[col.column_name] || null
           }))
         });
       }

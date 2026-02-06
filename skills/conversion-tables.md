@@ -93,6 +93,52 @@ CREATE TABLE ingredient (
 - AutoNumber fields → `serial PRIMARY KEY`
 - Composite keys → `PRIMARY KEY (col1, col2)`
 
+### Tables Without Primary Keys
+
+Access lookup tables often have no AutoNumber field — e.g., a carrier table with just `(carrier text, grams_per_liter numeric)`. These tables will be created in PostgreSQL without a PRIMARY KEY constraint, which causes the form editor to create duplicate records instead of updating existing ones.
+
+**Detection during Step 1 extraction:**
+
+In the PowerShell extraction, flag tables where no field has `Attributes = dbAutoIncrField` (value 16). Add this check:
+
+```powershell
+$hasAutoNumber = $false
+foreach ($field in $table.Fields) {
+    if ($field.Attributes -band 16) { $hasAutoNumber = $true; break }
+}
+if (-not $hasAutoNumber) {
+    Write-Host "  WARNING: No AutoNumber field - needs manual PK assignment"
+}
+```
+
+**PK resolution strategy (in order):**
+
+1. **LLM identifies natural key** — ask the LLM chat to examine the table and suggest which column(s) are the natural key. For lookup tables, it's usually the name/code column:
+   `ALTER TABLE carrier ADD PRIMARY KEY (carrier);`
+2. **Fallback: add surrogate key** — if the LLM can't identify a natural key (ambiguous data, no unique column, or user is unsure), add an auto-incrementing id:
+   `ALTER TABLE table_name ADD COLUMN id serial PRIMARY KEY;`
+   This is always safe and matches the form editor's default PK fallback of `"id"`.
+
+**During conversion, after all tables are created and data is migrated:**
+
+1. Run the diagnostic SQL to find tables missing PKs (use the database schema name):
+
+```sql
+SELECT t.table_name
+FROM information_schema.tables t
+LEFT JOIN information_schema.table_constraints c
+  ON c.table_schema = t.table_schema
+  AND c.table_name = t.table_name
+  AND c.constraint_type = 'PRIMARY KEY'
+WHERE t.table_schema = 'SCHEMA_NAME'
+  AND t.table_type = 'BASE TABLE'
+  AND c.constraint_name IS NULL
+ORDER BY t.table_name;
+```
+
+2. For each table, ask the LLM to suggest a natural key. If it can't, add `id serial PRIMARY KEY` as the fallback.
+3. **Every table must have a PK before forms are used** — without one, the form editor cannot distinguish inserts from updates and will create duplicate records.
+
 ### Foreign Keys
 
 Add after all tables are created to avoid ordering issues:

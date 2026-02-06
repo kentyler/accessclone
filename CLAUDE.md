@@ -49,9 +49,16 @@ This is PolyAccess (formerly CloneTemplate), a platform for converting MS Access
 
 ### Table Viewer (ui/src/app/views/table_viewer.cljs)
 - Datasheet View: Editable grid with inline cell editing
-- Design View: Shows table structure (columns, types, keys)
+- Design View: Access-style split pane layout
+  - Upper pane: Field Name | Data Type | Description grid with clickable row selection
+  - Lower pane: Property sheet showing column properties (when a field is selected) or table properties (when none selected)
+  - Column properties include: Field Size, Caption (pg_description), Default Value, Validation Rule (check constraints), Required (inverted nullable), Indexed (from pg_indexes)
+  - Access-familiar N/A properties shown grayed out: New Values, Format, Input Mask, Validation Text, Allow Zero Length, Unicode Compression, IME Mode, Text Align
+  - Selection state stored in `:table-viewer :selected-field`
+- Metadata API (`/api/tables`) returns extended column info: maxLength, precision, scale, description, indexed, checkConstraint; plus table-level description
 - Right-click context menu: New Record, Delete Record, Cut, Copy, Paste
 - Tab/Shift+Tab navigation between cells
+- State: `state_table.cljs` — `select-table-field!`, `set-table-view-mode!`, `load-table-for-viewing!`, cell editing, clipboard ops
 
 ### Query Viewer (ui/src/app/views/query_viewer.cljs)
 - Results View: Runs SQL and displays data in read-only grid
@@ -98,8 +105,13 @@ LLM tools in chat: `query_dependencies`, `query_intent`, `propose_intent`
 See `/skills/` directory for conversion and design guidance:
 - `form-design.md` - Form structure and patterns
 - `conversion.md` - Access database conversion workflow
+- `conversion-setup.md` - Database setup and initial configuration
+- `conversion-tables.md` - Table export from Access
+- `conversion-queries.md` - Query/view export from Access
 - `conversion-forms.md` - Form export from Access (critical transformations documented)
+- `conversion-vba.md` - VBA to PostgreSQL function conversion
 - `database-patterns.md` - PostgreSQL function patterns
+- `install.md` - Installation and setup guide
 
 ## Known Issues / Debugging Notes
 

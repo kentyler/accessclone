@@ -15,6 +15,11 @@
   (let [fields (get-in @state/app-state [:table-viewer :table-info :fields])]
     (or (:name (first (filter :pk fields))) "id")))
 
+(defn select-table-field!
+  "Select a field in design view for the property sheet"
+  [field-name]
+  (swap! state/app-state assoc-in [:table-viewer :selected-field] field-name))
+
 (defn set-table-view-mode!
   "Set table view mode - :datasheet or :design"
   [mode]

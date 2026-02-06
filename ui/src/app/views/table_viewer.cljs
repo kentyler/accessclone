@@ -5,55 +5,109 @@
             [app.state-table :as state-table]))
 
 ;; ============================================================
-;; DESIGN VIEW - Show table structure (columns, types, constraints)
+;; DESIGN VIEW - Access-style split: column grid + property sheet
 ;; ============================================================
+
+(defn field-size-display
+  "Compute a display string for Field Size from column metadata"
+  [field]
+  (cond
+    (:max-length field) (str (:max-length field))
+    (:precision field)  (str (:precision field))
+    :else               ""))
+
+(defn indexed-display
+  "Convert indexed value to Access-style display"
+  [field]
+  (case (:indexed field)
+    "unique" "Yes (No Duplicates)"
+    "yes"    "Yes (Duplicates OK)"
+    "No"))
+
+(defn property-row
+  "A single property row in the sheet"
+  [label value & [na?]]
+  [:div.field-property-row
+   [:div.field-property-label label]
+   [:div.field-property-value {:class (when na? "property-na")}
+    (if na? "(N/A)" (or value ""))]])
+
+(defn column-properties
+  "Property sheet for a selected column"
+  [field]
+  [:div.field-properties
+   [:div.field-properties-header "Field Properties"]
+   [:div.field-properties-tab "General"]
+   [:div.field-properties-body
+    [property-row "Field Size" (field-size-display field)]
+    [property-row "New Values" nil true]
+    [property-row "Format" nil true]
+    [property-row "Input Mask" nil true]
+    [property-row "Caption" (:description field)]
+    [property-row "Default Value" (:default field)]
+    [property-row "Validation Rule" (:check-constraint field)]
+    [property-row "Validation Text" nil true]
+    [property-row "Required" (if (:nullable field) "No" "Yes")]
+    [property-row "Allow Zero Length" nil true]
+    [property-row "Indexed" (indexed-display field)]
+    [property-row "Unicode Compression" nil true]
+    [property-row "IME Mode" nil true]
+    [property-row "Text Align" nil true]]])
+
+(defn table-properties
+  "Property sheet for table-level info (when no column selected)"
+  [table-info fields]
+  [:div.field-properties
+   [:div.field-properties-header "Table Properties"]
+   [:div.field-properties-tab "General"]
+   [:div.field-properties-body
+    [property-row "Description" (:description table-info)]
+    [property-row "Primary Key"
+     (or (:name (first (filter :pk fields))) "")]
+    [property-row "Column Count" (str (count fields))]]])
 
 (defn column-row
   "Single row in the design view showing column info"
-  [{:keys [name type pk fk nullable default]}]
-  [:tr {:class (when pk "pk-row")}
+  [{:keys [name type pk fk description]} selected?]
+  [:tr {:class (str (when pk "pk-row ")
+                    (when selected? "selected-field"))
+        :on-click #(state-table/select-table-field! name)}
    [:td.col-name
     (when pk [:span.pk-icon {:title "Primary Key"} "🔑"])
     (when fk [:span.fk-icon {:title (str "Foreign Key to " fk)} "🔗"])
     name]
    [:td.col-type type]
-   [:td.col-nullable (if nullable "Yes" "No")]
-   [:td.col-default (or default "")]])
+   [:td.col-description (or description "")]])
 
 (defn design-view
-  "Design view showing table structure"
+  "Design view showing table structure with property sheet"
   []
   (let [table-info (get-in @state/app-state [:table-viewer :table-info])
-        fields (:fields table-info)]
+        fields (:fields table-info)
+        selected-field-name (get-in @state/app-state [:table-viewer :selected-field])
+        selected-field (when selected-field-name
+                         (first (filter #(= (:name %) selected-field-name) fields)))]
     [:div.table-design-view
-     [:div.design-grid
+     ;; Upper pane — column grid
+     [:div.design-upper-pane
       [:table.structure-table
        [:thead
         [:tr
-         [:th "Column Name"]
+         [:th "Field Name"]
          [:th "Data Type"]
-         [:th "Nullable"]
-         [:th "Default"]]]
+         [:th "Description"]]]
        [:tbody
         (if (seq fields)
           (for [field fields]
             ^{:key (:name field)}
-            [column-row field])
-          [:tr [:td {:col-span 4} "No columns found"]])]]]
+            [column-row field (= (:name field) selected-field-name)])
+          [:tr [:td {:col-span 3} "No columns found"]])]]]
 
-     ;; Summary info
-     (when table-info
-       [:div.table-summary
-        [:div.summary-item
-         [:span.label "Table:"]
-         [:span.value (:name table-info)]]
-        [:div.summary-item
-         [:span.label "Columns:"]
-         [:span.value (count fields)]]
-        (when-let [pk-col (first (filter :pk fields))]
-          [:div.summary-item
-           [:span.label "Primary Key:"]
-           [:span.value (:name pk-col)]])])]))
+     ;; Lower pane — property sheet
+     [:div.design-lower-pane
+      (if selected-field
+        [column-properties selected-field]
+        [table-properties table-info fields])]]))
 
 ;; ============================================================
 ;; CONTEXT MENU

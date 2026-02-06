@@ -8,8 +8,9 @@ Converting an Access database involves multiple phases, each handled by a specia
 
 ## Conversion Phases
 
-| Phase | Skill | Description |
-|-------|-------|-------------|
+| Phase | Skill / Tool | Description |
+|-------|--------------|-------------|
+| 0. Diagnose | `diagnose_database.ps1` | Pre-flight check of the Access database for conversion blockers |
 | 1. Setup | `conversion-setup.md` | Create database, install infrastructure, create project folder |
 | 2. Tables | `conversion-tables.md` | Migrate table structures and data |
 | 3. Queries | `conversion-queries.md` | Convert queries to views/functions |
@@ -58,6 +59,48 @@ For each phase:
 4. Handle any errors before proceeding
 
 ## Phase Details
+
+### Phase 0: Diagnose
+
+Run the pre-conversion diagnostic against the live Access database:
+
+```powershell
+.\scripts\access\diagnose_database.ps1 -DatabasePath "C:\path\to\database.accdb" -OutputPath "C:\path\to\report.json"
+```
+
+The script opens the .accdb via COM and runs 12 checks:
+
+| Check | Severity | What It Detects |
+|-------|----------|-----------------|
+| `tables-without-pk` | error | Tables missing primary keys — form editor can't do updates |
+| `duplicate-candidate-keys` | warning | Columns in no-PK tables that have duplicates — can't be natural PK |
+| `empty-tables` | warning | Tables with 0 rows |
+| `problematic-data-types` | error/warning | OLE Object, Attachment, Calculated fields |
+| `reserved-word-conflicts` | warning | Table/column names that are PostgreSQL reserved words |
+| `case-collision-columns` | error | Columns that collide when lowercased (PG folds case) |
+| `complex-queries` | warning/info | Action queries, Access-specific SQL functions, parameterized queries |
+| `form-complexity` | warning/info | Subforms, VBA event counts, unbound forms, large control counts |
+| `report-complexity` | warning/info | Subreports, report events, deep grouping |
+| `vba-modules` | warning/info | Code size, external dependencies (COM, file I/O, email) |
+| `relationship-issues` | error/info | Missing referenced tables, FK inventory |
+| `size-and-scale` | warning/info | Very large tables, file size, total inventory |
+
+**Output** is a JSON report with `summary`, `inventory`, `checks`, and `findings` arrays. Feed the report to the LLM to get a prioritized action plan before starting Phase 1.
+
+**How to use the results:**
+
+1. **Errors must be resolved** — these will block the conversion or cause broken behavior
+2. **Warnings should be reviewed** — plan workarounds before starting
+3. **Info items are awareness** — no action required but useful context
+
+Example workflow:
+```
+User: "Convert Calculator3.accdb"
+→ Run diagnose_database.ps1
+→ LLM reads report JSON, summarizes: "3 tables missing PKs, 2 forms with subforms, 1 module with 400 lines of VBA"
+→ User addresses blockers (or acknowledges workarounds)
+→ Proceed to Phase 1
+```
 
 ### Phase 1: Setup
 

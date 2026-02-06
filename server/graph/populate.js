@@ -247,6 +247,134 @@ async function populateFromForm(pool, formName, content, databaseId) {
 }
 
 /**
+ * Parse JSON report content to extract structure for graph population
+ * Reports are banded: report-header, page-header, group-header-N, detail,
+ * group-footer-N, page-footer, report-footer
+ * @param {string} jsonContent - JSON string of report definition
+ * @returns {Object} - { name, record_source, controls: [...] }
+ */
+function parseReportContent(jsonContent) {
+  const report = {
+    name: null,
+    record_source: null,
+    controls: []
+  };
+
+  try {
+    const obj = typeof jsonContent === 'string' ? JSON.parse(jsonContent) : jsonContent;
+
+    report.name = obj.name || null;
+    report.record_source = obj['record-source'] || obj['record_source'] || null;
+
+    // Extract controls from all band sections
+    for (const key of Object.keys(obj)) {
+      const section = obj[key];
+      if (section && Array.isArray(section.controls)) {
+        for (const ctrl of section.controls) {
+          report.controls.push({
+            type: ctrl.type || null,
+            name: ctrl.name || null,
+            binding: ctrl['control-source'] || ctrl['control_source'] || ctrl.field || null
+          });
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Error parsing report content:', e.message);
+  }
+
+  return report;
+}
+
+/**
+ * Populate graph from a report definition
+ * @param {Pool} pool
+ * @param {string} reportName - Name of the report
+ * @param {string} content - JSON content of the report
+ * @param {string} databaseId - Database ID the report belongs to
+ * @returns {Promise<Object>} - { report: node, controls: number, edges: number }
+ */
+async function populateFromReport(pool, reportName, content, databaseId) {
+  const stats = { report: null, controls: 0, edges: 0 };
+
+  try {
+    const parsed = parseReportContent(content);
+
+    // Create report node
+    const reportNode = await upsertNode(pool, {
+      node_type: 'form',  // reuse 'form' node_type for reports (graph treats them the same)
+      name: reportName,
+      database_id: databaseId,
+      scope: 'local',
+      metadata: {
+        object_type: 'report',
+        record_source: parsed.record_source,
+        control_count: parsed.controls.length
+      }
+    });
+    stats.report = reportNode;
+
+    // If report has a record source, link to the table
+    if (parsed.record_source) {
+      const tableNode = await findNode(pool, 'table', parsed.record_source, databaseId);
+      if (tableNode) {
+        await upsertEdge(pool, {
+          from_id: reportNode.id,
+          to_id: tableNode.id,
+          rel_type: 'bound_to'
+        });
+        stats.edges++;
+      }
+    }
+
+    // Create control nodes and edges
+    for (const ctrl of parsed.controls) {
+      if (!ctrl.name) continue;  // skip unnamed controls
+
+      const controlNode = await upsertNode(pool, {
+        node_type: 'control',
+        name: ctrl.name,
+        database_id: databaseId,
+        scope: 'local',
+        metadata: {
+          form: reportName,
+          control_type: ctrl.type,
+          binding: ctrl.binding
+        }
+      });
+      stats.controls++;
+
+      // Report contains control
+      await upsertEdge(pool, {
+        from_id: reportNode.id,
+        to_id: controlNode.id,
+        rel_type: 'contains'
+      });
+      stats.edges++;
+
+      // If control is bound to a column, create edge
+      if (ctrl.binding) {
+        const colNode = await findNode(pool, 'column', ctrl.binding, databaseId);
+        if (colNode) {
+          await upsertEdge(pool, {
+            from_id: controlNode.id,
+            to_id: colNode.id,
+            rel_type: 'bound_to'
+          });
+          stats.edges++;
+        }
+      }
+    }
+
+    console.log(`Report "${reportName}" populated: ${stats.controls} controls, ${stats.edges} edges`);
+    return stats;
+  } catch (err) {
+    console.error(`Error populating graph from report "${reportName}":`, err.message);
+    throw err;
+  }
+}
+
+/**
  * Create or update an intent node and optionally link structures to it
  * @param {Pool} pool
  * @param {Object} intent - { name, description, origin }
@@ -318,6 +446,8 @@ module.exports = {
   populateFromSchemas,
   populateFromForm,
   parseFormContent,
+  populateFromReport,
+  parseReportContent,
   proposeIntent,
   confirmIntentLink,
   clearGraph

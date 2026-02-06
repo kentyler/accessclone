@@ -343,41 +343,56 @@ Keep responses concise and helpful. When discussing code or SQL, use markdown co
           const { analysis_type, field_name, group_by_field, filter_condition } = toolUse.input;
           const table = form_context.record_source;
 
-          let query, params = [];
-          const whereClause = filter_condition ? `WHERE ${filter_condition}` : '';
+          // Validate field names to prevent injection
+          const fieldNameRe = /^[a-zA-Z_][a-zA-Z0-9_ ]*$/;
+          if (field_name && !fieldNameRe.test(field_name)) {
+            toolResult = { error: `Invalid field name: ${field_name}` };
+          } else if (group_by_field && !fieldNameRe.test(group_by_field)) {
+            toolResult = { error: `Invalid group_by field: ${group_by_field}` };
+          } else {
+            let query;
+            const whereClause = filter_condition ? `WHERE ${filter_condition}` : '';
 
-          switch (analysis_type) {
-            case 'count':
-              query = `SELECT COUNT(*) as count FROM "${schema}"."${table}" ${whereClause}`;
-              break;
-            case 'sum':
-              query = `SELECT SUM("${field_name}") as total FROM "${schema}"."${table}" ${whereClause}`;
-              break;
-            case 'avg':
-              query = `SELECT AVG("${field_name}") as average FROM "${schema}"."${table}" ${whereClause}`;
-              break;
-            case 'min':
-              query = `SELECT MIN("${field_name}") as minimum, * FROM "${schema}"."${table}" ${whereClause} GROUP BY id ORDER BY minimum LIMIT 1`;
-              break;
-            case 'max':
-              query = `SELECT MAX("${field_name}") as maximum, * FROM "${schema}"."${table}" ${whereClause} GROUP BY id ORDER BY maximum DESC LIMIT 1`;
-              break;
-            case 'group_count':
-              query = `SELECT "${group_by_field || field_name}", COUNT(*) as count FROM "${schema}"."${table}" ${whereClause} GROUP BY "${group_by_field || field_name}" ORDER BY count DESC LIMIT 20`;
-              break;
-            default:
-              query = `SELECT * FROM "${schema}"."${table}" ${whereClause} LIMIT 100`;
-          }
+            switch (analysis_type) {
+              case 'count':
+                query = `SELECT COUNT(*) as count FROM "${schema}"."${table}" ${whereClause}`;
+                break;
+              case 'sum':
+                query = `SELECT SUM("${field_name}") as total FROM "${schema}"."${table}" ${whereClause}`;
+                break;
+              case 'avg':
+                query = `SELECT AVG("${field_name}") as average FROM "${schema}"."${table}" ${whereClause}`;
+                break;
+              case 'min':
+                query = `SELECT * FROM "${schema}"."${table}" ${whereClause} ORDER BY "${field_name}" ASC LIMIT 1`;
+                break;
+              case 'max':
+                query = `SELECT * FROM "${schema}"."${table}" ${whereClause} ORDER BY "${field_name}" DESC LIMIT 1`;
+                break;
+              case 'group_count':
+                query = `SELECT "${group_by_field || field_name}", COUNT(*) as count FROM "${schema}"."${table}" ${whereClause} GROUP BY "${group_by_field || field_name}" ORDER BY count DESC LIMIT 20`;
+                break;
+              default:
+                query = `SELECT * FROM "${schema}"."${table}" ${whereClause} LIMIT 100`;
+            }
 
-          try {
-            const analysisResult = await pool.query(query, params);
-            toolResult = {
-              analysis_type,
-              field: field_name,
-              results: analysisResult.rows
-            };
-          } catch (queryErr) {
-            toolResult = { error: queryErr.message };
+            // Run in a read-only transaction to prevent mutation via filter_condition
+            const client = await pool.connect();
+            try {
+              await client.query('BEGIN READ ONLY');
+              const analysisResult = await client.query(query);
+              await client.query('COMMIT');
+              toolResult = {
+                analysis_type,
+                field: field_name,
+                results: analysisResult.rows
+              };
+            } catch (queryErr) {
+              await client.query('ROLLBACK').catch(() => {});
+              toolResult = { error: queryErr.message };
+            } finally {
+              client.release();
+            }
           }
         } else if (toolUse.name === 'navigate_to_record' && form_context?.record_source) {
           const { record_id } = toolUse.input;

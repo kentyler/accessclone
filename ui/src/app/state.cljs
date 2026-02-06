@@ -5,7 +5,7 @@
             [cljs.core.async :refer [go <!]]
             [clojure.string :as str]))
 
-(def api-base "http://localhost:3001")
+(def api-base (str (.-protocol js/location) "//" (.-host js/location)))
 
 ;; Forward declarations for functions used before definition
 (declare load-tables! load-queries! load-functions! load-access-databases!

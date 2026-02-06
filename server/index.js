@@ -164,4 +164,11 @@ app.listen(PORT, () => {
   console.log(`PolyAccess backend running on http://localhost:${PORT}`);
   console.log(`Database: ${config.database.connectionString.replace(/:[^:@]+@/, ':****@')}`);
   console.log(`Forms: stored in shared.forms table`);
+
+  // Clean up expired sessions every hour
+  setInterval(() => {
+    pool.query('SELECT cleanup_old_sessions()').catch(err => {
+      console.error('Session cleanup error:', err.message);
+    });
+  }, 60 * 60 * 1000);
 });

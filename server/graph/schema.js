@@ -96,6 +96,24 @@ CREATE INDEX IF NOT EXISTS idx_reports_database ON shared.reports(database_id);
 CREATE INDEX IF NOT EXISTS idx_reports_current ON shared.reports(database_id, name) WHERE is_current = true;
 
 -- ============================================================
+-- Events - application event log
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.events (
+    id SERIAL PRIMARY KEY,
+    event_type VARCHAR(50) NOT NULL,
+    source VARCHAR(100),
+    database_id VARCHAR(100),
+    user_id VARCHAR(100),
+    session_id UUID,
+    message TEXT,
+    details JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_events_type ON shared.events(event_type);
+CREATE INDEX IF NOT EXISTS idx_events_created ON shared.events(created_at);
+
+-- ============================================================
 -- Import Log - tracks Access database import operations
 -- ============================================================
 CREATE TABLE IF NOT EXISTS shared.import_log (

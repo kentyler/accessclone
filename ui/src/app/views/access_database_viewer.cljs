@@ -6,7 +6,7 @@
             [cljs.core.async :refer [go <!]]
             [clojure.string :as str]))
 
-(def api-base "http://localhost:3001")
+(def api-base state/api-base)
 
 (declare get-item-name load-access-database-contents! load-target-existing!)
 

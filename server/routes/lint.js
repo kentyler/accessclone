@@ -1,6 +1,7 @@
 /**
- * Form Linting API
- * Validates form definitions and returns errors/warnings
+ * Form & Report Linting API
+ * Validates form/report definitions and returns errors/warnings
+ * Includes cross-object validation against database schema
  */
 
 const express = require('express');
@@ -13,6 +14,7 @@ const VALID_CONTROL_TYPES = [
 
 const REQUIRED_FORM_FIELDS = ['id', 'name', 'record-source'];
 const REQUIRED_CONTROL_FIELDS = ['type', 'x', 'y', 'width', 'height'];
+const REQUIRED_REPORT_FIELDS = ['id', 'name', 'record-source'];
 
 function normalizeType(type) {
   if (!type) return null;
@@ -212,12 +214,249 @@ function validateForm(form) {
   return issues;
 }
 
+// ============================================================
+// REPORT STRUCTURAL VALIDATION
+// ============================================================
+
+const STANDARD_REPORT_BANDS = [
+  'report-header', 'page-header', 'detail', 'page-footer', 'report-footer'
+];
+
+function isReportBand(key) {
+  if (STANDARD_REPORT_BANDS.includes(key)) return true;
+  if (/^group-header-\d+$/.test(key)) return true;
+  if (/^group-footer-\d+$/.test(key)) return true;
+  return false;
+}
+
+function validateReport(report) {
+  const issues = [];
+  const reportName = report.name || 'Untitled';
+
+  if (!report || typeof report !== 'object') {
+    issues.push({
+      severity: 'error',
+      location: 'report',
+      message: 'Report definition should be an object'
+    });
+    return issues;
+  }
+
+  // Check required top-level fields
+  for (const field of REQUIRED_REPORT_FIELDS) {
+    const key = field.replace('-', '_');
+    if (report[field] === undefined && report[key] === undefined) {
+      issues.push({
+        severity: 'error',
+        location: 'report',
+        message: `Missing required field '${field}'`,
+        field: field
+      });
+    }
+  }
+
+  // Find and validate all band sections
+  let hasBands = false;
+  for (const key of Object.keys(report)) {
+    if (isReportBand(key)) {
+      hasBands = true;
+      validateSection(report[key], key, issues, reportName);
+    }
+  }
+
+  if (!hasBands) {
+    issues.push({
+      severity: 'warning',
+      location: 'report',
+      message: 'No band sections defined (expected detail, report-header, etc.)'
+    });
+  }
+
+  return issues;
+}
+
+// ============================================================
+// CROSS-OBJECT VALIDATION (schema-aware)
+// ============================================================
+
+/**
+ * Fetch schema info: Map<tableName, columnName[]> (all lowercased)
+ * Includes both tables and views.
+ */
+async function getSchemaInfo(pool, schemaName) {
+  const schema = new Map();
+
+  // Get all tables and views
+  const tablesResult = await pool.query(`
+    SELECT table_name
+    FROM information_schema.tables
+    WHERE table_schema = $1
+      AND table_type IN ('BASE TABLE', 'VIEW')
+    ORDER BY table_name
+  `, [schemaName]);
+
+  for (const row of tablesResult.rows) {
+    const tableName = row.table_name.toLowerCase();
+    const colsResult = await pool.query(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = $1 AND table_name = $2
+      ORDER BY ordinal_position
+    `, [schemaName, row.table_name]);
+
+    schema.set(tableName, colsResult.rows.map(r => r.column_name.toLowerCase()));
+  }
+
+  return schema;
+}
+
+/**
+ * Get all field bindings from a control (checks both field and control-source)
+ */
+function getControlField(control) {
+  return control['control-source'] || control.control_source || control.field || null;
+}
+
+/**
+ * Cross-object validation for forms against database schema.
+ * schemaInfo is a Map<tableName, columnName[]>.
+ */
+function validateFormCrossObject(form, schemaInfo) {
+  const issues = [];
+  const recordSource = (form['record-source'] || form.record_source || '').toLowerCase();
+
+  if (!recordSource) return issues;
+
+  // Check record-source exists as a table or view
+  if (!schemaInfo.has(recordSource)) {
+    const available = Array.from(schemaInfo.keys()).slice(0, 10);
+    issues.push({
+      severity: 'error',
+      location: 'form',
+      message: `Record source '${recordSource}' not found in database`,
+      field: 'record-source',
+      suggestion: `Available tables/views: ${available.join(', ')}${schemaInfo.size > 10 ? '...' : ''}`
+    });
+    return issues; // Can't check field bindings without a valid source
+  }
+
+  const columns = schemaInfo.get(recordSource);
+
+  // Check field bindings in all sections
+  for (const sectionName of ['header', 'detail', 'footer']) {
+    const section = form[sectionName];
+    if (!section || !Array.isArray(section.controls)) continue;
+
+    section.controls.forEach((ctrl, i) => {
+      const field = getControlField(ctrl);
+      if (field && !columns.includes(field.toLowerCase())) {
+        issues.push({
+          severity: 'error',
+          location: `${sectionName} > control[${i}]`,
+          message: `Field '${field}' not found in '${recordSource}'`,
+          field: 'field',
+          suggestion: `Available columns: ${columns.join(', ')}`
+        });
+      }
+    });
+  }
+
+  return issues;
+}
+
+/**
+ * Validate combo-box row-source SQL using EXPLAIN (parse without executing).
+ * Requires pool and schemaName for database access.
+ */
+async function validateComboBoxSql(form, pool, schemaName) {
+  const issues = [];
+
+  for (const sectionName of ['header', 'detail', 'footer']) {
+    const section = form[sectionName];
+    if (!section || !Array.isArray(section.controls)) continue;
+
+    for (let i = 0; i < section.controls.length; i++) {
+      const ctrl = section.controls[i];
+      const type = normalizeType(ctrl.type);
+      const rowSource = ctrl['row-source'] || ctrl.row_source;
+
+      // Only validate SQL row-sources (strings that look like queries)
+      if (type === 'combo-box' && typeof rowSource === 'string' && /^\s*SELECT/i.test(rowSource)) {
+        try {
+          await pool.query(`EXPLAIN ${rowSource}`);
+        } catch (err) {
+          issues.push({
+            severity: 'error',
+            location: `${sectionName} > control[${i}]`,
+            message: `Invalid row-source SQL: ${err.message}`,
+            field: 'row-source'
+          });
+        }
+      }
+    }
+  }
+
+  return issues;
+}
+
+/**
+ * Cross-object validation for reports against database schema.
+ * Same checks as forms but iterates all band sections.
+ */
+function validateReportCrossObject(report, schemaInfo) {
+  const issues = [];
+  const recordSource = (report['record-source'] || report.record_source || '').toLowerCase();
+
+  if (!recordSource) return issues;
+
+  // Check record-source exists
+  if (!schemaInfo.has(recordSource)) {
+    const available = Array.from(schemaInfo.keys()).slice(0, 10);
+    issues.push({
+      severity: 'error',
+      location: 'report',
+      message: `Record source '${recordSource}' not found in database`,
+      field: 'record-source',
+      suggestion: `Available tables/views: ${available.join(', ')}${schemaInfo.size > 10 ? '...' : ''}`
+    });
+    return issues;
+  }
+
+  const columns = schemaInfo.get(recordSource);
+
+  // Check field bindings in all band sections
+  for (const key of Object.keys(report)) {
+    if (!isReportBand(key)) continue;
+    const section = report[key];
+    if (!section || !Array.isArray(section.controls)) continue;
+
+    section.controls.forEach((ctrl, i) => {
+      const field = getControlField(ctrl);
+      if (field && !columns.includes(field.toLowerCase())) {
+        issues.push({
+          severity: 'error',
+          location: `${key} > control[${i}]`,
+          message: `Field '${field}' not found in '${recordSource}'`,
+          field: 'field',
+          suggestion: `Available columns: ${columns.join(', ')}`
+        });
+      }
+    });
+  }
+
+  return issues;
+}
+
+// ============================================================
+// ROUTER
+// ============================================================
+
 function createRouter(pool, secrets) {
   /**
    * POST /api/lint/form
-   * Validate a form definition
+   * Validate a form definition (structural + cross-object)
    */
-  router.post('/form', (req, res) => {
+  router.post('/form', async (req, res) => {
     const { form } = req.body;
 
     if (!form) {
@@ -225,6 +464,22 @@ function createRouter(pool, secrets) {
     }
 
     const issues = validateForm(form);
+
+    // Cross-object validation (schema-aware)
+    try {
+      const schemaName = req.schemaName || 'public';
+      const schemaInfo = await getSchemaInfo(pool, schemaName);
+      const crossIssues = validateFormCrossObject(form, schemaInfo);
+      issues.push(...crossIssues);
+
+      // Validate combo-box SQL
+      const sqlIssues = await validateComboBoxSql(form, pool, schemaName);
+      issues.push(...sqlIssues);
+    } catch (err) {
+      // Cross-object validation failed - don't block the save
+      console.warn('Cross-object validation failed:', err.message);
+    }
+
     const errors = issues.filter(i => i.severity === 'error');
     const warnings = issues.filter(i => i.severity === 'warning');
 
@@ -238,6 +493,134 @@ function createRouter(pool, secrets) {
     });
   });
 
+  /**
+   * POST /api/lint/report
+   * Validate a report definition (structural + cross-object)
+   */
+  router.post('/report', async (req, res) => {
+    const { report } = req.body;
+
+    if (!report) {
+      return res.status(400).json({ error: 'report is required' });
+    }
+
+    const issues = validateReport(report);
+
+    // Cross-object validation (schema-aware)
+    try {
+      const schemaName = req.schemaName || 'public';
+      const schemaInfo = await getSchemaInfo(pool, schemaName);
+      const crossIssues = validateReportCrossObject(report, schemaInfo);
+      issues.push(...crossIssues);
+    } catch (err) {
+      console.warn('Cross-object validation failed:', err.message);
+    }
+
+    const errors = issues.filter(i => i.severity === 'error');
+    const warnings = issues.filter(i => i.severity === 'warning');
+
+    res.json({
+      valid: errors.length === 0,
+      errors: errors,
+      warnings: warnings,
+      summary: errors.length === 0
+        ? 'Report is valid'
+        : `${errors.length} error(s), ${warnings.length} warning(s)`
+    });
+  });
+
+  /**
+   * POST /api/lint/validate
+   * Validate all forms and reports in the current database
+   */
+  router.post('/validate', async (req, res) => {
+    try {
+      const databaseId = req.headers['x-database-id'];
+      if (!databaseId) {
+        return res.status(400).json({ error: 'X-Database-ID header is required' });
+      }
+
+      const schemaName = req.schemaName || 'public';
+      const schemaInfo = await getSchemaInfo(pool, schemaName);
+
+      // Load all current forms
+      const formsResult = await pool.query(
+        `SELECT name, definition FROM shared.forms
+         WHERE database_id = $1 AND is_current = true`,
+        [databaseId]
+      );
+
+      // Load all current reports
+      const reportsResult = await pool.query(
+        `SELECT name, definition FROM shared.reports
+         WHERE database_id = $1 AND is_current = true`,
+        [databaseId]
+      );
+
+      const formResults = [];
+      for (const row of formsResult.rows) {
+        let def;
+        try {
+          def = typeof row.definition === 'string' ? JSON.parse(row.definition) : row.definition;
+        } catch { continue; } // Skip unparseable
+
+        const issues = validateForm(def);
+        const crossIssues = validateFormCrossObject(def, schemaInfo);
+        issues.push(...crossIssues);
+
+        const errors = issues.filter(i => i.severity === 'error');
+        const warnings = issues.filter(i => i.severity === 'warning');
+        formResults.push({
+          name: row.name,
+          valid: errors.length === 0,
+          errors,
+          warnings
+        });
+      }
+
+      const reportResults = [];
+      for (const row of reportsResult.rows) {
+        let def;
+        try {
+          def = typeof row.definition === 'string' ? JSON.parse(row.definition) : row.definition;
+        } catch { continue; } // Skip EDN or unparseable
+
+        const issues = validateReport(def);
+        const crossIssues = validateReportCrossObject(def, schemaInfo);
+        issues.push(...crossIssues);
+
+        const errors = issues.filter(i => i.severity === 'error');
+        const warnings = issues.filter(i => i.severity === 'warning');
+        reportResults.push({
+          name: row.name,
+          valid: errors.length === 0,
+          errors,
+          warnings
+        });
+      }
+
+      const totalErrors = formResults.reduce((s, f) => s + f.errors.length, 0)
+        + reportResults.reduce((s, r) => s + r.errors.length, 0);
+      const totalWarnings = formResults.reduce((s, f) => s + f.warnings.length, 0)
+        + reportResults.reduce((s, r) => s + r.warnings.length, 0);
+
+      res.json({
+        forms: formResults,
+        reports: reportResults,
+        summary: {
+          formsChecked: formResults.length,
+          reportsChecked: reportResults.length,
+          totalErrors,
+          totalWarnings,
+          valid: totalErrors === 0
+        }
+      });
+    } catch (err) {
+      console.error('Database-wide validation failed:', err);
+      res.status(500).json({ error: 'Validation failed', details: err.message });
+    }
+  });
+
   return router;
 }
 
@@ -245,3 +628,8 @@ module.exports = createRouter;
 module.exports.validateForm = validateForm;
 module.exports.validateControl = validateControl;
 module.exports.normalizeType = normalizeType;
+module.exports.validateReport = validateReport;
+module.exports.validateFormCrossObject = validateFormCrossObject;
+module.exports.validateReportCrossObject = validateReportCrossObject;
+module.exports.getSchemaInfo = getSchemaInfo;
+module.exports.isReportBand = isReportBand;

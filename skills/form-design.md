@@ -298,6 +298,8 @@ Or via Property Sheet:
 
 **Important**: Field names are matched case-insensitively against database columns.
 
+**Validation on save**: Field bindings are validated against actual database columns when saving. If a control's `:field` or `:control-source` doesn't match any column in the form's record-source table, the save is blocked and a validation error is displayed. This catches renamed/deleted columns early.
+
 ### Unbound Controls
 
 Controls without `:field` are for display or user interaction:

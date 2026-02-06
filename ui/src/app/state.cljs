@@ -376,6 +376,12 @@
 (defn set-lint-errors! [errors]
   (swap! app-state assoc-in [:form-editor :lint-errors] errors))
 
+(defn clear-report-lint-errors! []
+  (swap! app-state assoc-in [:report-editor :lint-errors] nil))
+
+(defn set-report-lint-errors! [errors]
+  (swap! app-state assoc-in [:report-editor :lint-errors] errors))
+
 (defn do-save-form!
   "Actually save the form (called after lint passes)"
   []
@@ -1184,9 +1190,31 @@
         (save-report-to-file! report)))))
 
 (defn save-report!
-  "Save the current report (no lint for reports)"
+  "Lint the report and save if valid"
   []
-  (do-save-report!))
+  (let [current (get-in @app-state [:report-editor :current])
+        report-id (get-in @app-state [:report-editor :report-id])
+        report-obj (first (filter #(= (:id %) report-id)
+                                  (get-in @app-state [:objects :reports])))
+        report-with-meta (merge {:id report-id :name (:name report-obj)} current)]
+    (when (and report-id current)
+      (clear-report-lint-errors!)
+      (go
+        (let [response (<! (http/post (str api-base "/api/lint/report")
+                                       {:json-params {:report report-with-meta}}))]
+          (if (:success response)
+            (let [result (:body response)]
+              (if (:valid result)
+                (do
+                  (do-save-report!)
+                  (println "Report saved successfully"))
+                (do
+                  (set-report-lint-errors! (:errors result))
+                  (println "Report has validation errors:" (:errors result)))))
+            (do
+              ;; Lint endpoint failed, save anyway
+              (println "Lint check failed, saving anyway")
+              (do-save-report!))))))))
 
 (defn save-report-to-file!
   "Save a report to the database via backend API"

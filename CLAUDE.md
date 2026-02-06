@@ -89,6 +89,14 @@ This is PolyAccess (formerly CloneTemplate), a platform for converting MS Access
 - `/api/queries/run` - Execute SQL queries (SELECT only)
 - Schema routing via X-Database-ID header
 
+### Lint / Cross-Object Validation (server/routes/lint.js)
+Three endpoints for validating form and report definitions:
+- `POST /api/lint/form` — Structural validation (required fields, control types, dimensions) + cross-object validation (record-source exists, field bindings match real columns, combo-box SQL is valid via EXPLAIN)
+- `POST /api/lint/report` — Same pattern for reports: structural validation of banded sections + cross-object field binding checks
+- `POST /api/lint/validate` — Database-wide: loads all forms/reports from shared.forms/shared.reports, validates each, returns aggregated results with summary
+
+Save flow in both editors: lint first → if valid, save; if invalid, show errors in `.lint-errors-panel`; if lint endpoint fails, save anyway (graceful degradation). Cross-object checks use `getSchemaInfo()` which queries `information_schema` for all tables/views and their columns.
+
 ### Dependency/Intent Graph (server/graph/)
 A unified graph in `shared._nodes` and `shared._edges` that tracks:
 - **Structural nodes**: tables, columns, forms, controls (with database_id)

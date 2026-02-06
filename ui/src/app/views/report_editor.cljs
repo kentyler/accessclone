@@ -1,9 +1,44 @@
 (ns app.views.report-editor
   "Report editor/designer - replaces Access report design view"
-  (:require [app.state :as state]
+  (:require [clojure.string]
+            [app.state :as state]
             [app.views.report-properties :as report-properties]
             [app.views.report-design :as report-design]
             [app.views.report-view :as report-view]))
+
+(defn ask-ai-to-fix-report-errors!
+  "Send report lint errors to AI for suggestions"
+  [errors]
+  (let [error-text (str "My report has these validation errors:\n"
+                        (clojure.string/join "\n" (map #(str "- " (:location %) ": " (:message %)) errors))
+                        "\n\nHow can I fix these issues?")]
+    (state/set-chat-input! error-text)
+    (state/send-chat-message!)))
+
+(defn report-lint-errors-panel
+  "Display report lint errors with Ask AI button"
+  []
+  (let [errors (get-in @state/app-state [:report-editor :lint-errors])]
+    (when (seq errors)
+      [:div.lint-errors-panel
+       [:div.lint-errors-header
+        [:span.lint-errors-title "Report Validation Errors"]
+        [:button.lint-errors-close
+         {:on-click state/clear-report-lint-errors!}
+         "\u00D7"]]
+       [:ul.lint-errors-list
+        (for [[idx error] (map-indexed vector errors)]
+          ^{:key idx}
+          [:li.lint-error
+           [:span.error-location (:location error)]
+           [:span.error-message (:message error)]])]
+       [:div.lint-errors-actions
+        [:button.secondary-btn
+         {:on-click #(ask-ai-to-fix-report-errors! errors)}
+         "Ask AI to Help Fix"]
+        [:button.secondary-btn
+         {:on-click state/clear-report-lint-errors!}
+         "Dismiss"]]])))
 
 (defn report-toolbar
   "Toolbar with report actions"
@@ -49,6 +84,7 @@
             is-edn? (= "edn" (:_format current-def))]
         [:div.form-editor
          [report-toolbar]
+         [report-lint-errors-panel]
          (cond
            ;; EDN format - show raw
            is-edn?

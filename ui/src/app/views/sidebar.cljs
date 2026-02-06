@@ -2,6 +2,7 @@
   "Access-style collapsible sidebar with object navigation"
   (:require [reagent.core :as r]
             [app.state :as state]
+            [app.state-table :as state-table]
             [app.views.access-database-viewer :as access-db-viewer]))
 
 ;; Object types available in the dropdown (like Access navigation pane)
@@ -29,11 +30,20 @@
   "Button to create a new object of the selected type"
   []
   (let [object-type (:sidebar-object-type @state/app-state)]
-    (when (= object-type :forms)
+    (case object-type
+      :forms
       [:button.new-object-btn
        {:on-click #(state/create-new-form!)}
        [:span.icon "+"]
-       [:span "New Form"]])))
+       [:span "New Form"]]
+
+      :tables
+      [:button.new-object-btn
+       {:on-click #(state-table/start-new-table!)}
+       [:span.icon "+"]
+       [:span "New Table"]]
+
+      nil)))
 
 (defn object-list-item
   "Single item in the object list"

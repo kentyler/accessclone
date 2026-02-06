@@ -125,6 +125,163 @@
       (second match)
       record-source)))
 
+;; ============================================================
+;; Access JSON → PolyAccess Report Definition Converter
+;; ============================================================
+
+(def running-sum-map
+  {1 :over-group
+   2 :over-all})
+
+(def group-on-map
+  {0 :each-value
+   1 :prefix
+   2 :year
+   3 :quarter
+   4 :month
+   5 :week
+   6 :day
+   7 :hour
+   8 :minute
+   9 :interval})
+
+(def keep-together-map
+  {0 :none
+   1 :whole-group
+   2 :with-first-detail})
+
+(defn convert-report-control
+  "Convert a single Access report control JSON object to PolyAccess format"
+  [ctrl]
+  (let [base {:type (keyword (:type ctrl))
+              :name (:name ctrl)
+              :x (twips->px (:left ctrl))
+              :y (twips->px (:top ctrl))
+              :width (twips->px (:width ctrl))
+              :height (twips->px (:height ctrl))}]
+    (cond-> base
+      ;; Font
+      (:fontName ctrl)      (assoc :font-name (:fontName ctrl))
+      (:fontSize ctrl)      (assoc :font-size (:fontSize ctrl))
+      (:fontBold ctrl)      (assoc :font-bold true)
+      (:fontItalic ctrl)    (assoc :font-italic true)
+      (:fontUnderline ctrl) (assoc :font-underline true)
+
+      ;; Colors
+      (:foreColor ctrl)   (assoc :fore-color (access-color->hex (:foreColor ctrl)))
+      (:backColor ctrl)   (assoc :back-color (access-color->hex (:backColor ctrl)))
+      (:borderColor ctrl) (assoc :border-color (access-color->hex (:borderColor ctrl)))
+
+      ;; Data binding
+      (:controlSource ctrl) (assoc :field (:controlSource ctrl))
+
+      ;; Caption -> text (PolyAccess convention)
+      (:caption ctrl) (assoc :text (:caption ctrl))
+
+      ;; Format
+      (:format ctrl) (assoc :format (:format ctrl))
+
+      ;; Tooltip / Tag
+      (:tooltip ctrl) (assoc :tooltip (:tooltip ctrl))
+      (:tag ctrl)     (assoc :tag (:tag ctrl))
+
+      ;; Visibility
+      (false? (:visible ctrl)) (assoc :visible false)
+
+      ;; Report-specific control properties
+      (:runningSum ctrl)    (assoc :running-sum (get running-sum-map (:runningSum ctrl)))
+      (:canGrow ctrl)       (assoc :can-grow true)
+      (:canShrink ctrl)     (assoc :can-shrink true)
+      (:hideDuplicates ctrl)(assoc :hide-duplicates true)
+
+      ;; Subreport
+      (:sourceReport ctrl)     (assoc :source-report (:sourceReport ctrl))
+      (:linkChildFields ctrl)  (assoc :link-child-fields [(:linkChildFields ctrl)])
+      (:linkMasterFields ctrl) (assoc :link-master-fields [(:linkMasterFields ctrl)])
+
+      ;; Combo/List box
+      (:rowSource ctrl)    (assoc :row-source (:rowSource ctrl))
+      (:boundColumn ctrl)  (assoc :bound-column (:boundColumn ctrl))
+      (:columnCount ctrl)  (assoc :column-count (:columnCount ctrl))
+      (:columnWidths ctrl) (assoc :column-widths (:columnWidths ctrl))
+
+      ;; Events
+      (:hasFormatEvent ctrl) (assoc :has-format-event true)
+      (:hasPrintEvent ctrl)  (assoc :has-print-event true)
+      (:hasClickEvent ctrl)  (assoc :has-click-event true))))
+
+(defn convert-report-section
+  "Convert a report section JSON object to PolyAccess format"
+  [section]
+  (let [controls (mapv convert-report-control (or (:controls section) []))]
+    (cond-> {:height (twips->px (:height section))
+             :controls controls}
+      ;; Section properties
+      (some? (:visible section))     (assoc :visible (:visible section))
+      (:canGrow section)             (assoc :can-grow true)
+      (:canShrink section)           (assoc :can-shrink true)
+      (and (:forceNewPage section)
+           (pos? (:forceNewPage section))) (assoc :force-new-page (:forceNewPage section))
+      (some? (:keepTogether section))(assoc :keep-together (:keepTogether section))
+      (:backColor section)           (assoc :back-color (access-color->hex (:backColor section)))
+
+      ;; Section events
+      (:hasFormatEvent section)  (assoc :has-format-event true)
+      (:hasPrintEvent section)   (assoc :has-print-event true)
+      (:hasRetreatEvent section) (assoc :has-retreat-event true))))
+
+(defn convert-access-report
+  "Convert Access report JSON metadata to PolyAccess report definition"
+  [report-data]
+  (let [sections (or (:sections report-data) [])
+        ;; Build a map of section-name -> converted section
+        section-map (into {} (map (fn [sec]
+                                    [(keyword (:name sec))
+                                     (convert-report-section sec)])
+                                  sections))
+        record-source (extract-record-source (:recordSource report-data))
+        ;; Convert grouping array
+        grouping (mapv (fn [grp]
+                         (cond-> {:field (:field grp)
+                                  :group-header (boolean (:groupHeader grp))
+                                  :group-footer (boolean (:groupFooter grp))
+                                  :sort-order (if (= (:sortOrder grp) 1) "descending" "ascending")
+                                  :group-on (get group-on-map (:groupOn grp) :each-value)
+                                  :group-interval (or (:groupInterval grp) 1)
+                                  :keep-together (get keep-together-map (:keepTogether grp) :none)}))
+                       (or (:grouping report-data) []))]
+    (cond-> {:name (:name report-data)
+             :record-source record-source
+             :report-width (twips->px (:reportWidth report-data))
+             :page-header-option (or (:pageHeader report-data) 0)
+             :page-footer-option (or (:pageFooter report-data) 0)
+             :grouping grouping
+             ;; Standard sections (use empty defaults if missing)
+             :report-header (get section-map :report-header {:height 0 :controls []})
+             :page-header (get section-map :page-header {:height 0 :controls []})
+             :detail (get section-map :detail {:height 0 :controls []})
+             :page-footer (get section-map :page-footer {:height 0 :controls []})
+             :report-footer (get section-map :report-footer {:height 0 :controls []})}
+
+      ;; Caption
+      (:caption report-data) (assoc :caption (:caption report-data))
+
+      ;; Group header/footer sections (dynamic keys)
+      ;; Merge in any group-header-N / group-footer-N sections
+      (seq (filter #(re-find #"^group-" (name (key %))) section-map))
+      (merge (into {} (filter #(re-find #"^group-" (name (key %))) section-map)))
+
+      ;; Report-level events
+      (:hasOpenEvent report-data)       (assoc :has-open-event true)
+      (:hasCloseEvent report-data)      (assoc :has-close-event true)
+      (:hasActivateEvent report-data)   (assoc :has-activate-event true)
+      (:hasDeactivateEvent report-data) (assoc :has-deactivate-event true)
+      (:hasNoDataEvent report-data)     (assoc :has-no-data-event true)
+      (:hasPageEvent report-data)       (assoc :has-page-event true)
+      (:hasErrorEvent report-data)      (assoc :has-error-event true))))
+
+;; ============================================================
+
 (defn convert-access-form
   "Convert Access form JSON metadata to PolyAccess form definition"
   [form-data]
@@ -363,6 +520,34 @@
         (do (println "Failed to export form:" form-name (get-in response [:body :error]))
             false)))))
 
+(defn import-report!
+  "Import a single report: get JSON from Access, convert, save to target database"
+  [access-db-path report-name target-database-id]
+  (go
+    ;; Step 1: Get JSON metadata from Access via PowerShell
+    (let [response (<! (http/post (str api-base "/api/access-import/export-report")
+                                  {:json-params {:databasePath access-db-path
+                                                 :reportName report-name
+                                                 :targetDatabaseId target-database-id}}))]
+      (if (and (:success response) (get-in response [:body :reportData]))
+        ;; Step 2: Convert JSON to PolyAccess report definition
+        (let [report-data (get-in response [:body :reportData])
+              report-def (convert-access-report report-data)
+              _ (println "Converted report:" report-name
+                         "- sections:" (count (:sections report-data))
+                         "- grouping:" (count (:grouping report-def)))
+              ;; Step 3: Save to target database via reports API
+              save-response (<! (http/put (str api-base "/api/reports/" report-name)
+                                         {:json-params report-def
+                                          :headers {"X-Database-ID" target-database-id}}))]
+          (if (:success save-response)
+            (do (println "Saved report:" report-name "to" target-database-id)
+                true)
+            (do (println "Failed to save report:" report-name (get-in save-response [:body :error]))
+                false)))
+        (do (println "Failed to export report:" report-name (get-in response [:body :error]))
+            false)))))
+
 (defn import-selected!
   "Import selected forms/reports to the current PolyAccess database"
   [access-db-path target-database-id]
@@ -371,23 +556,18 @@
     (swap! viewer-state assoc :importing? true)
     (go
       (doseq [item-name selected]
-        (if (= obj-type :forms)
-          ;; Forms: JSON export + CLJS conversion
-          (<! (import-form! access-db-path item-name target-database-id))
-          ;; Reports: still use old endpoint for now
-          (let [response (<! (http/post (str api-base "/api/access-import/export-report")
-                                        {:json-params {:databasePath access-db-path
-                                                       :reportName item-name
-                                                       :targetDatabaseId target-database-id}}))]
-            (if (:success response)
-              (println "Imported report:" item-name)
-              (println "Failed to import report:" item-name (get-in response [:body :error])))))
+        (case obj-type
+          :forms   (<! (import-form! access-db-path item-name target-database-id))
+          :reports (<! (import-report! access-db-path item-name target-database-id))
+          ;; Default: no-op for other types
+          nil)
         ;; Refresh history after each import
         (<! (load-import-history! access-db-path)))
       (swap! viewer-state assoc :importing? false :selected #{})
       ;; Refresh badges and the forms/reports list in the target database
       (load-target-existing! target-database-id)
-      (state/load-forms!))))
+      (state/load-forms!)
+      (state/load-reports!))))
 
 (defn object-type-dropdown []
   (let [obj-type (:object-type @viewer-state)]

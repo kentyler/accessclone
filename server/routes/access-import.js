@@ -284,7 +284,8 @@ module.exports = function(pool) {
 
   /**
    * POST /api/access-import/export-report
-   * Export a report from Access to EDN
+   * Export a report from Access as JSON (raw metadata)
+   * The frontend converts JSON -> report definition and saves via /api/reports
    */
   router.post('/export-report', async (req, res) => {
     const { databasePath, reportName, targetDatabaseId } = req.body;
@@ -309,47 +310,31 @@ module.exports = function(pool) {
       }
 
       const scriptsDir = path.join(__dirname, '..', '..', 'scripts', 'access');
-      const exportScript = path.join(scriptsDir, 'export_report_to_edn.ps1');
+      const exportScript = path.join(scriptsDir, 'export_report.ps1');
 
-      // Export to temp file
-      const tempDir = path.join(__dirname, '..', '..', 'temp');
-      await fs.mkdir(tempDir, { recursive: true });
-      const outputPath = path.join(tempDir, `${reportName.replace(/[^a-zA-Z0-9]/g, '_')}.edn`);
-
-      await runPowerShell(exportScript, [
+      // Run PowerShell - it outputs JSON to stdout
+      const jsonOutput = await runPowerShell(exportScript, [
         '-DatabasePath', databasePath,
-        '-ReportName', reportName,
-        '-OutputPath', outputPath
+        '-ReportName', reportName
       ]);
 
-      // Read the exported EDN
-      const ednContent = await fs.readFile(outputPath, 'utf8');
-
-      // If targetDatabaseId specified, save to shared.reports
-      if (targetDatabaseId) {
-        const recordSourceMatch = ednContent.match(/:record-source\s+"([^"]+)"/);
-        const recordSource = recordSourceMatch ? recordSourceMatch[1] : null;
-
-        await pool.query(`
-          INSERT INTO shared.reports (database_id, name, definition, record_source, version, is_current)
-          VALUES ($1, $2, $3, $4, 1, true)
-          ON CONFLICT (database_id, name, version) DO UPDATE SET
-            definition = EXCLUDED.definition,
-            record_source = EXCLUDED.record_source,
-            is_current = true
-        `, [targetDatabaseId, reportName, ednContent, recordSource]);
+      // Remove BOM if present, then extract JSON object from output
+      // (Write-Host output from PowerShell may precede the JSON)
+      const cleanOutput = jsonOutput.replace(/^\uFEFF/, '').trim();
+      const jsonStart = cleanOutput.indexOf('{');
+      if (jsonStart === -1) {
+        throw new Error('No JSON object found in PowerShell output');
       }
-
-      // Clean up temp file
-      await fs.unlink(outputPath).catch(() => {});
+      const reportData = JSON.parse(cleanOutput.substring(jsonStart));
 
       // Log success
-      await logImport('success', null, { edn_length: ednContent.length });
+      const sectionCount = reportData.sections ? reportData.sections.length : 0;
+      await logImport('success', null, { sections: sectionCount });
 
+      // Return raw JSON to frontend for conversion
       res.json({
         success: true,
-        report: reportName,
-        saved: !!targetDatabaseId
+        reportData: reportData
       });
     } catch (err) {
       console.error('Error exporting report:', err);

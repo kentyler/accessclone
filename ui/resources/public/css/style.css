@@ -2121,6 +2121,17 @@ body {
   cursor: pointer;
 }
 
+/* Actions column header (narrow) */
+.structure-table th.col-actions-header {
+  width: 40px;
+}
+
+.structure-table .col-actions {
+  width: 40px;
+  text-align: center;
+  padding: 0.25rem;
+}
+
 /* Field Properties Sheet (Design View lower pane) */
 .field-properties {
   display: flex;
@@ -3028,4 +3039,150 @@ body {
   .editor-center {
     width: 100% !important;
   }
+}
+
+/* ============================================================
+   TABLE DESIGN VIEW — Inline Editing
+   ============================================================ */
+
+/* Inline text inputs in the design grid */
+.design-field-input {
+  width: 100%;
+  padding: 0.25rem 0.375rem;
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: 0.875rem;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.design-field-input:focus {
+  border-color: var(--primary);
+  outline: none;
+  background: white;
+}
+
+.design-field-input::placeholder {
+  color: var(--gray-400);
+  font-style: italic;
+}
+
+/* Inline dropdown in the design grid */
+.design-type-select {
+  width: 100%;
+  padding: 0.25rem 0.25rem;
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: 0.875rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.design-type-select:focus {
+  border-color: var(--primary);
+  outline: none;
+  background: white;
+}
+
+/* Delete button in actions column */
+.delete-field-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--gray-400);
+  font-size: 1rem;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.delete-field-btn:hover {
+  background: rgba(220, 38, 38, 0.1);
+  color: var(--error);
+}
+
+/* Ghost row for adding new fields */
+.new-field-row {
+  opacity: 0.5;
+}
+
+.new-field-row:hover {
+  opacity: 0.8;
+}
+
+.new-field-row td {
+  border-bottom: none;
+}
+
+/* New table name input bar */
+.new-table-name-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: var(--gray-100);
+  border-bottom: 1px solid var(--gray-200);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.new-table-name-bar label {
+  color: var(--gray-700);
+  white-space: nowrap;
+}
+
+.new-table-name-bar .design-field-input {
+  max-width: 300px;
+  border: 1px solid var(--gray-300);
+  border-radius: 4px;
+  background: white;
+  padding: 0.375rem 0.5rem;
+}
+
+/* Error message panel */
+.design-errors {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  margin: 0.5rem 1rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+}
+
+.design-error {
+  color: #991b1b;
+  font-size: 0.8125rem;
+  padding: 0.125rem 0;
+}
+
+/* Editable property sheet inputs */
+.design-prop-input,
+.design-prop-select {
+  width: 100%;
+  padding: 0.25rem 0.375rem;
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: 0.8125rem;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.design-prop-input:focus,
+.design-prop-select:focus {
+  border-color: var(--primary);
+  outline: none;
+  background: white;
+}
+
+.design-prop-input:disabled,
+.design-prop-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.design-prop-select {
+  cursor: pointer;
 }

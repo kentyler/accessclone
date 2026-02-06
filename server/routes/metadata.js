@@ -363,7 +363,7 @@ module.exports = function(pool) {
         colDefs.push(`PRIMARY KEY (${pkFields.map(f => quoteIdent(f.name)).join(', ')})`);
       }
 
-      const createSQL = `CREATE TABLE ${quoteIdent(schemaName)}.${quoteIdent(name)} (\n  ${colDefs.join(',\n  ')}\n)`;
+      const createSQL = `CREATE TABLE IF NOT EXISTS ${quoteIdent(schemaName)}.${quoteIdent(name)} (\n  ${colDefs.join(',\n  ')}\n)`;
       await client.query(createSQL);
 
       // Table description

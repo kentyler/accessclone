@@ -10,7 +10,7 @@
 ;; Forward declarations for functions used before definition
 (declare load-tables! load-queries! load-functions! load-access-databases!
          save-ui-state! save-current-record! save-form! save-form-to-file!
-         get-record-source-fields delete-current-record!)
+         get-record-source-fields delete-current-record! load-form-for-editing!)
 
 ;; Application state atom
 (defonce app-state
@@ -415,6 +415,118 @@
               (println "Lint check failed, saving anyway")
               (do-save-form!))))))))
 
+;; ============================================================
+;; SESSION-STATE FUNCTION CALLING
+;; ============================================================
+
+(defn call-session-function!
+  "Call a PostgreSQL function through the session-state pipeline.
+   1. Create session  2. Set form field values as state vars
+   3. Call function    4. Handle response (message/navigate/confirm)
+   5. Refresh data     6. Clear session"
+  [function-name & [{:keys [on-complete]}]]
+  (go
+    (println "Calling session function:" function-name)
+    ;; 1. Create session
+    (let [session-resp (<! (http/post (str api-base "/api/session")))]
+      (if-not (:success session-resp)
+        (println "Error creating session:" (:body session-resp))
+        (let [session-id (get-in session-resp [:body :sessionId])]
+          (println "Session created:" session-id)
+          ;; 2. Build state vars from current record fields
+          (let [current-record (get-in @app-state [:form-editor :current-record] {})
+                state-vars (reduce-kv
+                            (fn [m k v]
+                              (if (= k :__new__)
+                                m
+                                (assoc m (if (keyword? k) (name k) (str k))
+                                       {:value (str v) :type "text"})))
+                            {}
+                            current-record)]
+            ;; Set state vars (only if we have some)
+            (when (seq state-vars)
+              (<! (http/put (str api-base "/api/session/" session-id "/state")
+                            {:json-params state-vars})))
+            ;; 3. Call the function
+            (let [func-resp (<! (http/post (str api-base "/api/session/function/" function-name)
+                                           {:json-params {:sessionId session-id}}))]
+              (if-not (:success func-resp)
+                (do
+                  (println "Error calling function:" (:body func-resp))
+                  (js/alert (str "Error calling " function-name ": "
+                                 (get-in func-resp [:body :details]
+                                         (get-in func-resp [:body :error] "Unknown error")))))
+                (let [body (:body func-resp)
+                      user-message (:userMessage body)
+                      navigate-to (:navigateTo body)
+                      confirm-required (:confirmRequired body)]
+                  (println "Function response:" body)
+                  ;; 4. Handle response
+                  (when user-message
+                    (js/alert user-message))
+                  (when navigate-to
+                    ;; Find form in sidebar objects by name, open it
+                    (let [forms (get-in @app-state [:objects :forms])
+                          target-form (first (filter #(= (str/lower-case (:name %))
+                                                         (str/lower-case navigate-to))
+                                                     forms))]
+                      (if target-form
+                        (do
+                          (open-object! :forms (:id target-form))
+                          (load-form-for-editing! target-form))
+                        (println "Navigate target form not found:" navigate-to))))
+                  (when confirm-required
+                    (when (js/confirm "Confirm action?")
+                      ;; Call confirm_action function with the same session
+                      (<! (http/post (str api-base "/api/session/function/confirm_action")
+                                     {:json-params {:sessionId session-id}}))))
+                  ;; 5. Refresh form data if function may have mutated
+                  (let [record-source (get-in @app-state [:form-editor :current :record-source])]
+                    (when record-source
+                      (let [order-by (get-in @app-state [:form-editor :current :order-by])
+                            filter-str (get-in @app-state [:form-editor :current :filter])
+                            filter-map (when (and filter-str (not (str/blank? filter-str)))
+                                         (let [parts (str/split filter-str #"(?i)\s+AND\s+")]
+                                           (reduce (fn [m part]
+                                                     (if-let [[_ col val] (re-matches #"\s*\[?(\w+)\]?\s*=\s*[\"']?([^\"']*)[\"']?\s*" part)]
+                                                       (assoc m col val)
+                                                       m))
+                                                   {} parts)))
+                            query-params (cond-> {:limit 1000}
+                                           order-by (merge (let [parts (str/split (str/trim order-by) #"\s+")]
+                                                             (cond-> {:orderBy (first parts)}
+                                                               (= "DESC" (str/upper-case (or (second parts) "")))
+                                                               (assoc :orderDir "desc"))))
+                                           (seq filter-map) (assoc :filter (.stringify js/JSON (clj->js filter-map))))
+                            data-resp (<! (http/get (str api-base "/api/data/" record-source)
+                                                    {:query-params query-params
+                                                     :headers (db-headers)}))]
+                        (when (:success data-resp)
+                          (let [data (get-in data-resp [:body :data])
+                                total (get-in data-resp [:body :pagination :totalCount] (count data))
+                                pos (get-in @app-state [:form-editor :record-position :current] 1)
+                                safe-pos (min pos (count data))]
+                            (swap! app-state assoc-in [:form-editor :records] (vec data))
+                            (swap! app-state assoc-in [:form-editor :record-position] {:current safe-pos :total total})
+                            (when (and (seq data) (> safe-pos 0))
+                              (swap! app-state assoc-in [:form-editor :current-record] (nth data (dec safe-pos))))
+                            (swap! app-state assoc-in [:form-editor :record-dirty?] false))))))
+                  ;; Callback if provided
+                  (when on-complete
+                    (on-complete body)))))
+            ;; 6. Clear session
+            (<! (http/delete (str api-base "/api/session/" session-id)))))))))
+
+(defn fire-form-event!
+  "Check if the current form has a function mapped to the given event key,
+   and if so, call it via call-session-function!. Returns a channel."
+  [event-key & [{:keys [on-complete]}]]
+  (let [form-def (get-in @app-state [:form-editor :current])
+        function-name (get form-def event-key)]
+    (when (and function-name (string? function-name) (not (str/blank? function-name)))
+      (println "Firing form event" event-key "→" function-name)
+      (call-session-function! function-name {:on-complete on-complete}))))
+
 ;; View mode
 (defn set-view-mode! [mode]
   "Set form view mode - :design or :view"
@@ -435,7 +547,8 @@
               (swap! app-state assoc-in [:form-editor :records] [new-record])
               (swap! app-state assoc-in [:form-editor :current-record] new-record)
               (swap! app-state assoc-in [:form-editor :record-position] {:current 1 :total 1})
-              (swap! app-state assoc-in [:form-editor :record-dirty?] true))
+              (swap! app-state assoc-in [:form-editor :record-dirty?] true)
+              (fire-form-event! :on-load))
             ;; Normal mode: fetch records from API
             (go
               (let [order-by (get-in @app-state [:form-editor :current :order-by])
@@ -468,7 +581,9 @@
                     (swap! app-state assoc-in [:form-editor :record-position] {:current 1 :total total})
                     (swap! app-state assoc-in [:form-editor :record-dirty?] false)
                     (when (seq data)
-                      (swap! app-state assoc-in [:form-editor :current-record] (first data))))
+                      (swap! app-state assoc-in [:form-editor :current-record] (first data)))
+                    ;; Fire on-load event after data is loaded
+                    (fire-form-event! :on-load))
                   (println "Error loading data:" (:body response)))))))))))
 
 (defn get-view-mode []
@@ -500,7 +615,9 @@
     (when (and (> total 0) (<= pos total))
       (swap! app-state assoc-in [:form-editor :record-position] {:current pos :total total})
       (swap! app-state assoc-in [:form-editor :current-record] (nth records (dec pos)))
-      (swap! app-state assoc-in [:form-editor :record-dirty?] false))))
+      (swap! app-state assoc-in [:form-editor :record-dirty?] false)
+      ;; Fire on-current event after navigating to new record
+      (fire-form-event! :on-current))))
 
 (defn save-current-record!
   "Save the current record to the database"
@@ -516,63 +633,88 @@
                             :record-dirty? record-dirty?})
     (if (and record-source current-record record-dirty?)
       (go
-        ;; Find primary key - check for pk flag or common names
-        (let [fields (get-record-source-fields record-source)
-              pk-field-name (or (some #(when (:pk %) (:name %)) fields)
-                                "id")
-              ;; Check both string and keyword versions of pk
-              pk-value (or (get current-record (keyword pk-field-name))
-                           (get current-record pk-field-name))
-              ;; Check for __new__ marker (set by new-record!) or missing pk
-              is-new? (or (:__new__ current-record)
-                          (nil? pk-value)
-                          (= pk-value ""))
-              ;; Convert record to string keys for API, removing internal markers
-              record-for-api (reduce-kv
-                              (fn [m k v]
-                                (if (= k :__new__)
-                                  m  ; skip internal marker
-                                  (assoc m (if (keyword? k) (name k) k) v)))
-                              {}
-                              current-record)]
-          (println "Saving record:" {:pk pk-field-name :pk-value pk-value :is-new? is-new? :data record-for-api})
-          (if is-new?
-            ;; Insert new record - only remove pk if it's auto-increment "id"
-            (let [insert-data (if (= pk-field-name "id")
-                                (dissoc record-for-api "id")
-                                record-for-api)
-                  response (<! (http/post (str api-base "/api/data/" record-source)
-                                          {:json-params insert-data
-                                           :headers (db-headers)}))]
-              (if (:success response)
-                (do
-                  (println "Record inserted successfully")
-                  (let [new-record (get-in response [:body :data])]
-                    ;; Update the record at current position (already added by new-record!)
-                    (swap! app-state assoc-in [:form-editor :records (dec pos)] new-record)
-                    (swap! app-state assoc-in [:form-editor :current-record] new-record)
-                    (swap! app-state assoc-in [:form-editor :record-dirty?] false)))
-                (println "Error inserting record:" (:body response))))
-            ;; Update existing record
-            (let [update-data (dissoc record-for-api pk-field-name)
-                  url (str api-base "/api/data/" record-source "/" pk-value)
-                  _ (println "PUT URL:" url)
-                  _ (println "PUT data:" update-data)
-                  _ (println "PUT headers:" (db-headers))
-                  response (<! (http/put url {:json-params update-data
-                                              :headers (db-headers)}))]
-              (println "PUT response:" {:success (:success response)
-                                        :status (:status response)
-                                        :body (:body response)})
-              (if (:success response)
-                (do
-                  (println "Record updated successfully")
-                  (let [updated-record (get-in response [:body :data])]
-                    (swap! app-state assoc-in [:form-editor :records (dec pos)] updated-record)
-                    (swap! app-state assoc-in [:form-editor :current-record] updated-record)
-                    (swap! app-state assoc-in [:form-editor :record-dirty?] false)))
-                (println "Error updating record:" (:body response))))))
-      (println "Save skipped - conditions not met")))))
+        ;; Check before-update event — if mapped, run the function first
+        (let [before-update-fn (get-in @app-state [:form-editor :current :before-update])
+              abort? (when (and before-update-fn (string? before-update-fn)
+                                (not (str/blank? before-update-fn)))
+                       ;; Create session, set state, call function, check for validation error
+                       (let [sess-resp (<! (http/post (str api-base "/api/session")))]
+                         (if-not (:success sess-resp)
+                           false  ; session failed, proceed with save
+                           (let [session-id (get-in sess-resp [:body :sessionId])
+                                 state-vars (reduce-kv
+                                             (fn [m k v]
+                                               (if (= k :__new__) m
+                                                   (assoc m (if (keyword? k) (name k) (str k))
+                                                          {:value (str v) :type "text"})))
+                                             {} current-record)
+                                 _ (when (seq state-vars)
+                                     (<! (http/put (str api-base "/api/session/" session-id "/state")
+                                                   {:json-params state-vars})))
+                                 func-resp (<! (http/post (str api-base "/api/session/function/" before-update-fn)
+                                                          {:json-params {:sessionId session-id}}))
+                                 user-msg (when (:success func-resp)
+                                            (get-in func-resp [:body :userMessage]))
+                                 should-abort (boolean user-msg)]
+                             ;; Clean up session
+                             (<! (http/delete (str api-base "/api/session/" session-id)))
+                             (when user-msg
+                               (js/alert user-msg))
+                             should-abort))))]
+          (when-not abort?
+            ;; Find primary key - check for pk flag or common names
+            (let [fields (get-record-source-fields record-source)
+                  pk-field-name (or (some #(when (:pk %) (:name %)) fields)
+                                    "id")
+                  pk-value (or (get current-record (keyword pk-field-name))
+                               (get current-record pk-field-name))
+                  is-new? (or (:__new__ current-record)
+                              (nil? pk-value)
+                              (= pk-value ""))
+                  record-for-api (reduce-kv
+                                  (fn [m k v]
+                                    (if (= k :__new__)
+                                      m
+                                      (assoc m (if (keyword? k) (name k) k) v)))
+                                  {}
+                                  current-record)]
+              (println "Saving record:" {:pk pk-field-name :pk-value pk-value :is-new? is-new? :data record-for-api})
+              (if is-new?
+                ;; Insert new record
+                (let [insert-data (if (= pk-field-name "id")
+                                    (dissoc record-for-api "id")
+                                    record-for-api)
+                      response (<! (http/post (str api-base "/api/data/" record-source)
+                                              {:json-params insert-data
+                                               :headers (db-headers)}))]
+                  (if (:success response)
+                    (do
+                      (println "Record inserted successfully")
+                      (let [new-record (get-in response [:body :data])]
+                        (swap! app-state assoc-in [:form-editor :records (dec pos)] new-record)
+                        (swap! app-state assoc-in [:form-editor :current-record] new-record)
+                        (swap! app-state assoc-in [:form-editor :record-dirty?] false)))
+                    (println "Error inserting record:" (:body response))))
+                ;; Update existing record
+                (let [update-data (dissoc record-for-api pk-field-name)
+                      url (str api-base "/api/data/" record-source "/" pk-value)
+                      _ (println "PUT URL:" url)
+                      _ (println "PUT data:" update-data)
+                      _ (println "PUT headers:" (db-headers))
+                      response (<! (http/put url {:json-params update-data
+                                                  :headers (db-headers)}))]
+                  (println "PUT response:" {:success (:success response)
+                                            :status (:status response)
+                                            :body (:body response)})
+                  (if (:success response)
+                    (do
+                      (println "Record updated successfully")
+                      (let [updated-record (get-in response [:body :data])]
+                        (swap! app-state assoc-in [:form-editor :records (dec pos)] updated-record)
+                        (swap! app-state assoc-in [:form-editor :current-record] updated-record)
+                        (swap! app-state assoc-in [:form-editor :record-dirty?] false)))
+                    (println "Error updating record:" (:body response)))))))))
+      (println "Save skipped - conditions not met"))))
 
 (defn new-record!
   "Create a new empty record"

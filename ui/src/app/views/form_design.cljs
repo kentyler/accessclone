@@ -154,7 +154,13 @@
   (let [height (form-utils/get-section-height form-def section)
         controls (form-utils/get-section-controls form-def section)
         section-label (case section :header "Form Header" :detail "Detail" :footer "Form Footer")
-        can-resize? (not= section :header)]
+        can-resize? (not= section :header)
+        section-data (get form-def section)
+        back-color (:back-color section-data)
+        section-selected? (and selected
+                               (:section selected)
+                               (nil? (:idx selected))
+                               (= (:section selected) section))]
     [:div.form-section
      {:class (name section)}
      [:div.section-divider
@@ -165,14 +171,17 @@
        :on-mouse-down (when can-resize? (fn [e] (start-resize! section e)))}
       [:span.section-label section-label]]
      [:div.section-body
-      {:style {:height height
-               :background-image (str "radial-gradient(circle, #ccc 1px, transparent 1px)")
-               :background-size (str grid-size "px " grid-size "px")}
+      {:class (when section-selected? "selected")
+       :style (cond-> {:height height
+                        :background-image (str "radial-gradient(circle, #ccc 1px, transparent 1px)")
+                        :background-size (str grid-size "px " grid-size "px")}
+                (and back-color (not= back-color ""))
+                (assoc :background-color back-color))
        :on-drag-over (fn [e] (.preventDefault e))
        :on-click (fn [e]
                    (when (or (.. e -target -classList (contains "section-body"))
                              (.. e -target -classList (contains "controls-container")))
-                     (state/select-control! nil)))
+                     (state/select-control! {:section section})))
        :on-drop (fn [e]
                   (.preventDefault e)
                   (let [rect (.getBoundingClientRect (.-currentTarget e))

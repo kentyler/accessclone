@@ -769,6 +769,11 @@ body {
   overflow: hidden;
 }
 
+.section-body.selected {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
 .section-empty {
   display: flex;
   align-items: center;

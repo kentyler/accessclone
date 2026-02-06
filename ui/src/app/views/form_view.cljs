@@ -1,7 +1,8 @@
 (ns app.views.form-view
   "Form view mode - live data entry with record navigation"
   (:require [app.state :as state]
-            [app.views.form-utils :as fu]))
+            [app.views.form-utils :as fu]
+            [clojure.string :as str]))
 
 (declare show-record-menu)
 
@@ -29,10 +30,19 @@
   "Render a button control"
   [ctrl _field _value _on-change _opts]
   (let [button-text (or (:text ctrl) (:caption ctrl) "Button")
-        on-click (if (= button-text "Close")
+        click-fn-name (:on-click ctrl)
+        on-click (cond
+                   ;; Close button special case
+                   (= button-text "Close")
                    #(let [active (:active-tab @state/app-state)]
                       (when active
                         (state/close-tab! (:type active) (:id active))))
+                   ;; Mapped function name
+                   (and click-fn-name (string? click-fn-name)
+                        (not (str/blank? click-fn-name)))
+                   #(state/call-session-function! click-fn-name)
+                   ;; No mapped function
+                   :else
                    #(js/alert (str "Button clicked: " button-text)))]
     [:button.view-button {:on-click on-click} button-text]))
 

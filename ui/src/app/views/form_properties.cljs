@@ -41,6 +41,18 @@
            {:key :tag :label "Tag" :type :text}
            {:key :control-tip-text :label "ControlTip Text" :type :text}]})
 
+(def section-property-defs
+  {:format [{:key :height :label "Height" :type :number}
+            {:key :back-color :label "Back Color" :type :text}
+            {:key :visible :label "Visible" :type :yes-no :default true}]
+   :event  [{:key :on-click :label "On Click" :type :event}]
+   :other  [{:key :tag :label "Tag" :type :text}]})
+
+(def section-display-names
+  {:header "FormHeader"
+   :detail "Detail"
+   :footer "FormFooter"})
+
 (def form-property-defs
   {:format [{:key :caption :label "Caption" :type :text}
             {:key :default-view :label "Default View" :type :select
@@ -150,21 +162,33 @@
         active-tab (or (:properties-tab form-editor) :format)
         current (:current form-editor)
         ;; Get controls from the selected section
-        section (when selected (:section selected))
+        section-key (when selected (:section selected))
         idx (when selected (:idx selected))
-        controls (when section (or (get-in current [section :controls]) []))
-        selected-control (when (and section idx (< idx (count controls)))
+        controls (when section-key (or (get-in current [section-key :controls]) []))
+        selected-control (when (and section-key idx (< idx (count controls)))
                            (get controls idx))
-        ;; Determine if we're showing form or control properties
-        is-form? (nil? selected-control)
-        selection-type (if is-form? "Form" (name (:type selected-control)))
-        property-defs (if is-form? form-property-defs control-property-defs)
-        get-value (if is-form?
-                    #(get current %)
-                    #(get selected-control %))
-        on-change (if is-form?
-                    #(state/set-form-definition! (assoc current %1 %2))
-                    #(state/update-control! section idx %1 %2))]
+        ;; Determine three selection states: form, section, or control
+        is-control? (some? selected-control)
+        is-section? (and (some? section-key) (nil? idx))
+        is-form? (and (not is-control?) (not is-section?))
+        selection-type (cond
+                         is-control? (name (:type selected-control))
+                         is-section? (get section-display-names section-key (name section-key))
+                         :else "Form")
+        property-defs (cond
+                        is-control? control-property-defs
+                        is-section? section-property-defs
+                        :else form-property-defs)
+        section-data (when is-section? (get current section-key))
+        get-value (cond
+                    is-control? #(get selected-control %)
+                    is-section? #(get section-data %)
+                    :else #(get current %))
+        on-change (cond
+                    is-control? #(state/update-control! section-key idx %1 %2)
+                    is-section? #(state/set-form-definition!
+                                  (assoc-in current [section-key %1] %2))
+                    :else #(state/set-form-definition! (assoc current %1 %2)))]
     [:div.property-sheet
      [:div.property-sheet-header
       [:span.property-sheet-title "Property Sheet"]

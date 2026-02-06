@@ -125,6 +125,111 @@ describe('validateForm', () => {
     expect(errors.some(e => e.field === 'controls')).toBe(true);
   });
 
+  test('all 7 new control types pass validation', () => {
+    const newTypes = ['line', 'rectangle', 'image', 'list-box', 'option-group', 'tab-control', 'subform'];
+    for (const type of newTypes) {
+      const form = {
+        id: '1',
+        name: 'Test',
+        'record-source': 'users',
+        detail: {
+          height: 200,
+          controls: [
+            { type, x: 10, y: 10, width: 200, height: 25 }
+          ]
+        }
+      };
+      const issues = validateForm(form);
+      const typeErrors = issues.filter(i => i.severity === 'error' && i.field === 'type');
+      expect(typeErrors).toHaveLength(0);
+    }
+  });
+
+  test('image without picture generates a warning', () => {
+    const form = {
+      id: '1',
+      name: 'Test',
+      'record-source': 'users',
+      detail: {
+        height: 200,
+        controls: [
+          { type: 'image', x: 10, y: 10, width: 200, height: 100 }
+        ]
+      }
+    };
+    const issues = validateForm(form);
+    const warnings = issues.filter(i => i.severity === 'warning');
+    expect(warnings.some(w => w.field === 'picture')).toBe(true);
+  });
+
+  test('image with picture generates no warning', () => {
+    const form = {
+      id: '1',
+      name: 'Test',
+      'record-source': 'users',
+      detail: {
+        height: 200,
+        controls: [
+          { type: 'image', picture: '/images/logo.png', x: 10, y: 10, width: 200, height: 100 }
+        ]
+      }
+    };
+    const issues = validateForm(form);
+    const warnings = issues.filter(i => i.severity === 'warning' && i.field === 'picture');
+    expect(warnings).toHaveLength(0);
+  });
+
+  test('subform without source-form generates a warning', () => {
+    const form = {
+      id: '1',
+      name: 'Test',
+      'record-source': 'users',
+      detail: {
+        height: 200,
+        controls: [
+          { type: 'subform', x: 10, y: 10, width: 300, height: 200 }
+        ]
+      }
+    };
+    const issues = validateForm(form);
+    const warnings = issues.filter(i => i.severity === 'warning');
+    expect(warnings.some(w => w.field === 'source-form')).toBe(true);
+  });
+
+  test('option-group without options generates a warning', () => {
+    const form = {
+      id: '1',
+      name: 'Test',
+      'record-source': 'users',
+      detail: {
+        height: 200,
+        controls: [
+          { type: 'option-group', x: 10, y: 10, width: 200, height: 100 }
+        ]
+      }
+    };
+    const issues = validateForm(form);
+    const warnings = issues.filter(i => i.severity === 'warning');
+    expect(warnings.some(w => w.field === 'options')).toBe(true);
+  });
+
+  test('tab-control without pages generates a warning', () => {
+    const form = {
+      id: '1',
+      name: 'Test',
+      'record-source': 'users',
+      detail: {
+        height: 200,
+        controls: [
+          { type: 'tab-control', x: 10, y: 10, width: 400, height: 300 }
+        ]
+      }
+    };
+    const issues = validateForm(form);
+    const warnings = issues.filter(i => i.severity === 'warning');
+    expect(warnings.some(w => w.field === 'pages')).toBe(true);
+  });
+
   test('valid section-based form passes cleanly', () => {
     const form = {
       id: '1',

@@ -9,7 +9,8 @@ const router = express.Router();
 
 // Validation rules
 const VALID_CONTROL_TYPES = [
-  'label', 'text-box', 'button', 'check-box', 'combo-box'
+  'label', 'text-box', 'button', 'check-box', 'combo-box',
+  'line', 'rectangle', 'image', 'list-box', 'option-group', 'tab-control', 'subform'
 ];
 
 const REQUIRED_FORM_FIELDS = ['id', 'name', 'record-source'];
@@ -66,6 +67,42 @@ function validateControl(control, sectionName, index, errors, formName) {
       location: prefix,
       message: "label should have 'text' property",
       field: 'text'
+    });
+  }
+
+  if (type === 'image' && !control.picture) {
+    errors.push({
+      severity: 'warning',
+      location: prefix,
+      message: "image should have 'picture' property for image source",
+      field: 'picture'
+    });
+  }
+
+  if (type === 'subform' && !control['source-form'] && !control.source_form) {
+    errors.push({
+      severity: 'warning',
+      location: prefix,
+      message: "subform should have 'source-form' property",
+      field: 'source-form'
+    });
+  }
+
+  if (type === 'option-group' && !control.options) {
+    errors.push({
+      severity: 'warning',
+      location: prefix,
+      message: "option-group should have 'options' property",
+      field: 'options'
+    });
+  }
+
+  if (type === 'tab-control' && !control.pages) {
+    errors.push({
+      severity: 'warning',
+      location: prefix,
+      message: "tab-control should have 'pages' property",
+      field: 'pages'
     });
   }
 

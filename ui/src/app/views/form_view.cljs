@@ -1,6 +1,7 @@
 (ns app.views.form-view
   "Form view mode - live data entry with record navigation"
-  (:require [app.state :as state]
+  (:require [reagent.core :as r]
+            [app.state :as state]
             [app.views.form-utils :as fu]
             [clojure.string :as str]))
 
@@ -65,6 +66,99 @@
     :on-change #(when (and field allow-edits?) (on-change field (.. % -target -value)))}
    [:option ""]])
 
+(defn render-line
+  "Render a horizontal line control"
+  [ctrl _field _value _on-change _opts]
+  [:hr.view-line
+   {:style (cond-> {}
+             (:border-color ctrl) (assoc :border-color (:border-color ctrl))
+             (:border-width ctrl) (assoc :border-top-width (:border-width ctrl)))}])
+
+(defn render-rectangle
+  "Render a rectangle (box) control"
+  [ctrl _field _value _on-change _opts]
+  [:div.view-rectangle
+   {:style (cond-> {}
+             (:back-color ctrl) (assoc :background-color (:back-color ctrl))
+             (:border-color ctrl) (assoc :border-color (:border-color ctrl))
+             (:border-width ctrl) (assoc :border-width (:border-width ctrl)))}])
+
+(defn render-image
+  "Render an image control"
+  [ctrl _field _value _on-change _opts]
+  (if-let [src (:picture ctrl)]
+    [:img.view-image {:src src :alt (or (:text ctrl) "Image")}]
+    [:div.view-image-placeholder "\uD83D\uDDBC No Image"]))
+
+(defn render-listbox
+  "Render a list box (multi-select) control"
+  [_ctrl field value on-change {:keys [allow-edits?]}]
+  (let [rows (or (:list-rows _ctrl) 5)]
+    [:select.view-listbox
+     {:multiple true
+      :size rows
+      :value (or value "")
+      :disabled (not allow-edits?)
+      :on-change #(when (and field allow-edits?) (on-change field (.. % -target -value)))}
+     [:option ""]]))
+
+(defn render-option-group
+  "Render a radio button group control"
+  [ctrl field value on-change {:keys [allow-edits?]}]
+  (let [options (or (:options ctrl) [])
+        group-name (or (:name ctrl) (str "optgrp-" (random-uuid)))]
+    [:div.view-option-group
+     (if (seq options)
+       (for [[idx opt] (map-indexed vector options)]
+         ^{:key idx}
+         [:label.view-option-item
+          [:input {:type "radio"
+                   :name group-name
+                   :value (or (:value opt) idx)
+                   :checked (= value (or (:value opt) idx))
+                   :disabled (not allow-edits?)
+                   :on-change #(when (and field allow-edits?)
+                                 (on-change field (or (:value opt) idx)))}]
+          (or (:label opt) (str "Option " (inc idx)))])
+       [:span.view-option-placeholder "(No options defined)"])]))
+
+(defn render-tab-control
+  "Render a tab control with clickable tab headers (MVP: no nested controls)"
+  [ctrl _field _value _on-change _opts]
+  (let [active-tab (r/atom 0)
+        pages (or (:pages ctrl) [])]
+    (fn [ctrl _field _value _on-change _opts]
+      (let [pages (or (:pages ctrl) [])]
+        [:div.view-tab-control
+         [:div.view-tab-headers
+          (if (seq pages)
+            (for [[idx page] (map-indexed vector pages)]
+              ^{:key idx}
+              [:div.view-tab-header
+               {:class (when (= idx @active-tab) "active")
+                :on-click #(reset! active-tab idx)}
+               (or (:caption page) (:name page) (str "Page " (inc idx)))])
+            [:div.view-tab-header.active "Page 1"])]
+         [:div.view-tab-body
+          (if (seq pages)
+            [:span (str "(Tab page: " (or (:caption (nth pages @active-tab nil))
+                                          (:name (nth pages @active-tab nil))
+                                          (str "Page " (inc @active-tab))) ")")]
+            [:span "(Empty tab control)"])]]))))
+
+(defn render-subform
+  "Render a subform placeholder (MVP: shows source-form name, no child records)"
+  [ctrl _field _value _on-change _opts]
+  (let [source-form (or (:source-form ctrl) (:source_form ctrl))
+        link-field (or (:link-child-fields ctrl) (:link_child_fields ctrl))]
+    [:div.view-subform
+     [:div.view-subform-header
+      (if source-form
+        (str "Subform: " source-form)
+        "Subform (no source)")]
+     (when link-field
+       [:div.view-subform-link (str "Linked by: " link-field)])]))
+
 (defn render-default
   "Render fallback for unknown control types"
   [ctrl _field _value _on-change _opts]
@@ -73,11 +167,18 @@
 ;; --- Control type dispatch ---
 
 (def control-renderers
-  {:label     render-label
-   :text-box  render-textbox
-   :button    render-button
-   :check-box render-checkbox
-   :combo-box render-combobox})
+  {:label        render-label
+   :text-box     render-textbox
+   :button       render-button
+   :check-box    render-checkbox
+   :combo-box    render-combobox
+   :line         render-line
+   :rectangle    render-rectangle
+   :image        render-image
+   :list-box     render-listbox
+   :option-group render-option-group
+   :tab-control  render-tab-control
+   :subform      render-subform})
 
 (defn form-view-control
   "Render a single control in view mode"

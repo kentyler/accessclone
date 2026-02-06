@@ -36,6 +36,17 @@ This is PolyAccess (formerly CloneTemplate), a platform for converting MS Access
 - Popup Forms: `:popup 1` renders as floating window; `:modal 1` adds full-screen backdrop (z-index 900)
 - `normalize-form-definition` in state.cljs normalizes form data on load: coerces control `:type` to keyword, yes/no props to 0/1 integers (with defaults), and numeric props to numbers — across form-level and all sections
 
+### Report Editor (ui/src/app/views/report_editor.cljs)
+- Reports are **banded** (unlike forms which have 3 fixed sections: header/detail/footer). A banded report has 5 standard bands plus dynamic group bands that repeat based on data grouping:
+  - report-header (once), page-header (each page), group-header-0..N (on group break), detail (each record), group-footer-N..0 (on group break), page-footer (each page), report-footer (once)
+- Design View: Visual drag-drop editor with all bands rendered as resizable sections
+- Preview: Read-only page layout with live data, group break detection, banded section rendering
+- Property Sheet: Access-style tabbed interface (Format/Data/Event/Other/All) for report-level, section (band), group-level, and control properties
+- Group-level properties (field, sort-order, group-on, group-interval, keep-together) stored in `:grouping` array, edited via Data tab when a group band is selected
+- `normalize-report-definition` in state.cljs normalizes report data on load (same pattern as forms)
+- EDN-format legacy reports (from PowerShell export) display as read-only preformatted text
+- Files: report_editor.cljs (orchestrator), report_design.cljs (design surface), report_properties.cljs (property sheet), report_view.cljs (preview), report_utils.cljs (utilities)
+
 ### Table Viewer (ui/src/app/views/table_viewer.cljs)
 - Datasheet View: Editable grid with inline cell editing
 - Design View: Shows table structure (columns, types, keys)
@@ -58,10 +69,14 @@ This is PolyAccess (formerly CloneTemplate), a platform for converting MS Access
 - `navigate-to-record!` - Auto-saves before navigation
 - Records use keyword keys internally, converted to strings for API
 - UI state persistence: saves/restores open tabs across sessions
+- `load-databases!` / `switch-database!` reload all 5 object types: tables, queries, functions, forms, reports
+- Report state: `set-report-definition!`, `load-report-for-editing!`, `save-report!`, `set-report-view-mode!`, `select-report-control!`, `update-report-control!`, `delete-report-control!`
 
 ### API Routes (server/routes/)
 - `/api/data/:table` - CRUD operations for table records
 - `/api/databases` - Multi-database management
+- `/api/forms/*` - Form CRUD with append-only versioning (shared.forms table)
+- `/api/reports/*` - Report CRUD with append-only versioning (shared.reports table)
 - `/api/graph/*` - Dependency/intent graph queries
 - `/api/session/ui-state` - Save/load UI state (open tabs, active database)
 - `/api/queries/run` - Execute SQL queries (SELECT only)

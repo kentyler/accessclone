@@ -2697,3 +2697,97 @@ body {
   font-size: 0.75rem;
   color: var(--error);
 }
+
+/* ============================================================
+   REPORT PREVIEW STYLES
+   ============================================================ */
+
+.report-preview {
+  background: white;
+  margin: 1rem auto;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  min-height: 400px;
+  overflow: auto;
+}
+
+.report-preview-section {
+  position: relative;
+  border-bottom: 1px dotted var(--gray-300);
+  overflow: hidden;
+}
+
+.report-preview-section.report-header,
+.report-preview-section.report-footer {
+  border-bottom-color: var(--gray-400);
+}
+
+.report-preview-section.page-header,
+.report-preview-section.page-footer {
+  background: var(--gray-50);
+  border-bottom-style: dashed;
+}
+
+.report-preview-control {
+  position: absolute;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.report-preview-control.label {
+  font-weight: 500;
+}
+
+.report-line {
+  width: 100%;
+  border: none;
+  border-top: 1px solid #000;
+  margin: 0;
+}
+
+.report-rectangle {
+  width: 100%;
+  height: 100%;
+  border: 1px solid #000;
+}
+
+.report-no-data {
+  padding: 2rem;
+  text-align: center;
+  color: var(--gray-500);
+  font-style: italic;
+}
+
+.report-data-sections {
+  /* Container for all grouped data output */
+}
+
+/* Print styles for report preview */
+@media print {
+  .form-toolbar,
+  .editor-right,
+  .sidebar,
+  .header,
+  .chat-panel,
+  .tab-bar {
+    display: none !important;
+  }
+
+  .report-preview {
+    box-shadow: none;
+    margin: 0;
+    padding: 0;
+    max-width: 100% !important;
+  }
+
+  .editor-body {
+    display: block !important;
+  }
+
+  .editor-center {
+    width: 100% !important;
+  }
+}

@@ -7,7 +7,8 @@
             [app.views.form-view :as form-view]
             [app.views.table-viewer :as table-viewer]
             [app.views.query-viewer :as query-viewer]
-            [app.views.module-viewer :as module-viewer]))
+            [app.views.module-viewer :as module-viewer]
+            [app.views.report-editor :as report-editor]))
 
 (defn ask-ai-to-fix-errors!
   "Send lint errors to AI for suggestions"
@@ -168,6 +169,7 @@
   (let [active-tab (:active-tab @state/app-state)]
     (case (:type active-tab)
       :forms [form-editor]
+      :reports [report-editor/report-editor]
       :tables [table-viewer/table-viewer]
       :queries [query-viewer/query-viewer]
       :modules [module-viewer/module-viewer]

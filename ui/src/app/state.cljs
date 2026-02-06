@@ -10,7 +10,9 @@
 ;; Forward declarations for functions used before definition
 (declare load-tables! load-queries! load-functions! load-access-databases!
          save-ui-state! save-current-record! save-form! save-form-to-file!
-         get-record-source-fields delete-current-record! load-form-for-editing!)
+         get-record-source-fields delete-current-record! load-form-for-editing!
+         load-forms! load-reports! save-report! save-report-to-file!
+         filename->display-name)
 
 ;; Application state atom
 (defonce app-state
@@ -48,6 +50,15 @@
                          :original nil
                          :current nil
                          :selected-control nil}  ; index of selected control
+
+           ;; Report editor state
+           :report-editor {:dirty? false
+                           :original nil
+                           :current nil
+                           :selected-control nil
+                           :properties-tab :format
+                           :view-mode :design
+                           :records []}
 
            ;; Table viewer state
            :table-viewer {:table-id nil
@@ -137,7 +148,7 @@
 (defonce pending-ui-state (atom nil))
 
 (defn start-loading-objects! []
-  (reset! pending-loads 3)  ; 3 types: tables, queries, functions
+  (reset! pending-loads 5)  ; 5 types: tables, queries, functions, forms, reports
   (set-loading-objects! true))
 
 (defn object-load-complete! []
@@ -168,7 +179,9 @@
           (start-loading-objects!)
           (load-tables!)
           (load-queries!)
-          (load-functions!))
+          (load-functions!)
+          (load-forms!)
+          (load-reports!))
         (do
           (println "Error loading databases:" (:body response))
           (log-error! "Failed to load databases" "load-databases" {:response (:body response)}))))))
@@ -194,6 +207,8 @@
           (load-tables!)
           (load-queries!)
           (load-functions!)
+          (load-forms!)
+          (load-reports!)
           (println "Switched to database:" (:name new-db)))
         (do
           (println "Error switching database:" (:body response))
@@ -954,6 +969,263 @@
                  (update controls idx assoc prop value))))))
 
 ;; ============================================================
+;; REPORT EDITOR
+;; ============================================================
+
+(defn- normalize-report-control
+  "Normalize a single report control: keywordize :type, coerce yes/no and number props."
+  [ctrl]
+  (-> (reduce (fn [c prop]
+                (let [v (get c prop)]
+                  (if (nil? v)
+                    (assoc c prop (get yes-no-control-defaults prop 0))
+                    (assoc c prop (coerce-yes-no v)))))
+              (update ctrl :type coerce-to-keyword)
+              yes-no-control-props)
+      (#(reduce (fn [c prop]
+                  (if (contains? c prop)
+                    (assoc c prop (coerce-to-number (get c prop)))
+                    c))
+                % number-control-props))))
+
+(defn- normalize-report-section
+  "Normalize all controls in a report section."
+  [section]
+  (if (:controls section)
+    (update section :controls #(mapv normalize-report-control %))
+    section))
+
+(def ^:private report-section-keys
+  [:report-header :page-header :detail :page-footer :report-footer])
+
+(defn- normalize-report-definition
+  "Apply defaults and normalize types across the full report definition."
+  [definition]
+  (let [;; Normalize standard sections
+        def-with-sections
+        (reduce (fn [d section-key]
+                  (if (get d section-key)
+                    (update d section-key normalize-report-section)
+                    d))
+                definition
+                report-section-keys)
+        ;; Normalize group sections (group-header-0, group-footer-0, etc.)
+        all-keys (keys def-with-sections)
+        group-keys (filter (fn [k]
+                             (let [n (name k)]
+                               (or (str/starts-with? n "group-header-")
+                                   (str/starts-with? n "group-footer-"))))
+                           all-keys)]
+    (reduce (fn [d gk]
+              (if (get d gk)
+                (update d gk normalize-report-section)
+                d))
+            def-with-sections
+            group-keys)))
+
+(defn set-report-definition!
+  "Update report editor current definition and mark dirty."
+  [definition]
+  (swap! app-state assoc-in [:report-editor :current] definition)
+  (swap! app-state assoc-in [:report-editor :dirty?]
+         (not= definition (get-in @app-state [:report-editor :original]))))
+
+(defn set-report-view-mode!
+  "Set report view mode - :design or :preview"
+  [mode]
+  (swap! app-state assoc-in [:report-editor :view-mode] mode)
+  ;; When switching to preview, load data
+  (when (= mode :preview)
+    (let [record-source (get-in @app-state [:report-editor :current :record-source])]
+      (when record-source
+        (go
+          (let [order-by (get-in @app-state [:report-editor :current :order-by])
+                filter-str (get-in @app-state [:report-editor :current :filter])
+                filter-map (when (and filter-str (not (str/blank? filter-str)))
+                             (let [parts (str/split filter-str #"(?i)\s+AND\s+")]
+                               (reduce (fn [m part]
+                                         (if-let [[_ col val] (re-matches #"\s*\[?(\w+)\]?\s*=\s*[\"']?([^\"']*)[\"']?\s*" part)]
+                                           (assoc m col val)
+                                           m))
+                                       {} parts)))
+                query-params (cond-> {:limit 1000}
+                               order-by (merge (let [parts (str/split (str/trim order-by) #"\s+")]
+                                                 (cond-> {:orderBy (first parts)}
+                                                   (= "DESC" (str/upper-case (or (second parts) "")))
+                                                   (assoc :orderDir "desc"))))
+                               (seq filter-map) (assoc :filter (.stringify js/JSON (clj->js filter-map))))
+                response (<! (http/get (str api-base "/api/data/" record-source)
+                                       {:query-params query-params
+                                        :headers (db-headers)}))]
+            (if (:success response)
+              (let [data (get-in response [:body :data])]
+                (println "Report preview: loaded" (count data) "records from" record-source)
+                (swap! app-state assoc-in [:report-editor :records] (vec data)))
+              (println "Error loading report data:" (:body response)))))))))
+
+(defn get-report-view-mode []
+  (get-in @app-state [:report-editor :view-mode] :design))
+
+(defn select-report-control!
+  "Select a report control or section. Pass nil for report-level, {:section :page-header} for section, {:section :detail :idx 0} for control."
+  [selection]
+  (swap! app-state assoc-in [:report-editor :selected-control] selection))
+
+(defn update-report-control!
+  "Update a property of a control in a report section"
+  [section idx prop value]
+  (let [current (get-in @app-state [:report-editor :current])
+        controls (or (get-in current [section :controls]) [])]
+    (when (< idx (count controls))
+      (set-report-definition!
+       (assoc-in current [section :controls]
+                 (update controls idx assoc prop value))))))
+
+(defn delete-report-control!
+  "Delete a control from a report section"
+  [section idx]
+  (let [current (get-in @app-state [:report-editor :current])
+        controls (or (get-in current [section :controls]) [])]
+    (when (< idx (count controls))
+      (let [new-controls (vec (concat (subvec controls 0 idx)
+                                      (subvec controls (inc idx))))]
+        (swap! app-state assoc-in [:report-editor :selected-control] nil)
+        (set-report-definition! (assoc-in current [section :controls] new-controls))))))
+
+(defn load-report-for-editing!
+  "Load a report definition for editing"
+  [report]
+  ;; Auto-save dirty report before switching
+  (when (get-in @app-state [:report-editor :dirty?])
+    (save-report!))
+  ;; Check if definition is already loaded
+  (if (:definition report)
+    (let [def-with-defaults (normalize-report-definition (:definition report))]
+      (swap! app-state assoc :report-editor
+             {:report-id (:id report)
+              :dirty? false
+              :original def-with-defaults
+              :current def-with-defaults
+              :selected-control nil
+              :properties-tab :format
+              :view-mode :design
+              :records []})
+      (set-report-view-mode! :design))
+    ;; Need to fetch definition from API
+    (go
+      (let [response (<! (http/get (str api-base "/api/reports/" (:filename report))
+                                    {:headers (db-headers)}))]
+        (if (:success response)
+          (let [body (:body response)
+                ;; Handle EDN format - if _format is edn, store raw for now
+                is-edn? (= "edn" (:_format body))
+                definition (if is-edn?
+                             {:_raw_edn (:_raw_edn body) :_format "edn"
+                              :name (:name report)}
+                             (normalize-report-definition (dissoc body :id :name)))]
+            (println "Loaded report definition, keys:" (keys definition))
+            ;; Update report in objects list with definition
+            (swap! app-state update-in [:objects :reports]
+                   (fn [reports]
+                     (mapv (fn [r]
+                             (if (= (:id r) (:id report))
+                               (assoc r :definition definition)
+                               r))
+                           reports)))
+            ;; Set up report editor
+            (swap! app-state assoc :report-editor
+                   {:report-id (:id report)
+                    :dirty? false
+                    :original definition
+                    :current definition
+                    :selected-control nil
+                    :properties-tab :format
+                    :view-mode :design
+                    :records []}))
+          (println "Error loading report:" (:filename report)))))))
+
+(defn do-save-report!
+  "Actually save the report"
+  []
+  (let [current (get-in @app-state [:report-editor :current])
+        report-id (get-in @app-state [:report-editor :report-id])]
+    (when (and report-id current)
+      ;; Update the report in objects list
+      (update-object! :reports report-id {:definition current})
+      ;; Update the tab name if report name changed
+      (swap! app-state update :open-objects
+             (fn [tabs]
+               (mapv (fn [tab]
+                       (if (and (= (:type tab) :reports)
+                                (= (:id tab) report-id))
+                         (assoc tab :name (or (:name current) (:name tab)))
+                         tab))
+                     tabs)))
+      ;; Mark as clean
+      (swap! app-state assoc-in [:report-editor :dirty?] false)
+      (swap! app-state assoc-in [:report-editor :original] current)
+      ;; Save to file
+      (let [report (first (filter #(= (:id %) report-id)
+                                  (get-in @app-state [:objects :reports])))]
+        (save-report-to-file! report)))))
+
+(defn save-report!
+  "Save the current report (no lint for reports)"
+  []
+  (do-save-report!))
+
+(defn save-report-to-file!
+  "Save a report to the database via backend API"
+  [report]
+  (let [filename (or (:filename report)
+                     (-> (:name report)
+                         (str/lower-case)
+                         (str/replace #"\s+" "_")))
+        report-data (merge {:id (:id report)
+                            :name (:name report)}
+                           (:definition report))]
+    (go
+      (let [response (<! (http/put (str api-base "/api/reports/" filename)
+                                   {:json-params report-data}))]
+        (if (:success response)
+          (do
+            (println "Saved report:" filename)
+            (swap! app-state update-in [:objects :reports]
+                   (fn [reports]
+                     (mapv (fn [r]
+                             (if (= (:id r) (:id report))
+                               (assoc r :filename filename)
+                               r))
+                           reports))))
+          (do
+            (println "Error saving report:" (:body response))
+            (log-error! (str "Failed to save report: " (get-in response [:body :error])) "save-report" {:response (:body response)})))))))
+
+(defn load-reports!
+  "Load all reports for current database from API"
+  []
+  (go
+    (let [response (<! (http/get (str api-base "/api/reports")
+                                  {:headers (db-headers)}))]
+      (if (:success response)
+        (let [reports-data (get-in response [:body :reports] [])
+              details (get-in response [:body :details] [])]
+          (println "Loading reports:" reports-data)
+          (swap! app-state assoc-in [:objects :reports]
+                 (vec (map-indexed
+                        (fn [idx report-name]
+                          (let [detail (nth details idx nil)]
+                            {:id (inc idx)
+                             :name (filename->display-name report-name)
+                             :filename report-name
+                             :record-source (:record_source detail)}))
+                        reports-data)))
+          (object-load-complete!))
+        (do
+          (println "Could not load reports from API")
+          (object-load-complete!))))))
+
+;; ============================================================
 ;; MODULE VIEWER
 ;; ============================================================
 
@@ -1044,7 +1316,7 @@
 
 ;; Form operations (load from database via API)
 
-(defn- filename->display-name
+(defn filename->display-name
   "Convert filename to display name: recipe_calculator -> Recipe Calculator"
   [filename]
   (->> (str/split filename #"_")
@@ -1070,8 +1342,11 @@
                              :name (filename->display-name form-name)
                              :filename form-name
                              :record-source (:record_source detail)}))
-                        forms-data))))
-        (println "Could not load forms from API")))))
+                        forms-data)))
+          (object-load-complete!))
+        (do
+          (println "Could not load forms from API")
+          (object-load-complete!))))))
 
 (defn save-form-to-file!
   "Save a form to the database via backend API"
@@ -1286,13 +1561,10 @@
           ;; We'll handle this after loading databases
           (swap! app-state assoc :saved-database-id saved-db-id))))
 
-    ;; Load available databases (sets current database, then loads objects)
+    ;; Load available databases (sets current database, then loads all objects)
     (load-databases!)
 
     ;; Load app configuration
     (load-config!)
-
-    ;; Load forms from database
-    (load-forms!)
 
     (println "Application state initialized - loading from database")))

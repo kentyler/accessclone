@@ -937,6 +937,86 @@
                 (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :records]
                        [])))))))))
 
+(defn save-subform-cell!
+  "Save an edited cell value in a subform record.
+   Optimistic local update, then PUT to API. On error, clear filter-key to force re-fetch."
+  [source-form-name row-idx col-name value]
+  (let [cache-path [:form-editor :subform-cache source-form-name]
+        definition (get-in @app-state (conj cache-path :definition))
+        child-record-source (when (map? definition)
+                              (or (:record-source definition) (:record_source definition)))
+        records (get-in @app-state (conj cache-path :records))]
+    (when (and child-record-source (vector? records) (< row-idx (count records)))
+      (let [record (nth records row-idx)
+            fields (get-record-source-fields child-record-source)
+            pk-field-name (or (some #(when (:pk %) (:name %)) fields) "id")
+            pk-value (or (get record (keyword pk-field-name))
+                         (get record pk-field-name))]
+        (when pk-value
+          ;; Optimistic local update
+          (swap! app-state assoc-in (conj cache-path :records row-idx (keyword col-name)) value)
+          (go
+            (let [response (<! (http/put (str api-base "/api/data/" child-record-source "/" pk-value)
+                                          {:json-params {col-name value}
+                                           :headers (db-headers)}))]
+              (when-not (:success response)
+                (println "Error saving subform cell:" (:body response))
+                ;; Clear filter-key to force re-fetch
+                (swap! app-state assoc-in (conj cache-path :filter-key) nil)))))))))
+
+(defn new-subform-record!
+  "Create a new child record in a subform, pre-populated with link field values."
+  [source-form-name link-child-fields link-master-fields current-record]
+  (let [cache-path [:form-editor :subform-cache source-form-name]
+        definition (get-in @app-state (conj cache-path :definition))
+        child-record-source (when (map? definition)
+                              (or (:record-source definition) (:record_source definition)))]
+    (when child-record-source
+      (let [;; Build new record with link values pre-populated
+            new-data (reduce (fn [m [child-field master-field]]
+                               (let [master-val (or (get current-record (keyword master-field))
+                                                    (get current-record master-field))]
+                                 (if master-val
+                                   (assoc m child-field master-val)
+                                   m)))
+                             {}
+                             (map vector link-child-fields link-master-fields))]
+        (go
+          (let [response (<! (http/post (str api-base "/api/data/" child-record-source)
+                                         {:json-params new-data
+                                          :headers (db-headers)}))]
+            (if (:success response)
+              (do
+                (println "Subform record created")
+                ;; Clear filter-key to force re-fetch
+                (swap! app-state assoc-in (conj cache-path :filter-key) nil))
+              (println "Error creating subform record:" (:body response)))))))))
+
+(defn delete-subform-record!
+  "Delete a child record from a subform by row index."
+  [source-form-name row-idx]
+  (let [cache-path [:form-editor :subform-cache source-form-name]
+        definition (get-in @app-state (conj cache-path :definition))
+        child-record-source (when (map? definition)
+                              (or (:record-source definition) (:record_source definition)))
+        records (get-in @app-state (conj cache-path :records))]
+    (when (and child-record-source (vector? records) (< row-idx (count records)))
+      (let [record (nth records row-idx)
+            fields (get-record-source-fields child-record-source)
+            pk-field-name (or (some #(when (:pk %) (:name %)) fields) "id")
+            pk-value (or (get record (keyword pk-field-name))
+                         (get record pk-field-name))]
+        (when pk-value
+          (go
+            (let [response (<! (http/delete (str api-base "/api/data/" child-record-source "/" pk-value)
+                                             {:headers (db-headers)}))]
+              (if (:success response)
+                (do
+                  (println "Subform record deleted")
+                  ;; Clear filter-key to force re-fetch
+                  (swap! app-state assoc-in (conj cache-path :filter-key) nil))
+                (println "Error deleting subform record:" (:body response))))))))))
+
 (def ^:private yes-no-form-props
   "Form properties that use yes/no (1/0) values."
   [:popup :modal :allow-additions :allow-deletions :allow-edits

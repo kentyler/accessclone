@@ -5,7 +5,7 @@
             [app.views.form-utils :as fu]
             [clojure.string :as str]))
 
-(declare show-record-menu)
+(declare show-record-menu form-view-control)
 
 ;; --- Individual control renderers ---
 ;; Each takes the control definition, resolved field name, resolved value,
@@ -199,35 +199,50 @@
        [:span.view-option-placeholder "(No options defined)"])]))
 
 (defn render-tab-control
-  "Render a tab control with clickable tab headers (MVP: no nested controls)"
+  "Render a tab control with clickable tab headers and nested child controls"
   [ctrl _field _value _on-change _opts]
-  (let [active-tab (r/atom 0)
-        pages (or (:pages ctrl) [])]
-    (fn [ctrl _field _value _on-change _opts]
-      (let [pages (or (:pages ctrl) [])]
+  (let [active-tab (r/atom 0)]
+    (fn [ctrl _field _value _on-change {:keys [all-controls current-record on-change allow-edits?]}]
+      (let [page-names (or (:pages ctrl) [])
+            ;; Find :page type controls to get captions for each page name
+            page-ctrls (filter #(= :page (:type %)) (or all-controls []))
+            page-caption (fn [page-name]
+                           (let [pg (first (filter #(= (:name %) page-name) page-ctrls))]
+                             (or (:caption pg) page-name)))
+            ;; Active page name
+            active-page-name (nth page-names @active-tab nil)
+            ;; Child controls belonging to the active page
+            child-controls (when active-page-name
+                             (filter #(= (:parent-page %) active-page-name)
+                                     (or all-controls [])))]
         [:div.view-tab-control
          [:div.view-tab-headers
-          (if (seq pages)
-            (for [[idx page] (map-indexed vector pages)]
+          (if (seq page-names)
+            (for [[idx pname] (map-indexed vector page-names)]
               ^{:key idx}
               [:div.view-tab-header
                {:class (when (= idx @active-tab) "active")
                 :on-click #(reset! active-tab idx)}
-               (or (:caption page) (:name page) (str "Page " (inc idx)))])
+               (page-caption pname)])
             [:div.view-tab-header.active "Page 1"])]
          [:div.view-tab-body
-          (if (seq pages)
-            [:span (str "(Tab page: " (or (:caption (nth pages @active-tab nil))
-                                          (:name (nth pages @active-tab nil))
-                                          (str "Page " (inc @active-tab))) ")")]
-            [:span "(Empty tab control)"])]]))))
+          (if (seq child-controls)
+            (for [[idx child] (map-indexed vector child-controls)]
+              ^{:key idx}
+              [form-view-control child current-record on-change
+               {:allow-edits? allow-edits? :all-controls all-controls}])
+            (when-not (seq page-names)
+              [:span "(Empty tab control)"]))]]))))
 
 (defn render-subform
-  "Render a subform with child records as a read-only datasheet - Form-2 component.
+  "Render a subform with child records as an editable datasheet - Form-2 component.
    Fetches child form definition on mount, then child records filtered by parent link fields."
   [ctrl _field _value _on-change _opts]
-  ;; Outer function: trigger definition fetch
-  (let [source-form (or (:source-form ctrl) (:source_form ctrl))]
+  ;; Outer function: trigger definition fetch + local editing state
+  (let [source-form (or (:source-form ctrl) (:source_form ctrl))
+        selected (r/atom nil)    ;; {:row idx :col "field"} or nil
+        editing (r/atom nil)     ;; {:row idx :col "field"} or nil
+        edit-value (r/atom "")]
     (when source-form
       (state/fetch-subform-definition! source-form))
     ;; Inner render function
@@ -240,6 +255,10 @@
             ;; Get cached definition
             definition (when source-form
                          (get-in @state/app-state [:form-editor :subform-cache source-form :definition]))
+            ;; Read permissions from child form definition
+            allow-edits? (when (map? definition) (not= 0 (get definition :allow-edits 1)))
+            allow-additions? (when (map? definition) (not= 0 (get definition :allow-additions 1)))
+            allow-deletions? (when (map? definition) (not= 0 (get definition :allow-deletions 1)))
             ;; Extract record-source from child form definition
             child-record-source (when (map? definition)
                                   (or (:record-source definition) (:record_source definition)))
@@ -254,7 +273,6 @@
             detail-controls (when (map? definition)
                               (get-in definition [:detail :controls]))
             columns (if (seq detail-controls)
-                      ;; Use controls that have field bindings
                       (let [bound-ctrls (filter #(or (:control-source %) (:field %)) detail-controls)]
                         (if (seq bound-ctrls)
                           (mapv (fn [c]
@@ -262,58 +280,109 @@
                                    :caption (or (:caption c) (:label c)
                                                 (:control-source c) (:field c))})
                                 bound-ctrls)
-                          ;; No bound controls — fall back to record keys
                           nil))
-                      nil)]
+                      nil)
+            ;; Commit edit helper
+            commit-edit! (fn []
+                           (when-let [{:keys [row col]} @editing]
+                             (let [old-val (str (or (get (nth records row) (keyword col))
+                                                    (get (nth records row) col) ""))
+                                   new-val @edit-value]
+                               (when (not= old-val new-val)
+                                 (state/save-subform-cell! source-form row col new-val)))
+                             (reset! editing nil)))]
         [:div.view-subform
          [:div.view-subform-header
-          (if source-form
-            (str "Subform: " source-form)
-            "Subform (no source)")]
+          {:style {:display "flex" :align-items "center"}}
+          [:span (if source-form (str "Subform: " source-form) "Subform (no source)")]
+          (when (and source-form (map? definition))
+            [:div.subform-toolbar
+             (when allow-additions?
+               [:button {:title "New Record"
+                         :on-click #(state/new-subform-record!
+                                      source-form link-child-fields link-master-fields current-record)}
+                "+"])
+             (when (and allow-deletions? @selected)
+               [:button.subform-delete-btn
+                {:title "Delete Record"
+                 :on-click #(when (js/confirm "Delete this record?")
+                              (state/delete-subform-record! source-form (:row @selected))
+                              (reset! selected nil)
+                              (reset! editing nil))}
+                "\u2715"])])]
          (cond
-           ;; No source form configured
            (not source-form)
            nil
 
-           ;; Definition still loading
            (= definition :loading)
            [:div.subform-datasheet [:span.subform-loading "Loading..."]]
 
-           ;; Definition error
            (:error definition)
            [:div.subform-datasheet [:span.subform-loading "Error loading subform"]]
 
-           ;; Records still loading
            (= records :loading)
            [:div.subform-datasheet [:span.subform-loading "Loading records..."]]
 
-           ;; No matching records
-           (and (vector? records) (empty? records))
+           (and (vector? records) (empty? records) (not allow-additions?))
            [:div.subform-datasheet [:span.subform-loading "(No records)"]]
 
-           ;; Has records — render datasheet
-           (and (vector? records) (seq records))
-           (let [;; Final columns: from child form controls, or fallback to record keys
-                 cols (or columns
-                        (mapv (fn [k] {:field (name k) :caption (name k)})
-                              (keys (first records))))]
+           (and (vector? records) (or (seq records) allow-additions?))
+           (let [cols (or columns
+                        (when (seq records)
+                          (mapv (fn [k] {:field (name k) :caption (name k)})
+                                (keys (first records))))
+                        [])]
              [:div.subform-datasheet
-              [:table.subform-table
-               [:thead
-                [:tr
-                 (for [[i col] (map-indexed vector cols)]
-                   ^{:key i}
-                   [:th (:caption col)])]]
-               [:tbody
-                (for [[idx rec] (map-indexed vector records)]
-                  ^{:key idx}
+              (when (seq cols)
+                [:table.subform-table
+                 [:thead
                   [:tr
-                   (for [[ci col] (map-indexed vector cols)]
-                     ^{:key ci}
-                     [:td (str (or (get rec (:field col))
-                                   (get rec (keyword (:field col))) ""))])])]]])
+                   (for [[i col] (map-indexed vector cols)]
+                     ^{:key i}
+                     [:th (:caption col)])]]
+                 [:tbody
+                  (for [[idx rec] (map-indexed vector records)]
+                    ^{:key idx}
+                    [:tr
+                     (for [[ci col] (map-indexed vector cols)]
+                       (let [col-field (:field col)
+                             is-selected? (and @selected
+                                               (= (:row @selected) idx)
+                                               (= (:col @selected) col-field))
+                             is-editing? (and @editing
+                                              (= (:row @editing) idx)
+                                              (= (:col @editing) col-field))]
+                         ^{:key ci}
+                         [:td {:class (str (when is-selected? "selected ")
+                                           (when is-editing? "editing"))
+                               :on-click (fn [e]
+                                           (.stopPropagation e)
+                                           (when (not is-editing?)
+                                             (commit-edit!)
+                                             (reset! selected {:row idx :col col-field})))
+                               :on-double-click (fn [e]
+                                                  (.stopPropagation e)
+                                                  (when allow-edits?
+                                                    (reset! selected {:row idx :col col-field})
+                                                    (reset! editing {:row idx :col col-field})
+                                                    (reset! edit-value
+                                                            (str (or (get rec (keyword col-field))
+                                                                     (get rec col-field) "")))))}
+                          (if is-editing?
+                            [:input.subform-cell-input
+                             {:type "text"
+                              :auto-focus true
+                              :value @edit-value
+                              :on-change #(reset! edit-value (.. % -target -value))
+                              :on-blur #(commit-edit!)
+                              :on-key-down (fn [e]
+                                             (case (.-key e)
+                                               "Enter" (commit-edit!)
+                                               "Escape" (reset! editing nil)
+                                               nil))}]
+                            (str (or (get rec (keyword col-field))
+                                     (get rec col-field) "")))]))])]])])
 
-           ;; Waiting for definition to load before fetching records
            :else
            [:div.subform-datasheet [:span.subform-loading "Loading..."]])]))))
 
@@ -340,7 +409,7 @@
 
 (defn form-view-control
   "Render a single control in view mode"
-  [ctrl current-record on-change & [{:keys [auto-focus? allow-edits?]}]]
+  [ctrl current-record on-change & [{:keys [auto-focus? allow-edits? all-controls]}]]
   (let [ctrl-type (:type ctrl)
         field (fu/resolve-control-field ctrl)
         value (fu/resolve-field-value field current-record)
@@ -349,7 +418,9 @@
     [:div.view-control
      {:style (fu/control-style ctrl)
       :on-context-menu show-record-menu}
-     [renderer ctrl field value on-change {:auto-focus? auto-focus? :is-new? is-new? :allow-edits? allow-edits?}]]))
+     [renderer ctrl field value on-change
+      {:auto-focus? auto-focus? :is-new? is-new? :allow-edits? allow-edits?
+       :all-controls all-controls :current-record current-record :on-change on-change}]]))
 
 ;; --- Record context menu ---
 
@@ -421,8 +492,10 @@
   "Render a section in view mode"
   [section form-def current-record on-field-change & [{:keys [show-selectors? allow-edits?]}]]
   (let [height (fu/get-section-height form-def section)
-        controls (fu/get-section-controls form-def section)]
-    (when (seq controls)
+        all-controls (fu/get-section-controls form-def section)
+        ;; Filter out controls that belong to tab pages (rendered inside tab body)
+        controls (remove #(or (:parent-page %) (= :page (:type %))) all-controls)]
+    (when (seq all-controls)
       (if (and show-selectors? (= section :detail))
         [:div.single-form-row
          [record-selector true false]
@@ -432,20 +505,24 @@
           [:div.view-controls-container
            (for [[idx ctrl] (map-indexed vector controls)]
              ^{:key idx}
-             [form-view-control ctrl current-record on-field-change {:allow-edits? allow-edits?}])]]]
+             [form-view-control ctrl current-record on-field-change
+              {:allow-edits? allow-edits? :all-controls all-controls}])]]]
         [:div.view-section
          {:class (name section)
           :style {:height height}}
          [:div.view-controls-container
           (for [[idx ctrl] (map-indexed vector controls)]
             ^{:key idx}
-            [form-view-control ctrl current-record on-field-change {:allow-edits? allow-edits?}])]]))))
+            [form-view-control ctrl current-record on-field-change
+             {:allow-edits? allow-edits? :all-controls all-controls}])]]))))
 
 (defn form-view-detail-row
   "Render a single detail row for continuous forms"
   [idx record form-def selected? on-select on-field-change & [{:keys [show-selectors? allow-edits?]}]]
   (let [height (fu/get-section-height form-def :detail)
-        controls (fu/get-section-controls form-def :detail)
+        all-controls (fu/get-section-controls form-def :detail)
+        ;; Filter out controls that belong to tab pages
+        controls (vec (remove #(or (:parent-page %) (= :page (:type %))) all-controls))
         first-textbox-idx (first (keep-indexed
                                    (fn [i c] (when (= (:type c) :text-box) i))
                                    controls))]
@@ -460,7 +537,8 @@
         ^{:key ctrl-idx}
         [form-view-control ctrl record on-field-change
          {:auto-focus? (and selected? (= ctrl-idx first-textbox-idx))
-          :allow-edits? allow-edits?}])]]))
+          :allow-edits? allow-edits?
+          :all-controls all-controls}])]]))
 
 (defn tentative-new-row
   "Render the * placeholder row at the bottom of continuous forms"

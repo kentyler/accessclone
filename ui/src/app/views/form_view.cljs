@@ -57,14 +57,71 @@
             :on-change #(when (and field allow-edits?) (on-change field (.. % -target -checked)))}]
    (or (:text ctrl) (:caption ctrl))])
 
+;; --- Row-source helpers (shared by combobox & listbox) ---
+
+(defn- parse-column-widths
+  "Parse column-widths string like '0cm;5cm' into a vector of numbers [0 5].
+   Columns with width 0 are hidden from display."
+  [col-widths-str]
+  (when (and col-widths-str (not (str/blank? col-widths-str)))
+    (mapv (fn [s]
+            (let [n (js/parseFloat (str/replace (str/trim s) #"[a-zA-Z]+" ""))]
+              (if (js/isNaN n) 1 n)))
+          (str/split col-widths-str #";"))))
+
+(defn- build-option-display
+  "Given a data row, fields list, bound-column (1-based), and column-widths,
+   returns [bound-val display-text] where display-text joins visible columns."
+  [row fields bound-col col-widths]
+  (let [field-names (mapv (fn [f] (or (:name f) (name (first (keys f))))) fields)
+        bound-idx (max 0 (dec (or bound-col 1)))
+        ;; Get bound value from the bound column
+        bound-key (if (< bound-idx (count field-names))
+                    (nth field-names bound-idx)
+                    (first field-names))
+        bound-val (str (or (get row bound-key)
+                           (get row (keyword bound-key)) ""))
+        ;; Build display text from visible columns
+        visible-texts (keep-indexed
+                        (fn [i fname]
+                          (let [w (when (seq col-widths) (nth col-widths i nil))]
+                            ;; Show column if no widths specified, or width > 0
+                            (when (or (nil? w) (> w 0))
+                              (str (or (get row fname)
+                                       (get row (keyword fname)) "")))))
+                        field-names)
+        display (if (seq visible-texts)
+                  (str/join " - " visible-texts)
+                  bound-val)]
+    [bound-val display]))
+
 (defn render-combobox
-  "Render a combo box (dropdown) control"
-  [_ctrl field value on-change {:keys [allow-edits?]}]
-  [:select.view-select
-   {:value value
-    :disabled (not allow-edits?)
-    :on-change #(when (and field allow-edits?) (on-change field (.. % -target -value)))}
-   [:option ""]])
+  "Render a combo box (dropdown) control - Form-2 component.
+   Fetches row-source on mount, populates options from cache."
+  [ctrl field value on-change opts]
+  ;; Outer function: trigger fetch
+  (when-let [row-source (:row-source ctrl)]
+    (state/fetch-row-source! row-source))
+  ;; Inner render function
+  (fn [ctrl field value on-change {:keys [allow-edits?]}]
+    (let [row-source (:row-source ctrl)
+          cached (when row-source
+                   (state/get-row-source-options row-source))
+          rows (when (map? cached) (:rows cached))
+          fields (when (map? cached) (:fields cached))
+          bound-col (:bound-column ctrl)
+          col-widths (parse-column-widths (:column-widths ctrl))]
+      [:select.view-select
+       {:value (str (or value ""))
+        :disabled (not allow-edits?)
+        :on-change #(when (and field allow-edits?)
+                      (on-change field (.. % -target -value)))}
+       [:option {:value ""} ""]
+       (when (seq rows)
+         (for [[idx row] (map-indexed vector rows)]
+           (let [[bound-val display] (build-option-display row fields bound-col col-widths)]
+             ^{:key idx}
+             [:option {:value bound-val} display])))])))
 
 (defn render-line
   "Render a horizontal line control"
@@ -91,16 +148,35 @@
     [:div.view-image-placeholder "\uD83D\uDDBC No Image"]))
 
 (defn render-listbox
-  "Render a list box (multi-select) control"
-  [_ctrl field value on-change {:keys [allow-edits?]}]
-  (let [rows (or (:list-rows _ctrl) 5)]
-    [:select.view-listbox
-     {:multiple true
-      :size rows
-      :value (or value "")
-      :disabled (not allow-edits?)
-      :on-change #(when (and field allow-edits?) (on-change field (.. % -target -value)))}
-     [:option ""]]))
+  "Render a list box control - Form-2 component.
+   Fetches row-source on mount, populates options from cache."
+  [ctrl field value on-change opts]
+  ;; Outer function: trigger fetch
+  (when-let [row-source (:row-source ctrl)]
+    (state/fetch-row-source! row-source))
+  ;; Inner render function
+  (fn [ctrl field value on-change {:keys [allow-edits?]}]
+    (let [row-source (:row-source ctrl)
+          cached (when row-source
+                   (state/get-row-source-options row-source))
+          rows (when (map? cached) (:rows cached))
+          fields (when (map? cached) (:fields cached))
+          bound-col (:bound-column ctrl)
+          col-widths (parse-column-widths (:column-widths ctrl))
+          list-rows (or (:list-rows ctrl) 5)]
+      [:select.view-listbox
+       {:multiple true
+        :size list-rows
+        :value (str (or value ""))
+        :disabled (not allow-edits?)
+        :on-change #(when (and field allow-edits?)
+                      (on-change field (.. % -target -value)))}
+       [:option {:value ""} ""]
+       (when (seq rows)
+         (for [[idx row] (map-indexed vector rows)]
+           (let [[bound-val display] (build-option-display row fields bound-col col-widths)]
+             ^{:key idx}
+             [:option {:value bound-val} display])))])))
 
 (defn render-option-group
   "Render a radio button group control"
@@ -147,17 +223,99 @@
             [:span "(Empty tab control)"])]]))))
 
 (defn render-subform
-  "Render a subform placeholder (MVP: shows source-form name, no child records)"
+  "Render a subform with child records as a read-only datasheet - Form-2 component.
+   Fetches child form definition on mount, then child records filtered by parent link fields."
   [ctrl _field _value _on-change _opts]
-  (let [source-form (or (:source-form ctrl) (:source_form ctrl))
-        link-field (or (:link-child-fields ctrl) (:link_child_fields ctrl))]
-    [:div.view-subform
-     [:div.view-subform-header
-      (if source-form
-        (str "Subform: " source-form)
-        "Subform (no source)")]
-     (when link-field
-       [:div.view-subform-link (str "Linked by: " link-field)])]))
+  ;; Outer function: trigger definition fetch
+  (let [source-form (or (:source-form ctrl) (:source_form ctrl))]
+    (when source-form
+      (state/fetch-subform-definition! source-form))
+    ;; Inner render function
+    (fn [ctrl _field _value _on-change _opts]
+      (let [source-form (or (:source-form ctrl) (:source_form ctrl))
+            link-child-fields (or (:link-child-fields ctrl) (:link_child_fields ctrl))
+            link-master-fields (or (:link-master-fields ctrl) (:link_master_fields ctrl))
+            ;; Read current-record from app-state so we re-render on parent navigation
+            current-record (or (get-in @state/app-state [:form-editor :current-record]) {})
+            ;; Get cached definition
+            definition (when source-form
+                         (get-in @state/app-state [:form-editor :subform-cache source-form :definition]))
+            ;; Extract record-source from child form definition
+            child-record-source (when (map? definition)
+                                  (or (:record-source definition) (:record_source definition)))
+            ;; Trigger child record fetch when definition is ready and we have link fields
+            _ (when (and source-form child-record-source (seq link-child-fields) (seq link-master-fields))
+                (state/fetch-subform-records! source-form child-record-source
+                                              link-child-fields link-master-fields current-record))
+            ;; Get cached records
+            records (when source-form
+                      (get-in @state/app-state [:form-editor :subform-cache source-form :records]))
+            ;; Build column headers from child form's detail section controls
+            detail-controls (when (map? definition)
+                              (get-in definition [:detail :controls]))
+            columns (if (seq detail-controls)
+                      ;; Use controls that have field bindings
+                      (let [bound-ctrls (filter #(or (:control-source %) (:field %)) detail-controls)]
+                        (if (seq bound-ctrls)
+                          (mapv (fn [c]
+                                  {:field (str/lower-case (or (:control-source c) (:field c)))
+                                   :caption (or (:caption c) (:label c)
+                                                (:control-source c) (:field c))})
+                                bound-ctrls)
+                          ;; No bound controls — fall back to record keys
+                          nil))
+                      nil)]
+        [:div.view-subform
+         [:div.view-subform-header
+          (if source-form
+            (str "Subform: " source-form)
+            "Subform (no source)")]
+         (cond
+           ;; No source form configured
+           (not source-form)
+           nil
+
+           ;; Definition still loading
+           (= definition :loading)
+           [:div.subform-datasheet [:span.subform-loading "Loading..."]]
+
+           ;; Definition error
+           (:error definition)
+           [:div.subform-datasheet [:span.subform-loading "Error loading subform"]]
+
+           ;; Records still loading
+           (= records :loading)
+           [:div.subform-datasheet [:span.subform-loading "Loading records..."]]
+
+           ;; No matching records
+           (and (vector? records) (empty? records))
+           [:div.subform-datasheet [:span.subform-loading "(No records)"]]
+
+           ;; Has records — render datasheet
+           (and (vector? records) (seq records))
+           (let [;; Final columns: from child form controls, or fallback to record keys
+                 cols (or columns
+                        (mapv (fn [k] {:field (name k) :caption (name k)})
+                              (keys (first records))))]
+             [:div.subform-datasheet
+              [:table.subform-table
+               [:thead
+                [:tr
+                 (for [[i col] (map-indexed vector cols)]
+                   ^{:key i}
+                   [:th (:caption col)])]]
+               [:tbody
+                (for [[idx rec] (map-indexed vector records)]
+                  ^{:key idx}
+                  [:tr
+                   (for [[ci col] (map-indexed vector cols)]
+                     ^{:key ci}
+                     [:td (str (or (get rec (:field col))
+                                   (get rec (keyword (:field col))) ""))])])]]])
+
+           ;; Waiting for definition to load before fetching records
+           :else
+           [:div.subform-datasheet [:span.subform-loading "Loading..."]])]))))
 
 (defn render-default
   "Render fallback for unknown control types"

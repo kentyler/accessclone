@@ -807,6 +807,136 @@
           query (first (filter #(= (:name %) record-source) queries))]
       (or (:fields table) (:fields query) []))))
 
+;; --- Row-source cache (combobox/listbox population) ---
+
+(defn clear-row-source-cache!
+  "Reset the row-source cache. Called when switching forms."
+  []
+  (swap! app-state assoc-in [:form-editor :row-source-cache] {}))
+
+(defn fetch-row-source!
+  "Fetch and cache row-source data for a combobox/listbox.
+   Handles three types:
+   - SQL (starts with SELECT): execute via POST /api/queries/run
+   - Value list (contains semicolons): split on ; into rows, no API call
+   - Table/query name (plain identifier): fetch via GET /api/data/:name"
+  [row-source]
+  (when (and row-source (not (str/blank? row-source)))
+    (let [cached (get-in @app-state [:form-editor :row-source-cache row-source])]
+      (when-not cached
+        ;; Mark as loading
+        (swap! app-state assoc-in [:form-editor :row-source-cache row-source] :loading)
+        (let [trimmed (str/trim row-source)]
+          (cond
+            ;; Value list: "Active;Inactive;Pending" or "A";"B";"C"
+            (and (not (re-find #"(?i)^select\s" trimmed))
+                 (str/includes? trimmed ";"))
+            (let [items (mapv str/trim (str/split trimmed #";"))
+                  items (filterv #(not (str/blank? %)) items)
+                  ;; Strip surrounding quotes if present
+                  items (mapv #(str/replace % #"^\"|\"$" "") items)
+                  rows (mapv (fn [v] {"value" v}) items)]
+              (swap! app-state assoc-in [:form-editor :row-source-cache row-source]
+                     {:rows rows :fields [{:name "value"}]}))
+
+            ;; SQL query
+            (re-find #"(?i)^select\s" trimmed)
+            (go
+              (let [response (<! (http/post (str api-base "/api/queries/run")
+                                            {:json-params {:sql trimmed}
+                                             :headers (db-headers)}))]
+                (if (:success response)
+                  (let [body (:body response)]
+                    (swap! app-state assoc-in [:form-editor :row-source-cache row-source]
+                           {:rows (or (:data body) [])
+                            :fields (or (:fields body) [])}))
+                  (do
+                    (println "Error fetching row-source SQL:" (:body response))
+                    (swap! app-state assoc-in [:form-editor :row-source-cache row-source]
+                           {:rows [] :fields [] :error true})))))
+
+            ;; Table/query name
+            :else
+            (go
+              (let [response (<! (http/get (str api-base "/api/data/" trimmed)
+                                           {:query-params {:limit 1000}
+                                            :headers (db-headers)}))]
+                (if (:success response)
+                  (let [data (get-in response [:body :data] [])
+                        field-names (if (seq data)
+                                      (mapv (fn [k] {:name (name k)}) (keys (first data)))
+                                      [])]
+                    (swap! app-state assoc-in [:form-editor :row-source-cache row-source]
+                           {:rows data :fields field-names}))
+                  (do
+                    (println "Error fetching row-source table:" trimmed (:body response))
+                    (swap! app-state assoc-in [:form-editor :row-source-cache row-source]
+                           {:rows [] :fields [] :error true})))))))))))
+
+(defn get-row-source-options
+  "Returns cached row-source data. nil if not loaded, :loading if in-flight,
+   {:rows [...] :fields [...]} if ready."
+  [row-source]
+  (get-in @app-state [:form-editor :row-source-cache row-source]))
+
+;; --- Subform cache (child form definition + child records) ---
+
+(defn clear-subform-cache!
+  "Reset the subform cache. Called when switching forms."
+  []
+  (swap! app-state assoc-in [:form-editor :subform-cache] {}))
+
+(defn fetch-subform-definition!
+  "Fetch and cache a child form definition for a subform control."
+  [source-form-name]
+  (when (and source-form-name (not (str/blank? source-form-name)))
+    (let [cached (get-in @app-state [:form-editor :subform-cache source-form-name :definition])]
+      (when-not cached
+        (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :definition] :loading)
+        (go
+          (let [response (<! (http/get (str api-base "/api/forms/" source-form-name)
+                                        {:headers (db-headers)}))]
+            (if (:success response)
+              (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :definition]
+                     (:body response))
+              (do
+                (println "Error fetching subform definition:" source-form-name)
+                (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :definition]
+                       {:error true})))))))))
+
+(defn fetch-subform-records!
+  "Fetch and cache child records for a subform, filtered by parent link fields.
+   Only re-fetches when the filter key (master field values) changes."
+  [source-form-name record-source link-child-fields link-master-fields current-record]
+  (when (and source-form-name record-source (seq link-child-fields) (seq link-master-fields))
+    (let [;; Build filter from paired child/master fields
+          filter-map (reduce (fn [m [child-field master-field]]
+                               (let [master-val (or (get current-record (keyword master-field))
+                                                    (get current-record master-field))]
+                                 (if master-val
+                                   (assoc m child-field master-val)
+                                   m)))
+                             {}
+                             (map vector link-child-fields link-master-fields))
+          filter-key (pr-str filter-map)
+          cached-filter-key (get-in @app-state [:form-editor :subform-cache source-form-name :filter-key])]
+      (when (and (seq filter-map) (not= filter-key cached-filter-key))
+        (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :filter-key] filter-key)
+        (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :records] :loading)
+        (go
+          (let [response (<! (http/get (str api-base "/api/data/" record-source)
+                                        {:query-params {:limit 1000
+                                                        :filter (.stringify js/JSON (clj->js filter-map))}
+                                         :headers (db-headers)}))]
+            (if (:success response)
+              (let [data (get-in response [:body :data] [])]
+                (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :records]
+                       (vec data)))
+              (do
+                (println "Error fetching subform records:" source-form-name (:body response))
+                (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :records]
+                       [])))))))))
+
 (def ^:private yes-no-form-props
   "Form properties that use yes/no (1/0) values."
   [:popup :modal :allow-additions :allow-deletions :allow-edits
@@ -910,6 +1040,9 @@
   ;; Auto-save current form definition if dirty before loading new one
   (when (get-in @app-state [:form-editor :dirty?])
     (save-form!))
+  ;; Clear caches from previous form
+  (clear-row-source-cache!)
+  (clear-subform-cache!)
   ;; Check if definition is already loaded
   (if (:definition form)
     ;; Definition already loaded, use it

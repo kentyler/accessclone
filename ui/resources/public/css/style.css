@@ -1314,6 +1314,51 @@ body {
   font-size: 0.75rem;
 }
 
+.subform-datasheet {
+  flex: 1;
+  overflow: auto;
+  padding: 0;
+}
+
+.subform-loading {
+  display: block;
+  padding: 0.5rem;
+  color: var(--gray-500);
+  font-size: 0.75rem;
+  font-style: italic;
+}
+
+.subform-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+
+.subform-table th {
+  position: sticky;
+  top: 0;
+  background: var(--gray-200);
+  border: 1px solid var(--gray-300);
+  padding: 0.1875rem 0.375rem;
+  text-align: left;
+  font-weight: 600;
+  white-space: nowrap;
+  z-index: 1;
+}
+
+.subform-table td {
+  border: 1px solid var(--gray-300);
+  padding: 0.125rem 0.375rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.subform-table tr:hover td {
+  background: var(--blue-50, #eff6ff);
+}
+
 .editor-body.view-mode {
   /* In view mode, center takes full width */
 }

@@ -72,11 +72,62 @@
           [render-report-control ctrl record expr-context])]))))
 
 ;; ============================================================
+;; GROUP-ON VALUE TRANSFORMATION
+;; ============================================================
+
+(defn- parse-date
+  "Parse a value to a js/Date. Returns nil if not a valid date."
+  [val]
+  (when (some? val)
+    (let [d (js/Date. val)]
+      (when-not (js/isNaN (.getTime d)) d))))
+
+(defn- iso-week-number
+  "Return ISO week number for a js/Date."
+  [d]
+  (let [target (js/Date. (.getTime d))]
+    (.setHours target 0 0 0 0)
+    (.setDate target (+ (.getDate target) 3 (- (mod (+ (.getDay target) 6) 7))))
+    (let [jan4 (js/Date. (.getFullYear target) 0 4)
+          diff (- (.getTime target) (.getTime jan4))]
+      (inc (js/Math.floor (/ (/ diff 86400000) 7))))))
+
+(defn group-value
+  "Transform a raw field value based on group-on and group-interval settings.
+   Returns a comparable value used for break detection and sorting."
+  [val group-on group-interval]
+  (case (or group-on "Each Value")
+    "Each Value" val
+    "Prefix" (let [s (str val)
+                   n (or group-interval 1)]
+               (if (<= (count s) n) s (subs s 0 n)))
+    "Interval" (when (some? val)
+                 (let [n (or group-interval 1)]
+                   (when (pos? n)
+                     (* n (js/Math.floor (/ val n))))))
+    ;; Date-based groupings
+    (if-let [d (parse-date val)]
+      (let [y (.getFullYear d)]
+        (case group-on
+          "Year"    y
+          "Quarter" (+ (* y 10) (inc (js/Math.floor (/ (.getMonth d) 3))))
+          "Month"   (+ (* y 100) (inc (.getMonth d)))
+          "Week"    (+ (* y 100) (iso-week-number d))
+          "Day"     (+ (* y 10000) (* (inc (.getMonth d)) 100) (.getDate d))
+          "Hour"    (+ (* y 1000000) (* (inc (.getMonth d)) 10000)
+                       (* (.getDate d) 100) (.getHours d))
+          "Minute"  (+ (* y 100000000) (* (inc (.getMonth d)) 1000000)
+                       (* (.getDate d) 10000) (* (.getHours d) 100) (.getMinutes d))
+          val))
+      val)))
+
+;; ============================================================
 ;; GROUP BREAK DETECTION
 ;; ============================================================
 
 (defn detect-group-breaks
-  "Given grouping definitions and two consecutive records, return which groups broke."
+  "Given grouping definitions and two consecutive records, return which groups broke.
+   Uses group-value to transform values based on group-on settings."
   [grouping prev-record current-record]
   (when (seq grouping)
     (loop [idx 0, broke? false, breaks []]
@@ -84,11 +135,65 @@
         breaks
         (let [grp (nth grouping idx)
               field-key (keyword (str/lower-case (or (:field grp) "")))
-              prev-val (when prev-record (get prev-record field-key))
-              curr-val (get current-record field-key)
+              group-on (:group-on grp)
+              group-interval (:group-interval grp)
+              prev-val (when prev-record
+                         (group-value (get prev-record field-key) group-on group-interval))
+              curr-val (group-value (get current-record field-key) group-on group-interval)
               changed? (or broke? (not= prev-val curr-val))]
           (recur (inc idx) changed?
                  (if changed? (conj breaks idx) breaks)))))))
+
+;; ============================================================
+;; CLIENT-SIDE SORTING BY GROUP FIELDS
+;; ============================================================
+
+(defn- compare-vals
+  "Compare two values, handling nil and mixed types gracefully."
+  [a b]
+  (cond
+    (and (nil? a) (nil? b)) 0
+    (nil? a) -1
+    (nil? b) 1
+    (and (number? a) (number? b)) (compare a b)
+    :else (compare (str a) (str b))))
+
+(defn sort-records-for-grouping
+  "Sort records by group fields first (respecting sort-order and group-on transforms),
+   then by the report's order-by as a tiebreaker."
+  [records grouping order-by]
+  (if (and (empty? grouping) (not order-by))
+    records
+    (let [comparators
+          (concat
+           ;; Group-level comparators
+           (map (fn [grp]
+                  (let [field-key (keyword (str/lower-case (or (:field grp) "")))
+                        desc? (= "Descending" (:sort-order grp))
+                        gon (:group-on grp)
+                        gint (:group-interval grp)]
+                    (fn [a b]
+                      (let [va (group-value (get a field-key) gon gint)
+                            vb (group-value (get b field-key) gon gint)
+                            c (compare-vals va vb)]
+                        (if desc? (- c) c)))))
+                grouping)
+           ;; Order-by tiebreaker (if not already a group field)
+           (when order-by
+             (let [ob-key (keyword (str/lower-case order-by))
+                   already-grouped? (some #(= ob-key (keyword (str/lower-case (or (:field %) ""))))
+                                          grouping)]
+               (when-not already-grouped?
+                 [(fn [a b] (compare-vals (get a ob-key) (get b ob-key)))]))))]
+      (if (seq comparators)
+        (sort (fn [a b]
+                (loop [comps comparators]
+                  (if (empty? comps)
+                    0
+                    (let [c ((first comps) a b)]
+                      (if (zero? c) (recur (rest comps)) c)))))
+              records)
+        records))))
 
 ;; ============================================================
 ;; FLAT ELEMENT BUILDING
@@ -115,71 +220,101 @@
    :expr-context expr-context
    :key-str key-str})
 
-(defn- emit-group-footers!
-  "Emit group footer elements for broken groups (in reverse order).
-   Resets group-records for each broken group level."
-  [add! report-def records breaks group-records prev-record idx]
-  (doseq [gi (reverse breaks)]
-    (let [footer-key (keyword (str "group-footer-" gi))
-          grp-recs (nth @group-records gi [])]
-      (when (and (get report-def footer-key)
-                 (section-visible? report-def footer-key))
-        (add! (make-element :group-footer footer-key prev-record report-def
-                            {:all-records records :group-records grp-recs}
-                            (str "gf-" gi "-" idx))))
-      (swap! group-records assoc gi []))))
+(defn- build-group-tree
+  "Build a tree of group segments from sorted records.
+   Returns a vector of {:level N :first-record rec :records [...] :children [...]}.
+   Each level N collects records that share the same transformed group value.
+   Level 0 is the outermost grouping, with nested levels inside :children."
+  [records grouping]
+  (if (empty? grouping)
+    ;; No grouping — return a single segment with all records
+    [{:level -1 :first-record (first records) :records (vec records) :children []}]
+    (letfn [(segment [level recs]
+              (if (>= level (count grouping))
+                ;; Past deepest group level — leaf, no children
+                [{:level level :first-record (first recs) :records (vec recs) :children []}]
+                ;; Partition records by this level's group value
+                (let [grp (nth grouping level)
+                      field-key (keyword (str/lower-case (or (:field grp) "")))
+                      gon (:group-on grp)
+                      gint (:group-interval grp)]
+                  (loop [remaining recs, segments []]
+                    (if (empty? remaining)
+                      segments
+                      (let [first-rec (first remaining)
+                            gval (group-value (get first-rec field-key) gon gint)
+                            ;; Collect consecutive records with same group value
+                            same (take-while
+                                  #(= gval (group-value (get % field-key) gon gint))
+                                  remaining)
+                            rest-recs (drop (count same) remaining)
+                            children (segment (inc level) same)]
+                        (recur rest-recs
+                               (conj segments
+                                     {:level level
+                                      :first-record first-rec
+                                      :records (vec same)
+                                      :children children}))))))))]
+      (segment 0 records))))
 
-(defn- emit-group-headers!
-  "Emit group header elements for broken groups (or all on first record)."
-  [add! report-def records grouping breaks record idx]
-  (let [all-ctx {:all-records records}
-        indices (if (zero? idx) (range (count grouping)) breaks)]
-    (doseq [gi indices]
-      (let [header-key (keyword (str "group-header-" gi))]
-        (when (and (get report-def header-key)
-                   (section-visible? report-def header-key))
-          (add! (make-element :group-header header-key record report-def
-                              all-ctx (str "gh-" gi "-" idx))))))))
-
-(defn- emit-final-group-footers!
-  "Emit group footers at end of all records."
-  [add! report-def records grouping group-records prev-record]
-  (doseq [gi (reverse (range (count grouping)))]
-    (let [footer-key (keyword (str "group-footer-" gi))
-          grp-recs (nth @group-records gi [])]
-      (when (and (get report-def footer-key)
-                 (section-visible? report-def footer-key))
-        (add! (make-element :group-footer footer-key prev-record report-def
-                            {:all-records records :group-records grp-recs}
-                            (str "gf-final-" gi)))))))
+(defn- walk-group-tree
+  "Walk the group tree and emit flat elements.
+   Emits group-header at start, detail records at leaves, group-footer at end."
+  [add! report-def all-records grouping segments counter]
+  (doseq [seg segments]
+    (let [level (:level seg)
+          seg-records (:records seg)
+          first-rec (:first-record seg)
+          ctx {:all-records all-records :group-records seg-records}]
+      (if (= level -1)
+        ;; No grouping — just emit detail rows
+        (doseq [rec seg-records]
+          (let [idx (vswap! counter inc)]
+            (when (section-visible? report-def :detail)
+              (add! (make-element :detail :detail rec report-def
+                                  {:all-records all-records} (str "detail-" idx))))))
+        (do
+          ;; Emit group header
+          (let [header-key (keyword (str "group-header-" level))]
+            (when (and (get report-def header-key)
+                       (section-visible? report-def header-key))
+              (add! (make-element :group-header header-key first-rec report-def
+                                  ctx (str "gh-" level "-" (vswap! counter inc))))))
+          ;; Recurse into children
+          (if (seq (:children seg))
+            (walk-group-tree add! report-def all-records grouping (:children seg) counter)
+            ;; Leaf level — emit detail rows
+            (doseq [rec seg-records]
+              (let [idx (vswap! counter inc)]
+                (when (section-visible? report-def :detail)
+                  (add! (make-element :detail :detail rec report-def
+                                      {:all-records all-records} (str "detail-" idx)))))))
+          ;; Emit group footer
+          (let [footer-key (keyword (str "group-footer-" level))
+                last-rec (peek seg-records)]
+            (when (and (get report-def footer-key)
+                       (section-visible? report-def footer-key))
+              (add! (make-element :group-footer footer-key last-rec report-def
+                                  ctx (str "gf-" level "-" (vswap! counter inc)))))))))))
 
 (defn build-flat-elements
   "Build a flat list of element descriptors from records and grouping.
+   Two-pass approach: sort + build group tree, then walk tree to emit elements.
    Includes report-header/footer but NOT page-header/footer."
   [report-def records grouping]
-  (let [all-ctx {:all-records records}
+  (let [sorted-records (sort-records-for-grouping records grouping (:order-by report-def))
+        all-ctx {:all-records sorted-records}
         elements (atom [])
         add! #(swap! elements conj %)]
     ;; Report Header
     (when (section-visible? report-def :report-header)
       (add! (make-element :report-header :report-header {} report-def all-ctx "rpt-hdr")))
-    ;; Data sections with group break detection
-    (when (seq records)
-      (let [prev-record (atom nil)
-            group-records (atom (vec (repeat (max 1 (count grouping)) [])))]
-        (doseq [[idx record] (map-indexed vector records)]
-          (let [breaks (detect-group-breaks grouping @prev-record record)]
-            (when (and (pos? idx) (seq breaks))
-              (emit-group-footers! add! report-def records breaks group-records @prev-record idx))
-            (when (or (zero? idx) (seq breaks))
-              (emit-group-headers! add! report-def records grouping breaks record idx))
-            (dotimes [gi (count grouping)]
-              (swap! group-records update gi conj record))
-            (when (section-visible? report-def :detail)
-              (add! (make-element :detail :detail record report-def all-ctx (str "detail-" idx))))
-            (reset! prev-record record)))
-        (when (seq grouping)
-          (emit-final-group-footers! add! report-def records grouping group-records @prev-record))))
+    ;; Pass 1: Build group tree from sorted records
+    ;; Pass 2: Walk tree, emitting headers, details, and footers with correct group-records
+    (when (seq sorted-records)
+      (let [tree (build-group-tree sorted-records grouping)
+            counter (volatile! -1)]
+        (walk-group-tree add! report-def sorted-records grouping tree counter)))
     ;; Report Footer
     (when (section-visible? report-def :report-footer)
       (add! (make-element :report-footer :report-footer {} report-def all-ctx "rpt-ftr")))

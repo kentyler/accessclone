@@ -10,7 +10,8 @@ const router = express.Router();
 // Validation rules
 const VALID_CONTROL_TYPES = [
   'label', 'text-box', 'button', 'check-box', 'combo-box',
-  'line', 'rectangle', 'image', 'list-box', 'option-group', 'tab-control', 'subform'
+  'line', 'rectangle', 'image', 'list-box', 'option-group', 'option-button',
+  'toggle-button', 'tab-control', 'subform', 'page'
 ];
 
 const REQUIRED_FORM_FIELDS = ['id', 'name', 'record-source'];

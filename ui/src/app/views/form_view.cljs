@@ -27,24 +27,63 @@
     :auto-focus (and is-new? auto-focus?)
     :on-change #(when (and field allow-edits?) (on-change field (.. % -target -value)))}])
 
+(defn- resolve-button-action
+  "Resolve the on-click handler for a button control.
+   Checks :on-click property first (string function name or map with :action/:function),
+   then falls back to standard actions based on button caption text."
+  [ctrl]
+  (let [button-text (or (:text ctrl) (:caption ctrl) "Button")
+        text-lower (str/lower-case button-text)
+        on-click-prop (:on-click ctrl)]
+    (cond
+      ;; Map-style on-click with :action key for standard actions
+      (and (map? on-click-prop) (:action on-click-prop))
+      (let [action (keyword (:action on-click-prop))]
+        (case action
+          :save-record   #(state/save-current-record!)
+          :new-record    #(state/new-record!)
+          :delete-record #(when (js/confirm "Delete this record?")
+                            (state/delete-current-record!))
+          :close-form    #(state/close-current-tab!)
+          :refresh       #(state/set-view-mode! :view)
+          ;; Unknown action
+          #(js/alert (str "Unknown action: " (name action)))))
+
+      ;; Map-style on-click with :function key for session function call
+      (and (map? on-click-prop) (:function on-click-prop))
+      #(state/call-session-function! (:function on-click-prop))
+
+      ;; String on-click: session function name
+      (and (string? on-click-prop) (not (str/blank? on-click-prop)))
+      #(state/call-session-function! on-click-prop)
+
+      ;; Caption-based standard actions
+      (or (= text-lower "close") (str/includes? text-lower "close form"))
+      #(state/close-current-tab!)
+
+      (or (= text-lower "save") (str/includes? text-lower "save record"))
+      #(state/save-current-record!)
+
+      (or (= text-lower "new record") (= text-lower "new")
+          (str/includes? text-lower "add new"))
+      #(state/new-record!)
+
+      (or (= text-lower "delete") (= text-lower "delete record"))
+      #(when (js/confirm "Delete this record?")
+         (state/delete-current-record!))
+
+      (or (= text-lower "refresh") (= text-lower "requery"))
+      #(state/set-view-mode! :view)
+
+      ;; No mapped action
+      :else
+      #(js/alert (str "Button clicked: " button-text)))))
+
 (defn render-button
   "Render a button control"
   [ctrl _field _value _on-change _opts]
   (let [button-text (or (:text ctrl) (:caption ctrl) "Button")
-        click-fn-name (:on-click ctrl)
-        on-click (cond
-                   ;; Close button special case
-                   (= button-text "Close")
-                   #(let [active (:active-tab @state/app-state)]
-                      (when active
-                        (state/close-tab! (:type active) (:id active))))
-                   ;; Mapped function name
-                   (and click-fn-name (string? click-fn-name)
-                        (not (str/blank? click-fn-name)))
-                   #(state/call-session-function! click-fn-name)
-                   ;; No mapped function
-                   :else
-                   #(js/alert (str "Button clicked: " button-text)))]
+        on-click (resolve-button-action ctrl)]
     [:button.view-button {:on-click on-click} button-text]))
 
 (defn render-checkbox
@@ -197,6 +236,35 @@
                                  (on-change field (or (:value opt) idx)))}]
           (or (:label opt) (str "Option " (inc idx)))])
        [:span.view-option-placeholder "(No options defined)"])]))
+
+(defn render-option-button
+  "Render a single radio button (option-button) control.
+   In Access, these are typically children of an option-group, but can also be standalone."
+  [ctrl field value on-change {:keys [allow-edits?]}]
+  (let [option-value (or (:option-value ctrl) (:value ctrl) 1)
+        group-name (or (:group-name ctrl) (:name ctrl) (str "opt-" (random-uuid)))
+        label-text (or (:text ctrl) (:caption ctrl) "")]
+    [:label.view-option-item
+     [:input {:type "radio"
+              :name group-name
+              :value option-value
+              :checked (= (str value) (str option-value))
+              :disabled (not allow-edits?)
+              :on-change #(when (and field allow-edits?)
+                            (on-change field option-value))}]
+     label-text]))
+
+(defn render-toggle-button
+  "Render a toggle button control (pressed/unpressed state bound to a field)"
+  [ctrl field value on-change {:keys [allow-edits?]}]
+  (let [label-text (or (:text ctrl) (:caption ctrl) "Toggle")
+        pressed? (boolean value)]
+    [:button.view-toggle-button
+     {:class (when pressed? "pressed")
+      :disabled (not allow-edits?)
+      :on-click #(when (and field allow-edits?)
+                   (on-change field (not pressed?)))}
+     label-text]))
 
 (defn render-tab-control
   "Render a tab control with clickable tab headers and nested child controls"
@@ -394,18 +462,20 @@
 ;; --- Control type dispatch ---
 
 (def control-renderers
-  {:label        render-label
-   :text-box     render-textbox
-   :button       render-button
-   :check-box    render-checkbox
-   :combo-box    render-combobox
-   :line         render-line
-   :rectangle    render-rectangle
-   :image        render-image
-   :list-box     render-listbox
-   :option-group render-option-group
-   :tab-control  render-tab-control
-   :subform      render-subform})
+  {:label         render-label
+   :text-box      render-textbox
+   :button        render-button
+   :check-box     render-checkbox
+   :combo-box     render-combobox
+   :line          render-line
+   :rectangle     render-rectangle
+   :image         render-image
+   :list-box      render-listbox
+   :option-group  render-option-group
+   :option-button render-option-button
+   :toggle-button render-toggle-button
+   :tab-control   render-tab-control
+   :subform       render-subform})
 
 (defn form-view-control
   "Render a single control in view mode"

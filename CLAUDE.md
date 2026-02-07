@@ -79,6 +79,24 @@ This is PolyAccess (formerly CloneTemplate), a platform for converting MS Access
 - `load-databases!` / `switch-database!` reload all 5 object types: tables, queries, functions, forms, reports
 - Report state: `set-report-definition!`, `load-report-for-editing!`, `save-report!`, `set-report-view-mode!`, `select-report-control!`, `update-report-control!`, `delete-report-control!`
 
+### Error Logging (shared.events)
+All errors are logged to the `shared.events` table for persistent diagnostics.
+
+**Server-side** (`server/lib/events.js`):
+- `logError(pool, source, message, err, { databaseId })` — logs with stack trace, event_type='error'
+- `logEvent(pool, eventType, source, message, { databaseId, details })` — general events
+- Source naming convention: `"METHOD /api/path"` e.g. `"GET /api/tables"`, `"POST /api/data/:table"`
+- Use `logError` for actual errors; use `logEvent(pool, 'warning', ...)` for:
+  - Graceful degradation (sessions GET returning empty `{}`)
+  - Non-fatal side effects (graph population after form/report save)
+  - Chat tool errors (with tool name in details)
+
+**Frontend** (`state.cljs`):
+- `log-error!` (message, source, details) — calls `set-error!` (UI banner) + `log-event!` (POST to server)
+- `log-event!` (event-type, message, source, details) — POST to `/api/events`, no UI banner
+- Use `log-error!` for user-facing errors (form load, save, delete failures)
+- Use `log-event!` for background errors where a banner would be disruptive (subform loading, query execution when error state is already shown in UI)
+
 ### API Routes (server/routes/)
 - `/api/data/:table` - CRUD operations for table records
 - `/api/databases` - Multi-database management

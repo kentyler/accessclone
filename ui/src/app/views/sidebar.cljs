@@ -80,7 +80,8 @@
 (defn access-database-list
   "List of Access database files found by scanning"
   []
-  (let [databases (get-in @state/app-state [:objects :access_databases] [])
+  (let [databases (sort-by #(clojure.string/lower-case (or (:name %) ""))
+                          (get-in @state/app-state [:objects :access_databases] []))
         selected-path (:loaded-path @access-db-viewer/viewer-state)]
     [:div
      [:div.scan-button-row

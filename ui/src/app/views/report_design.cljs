@@ -132,24 +132,50 @@
 (defn stop-resize! []
   (reset! resize-state nil))
 
+(defn- parse-drop-data
+  "Extract drop coordinates and data from a drag event."
+  [e]
+  (let [rect (.getBoundingClientRect (.-currentTarget e))
+        raw-x (- (.-clientX e) (.-left rect))
+        raw-y (- (.-clientY e) (.-top rect))
+        offset-data (.getData (.-dataTransfer e) "application/x-offset")
+        offset (when (and offset-data (not= offset-data ""))
+                 (js->clj (js/JSON.parse offset-data) :keywordize-keys true))]
+    {:x (if offset (- raw-x (:x offset)) raw-x)
+     :y (if offset (- raw-y (:y offset)) raw-y)
+     :raw-x raw-x :raw-y raw-y
+     :ctrl-key? (.-ctrlKey e)
+     :control-idx (.getData (.-dataTransfer e) "application/x-control-idx")
+     :from-section (keyword (.getData (.-dataTransfer e) "application/x-section"))
+     :field-data (.getData (.-dataTransfer e) "application/x-field")}))
+
+(defn- handle-section-drop!
+  "Handle a drop event on a report section."
+  [section e]
+  (.preventDefault e)
+  (let [{:keys [x y raw-x raw-y ctrl-key? control-idx from-section field-data]}
+        (parse-drop-data e)]
+    (cond
+      (and control-idx (not= control-idx ""))
+      (move-control! (js/parseInt control-idx 10) x y ctrl-key? (or from-section section))
+
+      (and field-data (not= field-data ""))
+      (let [parsed (js->clj (js/JSON.parse field-data) :keywordize-keys true)]
+        (add-field-control! (:name parsed) (:type parsed) raw-x raw-y ctrl-key? section)))))
+
 (defn report-section
   "A single report section (report-header, page-header, detail, etc.)"
   [section report-def selected grid-size]
   (let [height (ru/get-section-height report-def section)
         controls (ru/get-section-controls report-def section)
         section-label (ru/section-display-name section)
-        section-data (get report-def section)
-        back-color (:back-color section-data)
-        section-selected? (and selected
-                               (:section selected)
-                               (nil? (:idx selected))
+        back-color (:back-color (get report-def section))
+        section-selected? (and selected (:section selected) (nil? (:idx selected))
                                (= (:section selected) section))]
-    [:div.form-section
-     {:class (name section)}
+    [:div.form-section {:class (name section)}
      [:div.section-divider
-      {:class "resizable"
-       :title (str "Drag to resize " section-label)
-       :on-mouse-down (fn [e] (start-resize! section e))}
+      {:class "resizable" :title (str "Drag to resize " section-label)
+       :on-mouse-down #(start-resize! section %)}
       [:span.section-label section-label]]
      [:div.section-body
       {:class (when section-selected? "selected")
@@ -158,40 +184,13 @@
                         :background-size (str grid-size "px " grid-size "px")}
                 (and back-color (not= back-color ""))
                 (assoc :background-color back-color))
-       :on-drag-over (fn [e] (.preventDefault e))
-       :on-click (fn [e]
-                   (when (or (.. e -target -classList (contains "section-body"))
-                             (.. e -target -classList (contains "controls-container")))
-                     (state/select-report-control! {:section section})))
-       :on-drop (fn [e]
-                  (.preventDefault e)
-                  (let [rect (.getBoundingClientRect (.-currentTarget e))
-                        raw-x (- (.-clientX e) (.-left rect))
-                        raw-y (- (.-clientY e) (.-top rect))
-                        ctrl-key? (.-ctrlKey e)
-                        control-idx (.getData (.-dataTransfer e) "application/x-control-idx")
-                        from-section (keyword (.getData (.-dataTransfer e) "application/x-section"))
-                        offset-data (.getData (.-dataTransfer e) "application/x-offset")
-                        offset (when (and offset-data (not= offset-data ""))
-                                 (js->clj (js/JSON.parse offset-data) :keywordize-keys true))
-                        x (if offset (- raw-x (:x offset)) raw-x)
-                        y (if offset (- raw-y (:y offset)) raw-y)
-                        field-data (.getData (.-dataTransfer e) "application/x-field")]
-                    (cond
-                      ;; Moving existing control
-                      (and control-idx (not= control-idx ""))
-                      (move-control! (js/parseInt control-idx 10) x y ctrl-key?
-                                     (or from-section section))
-
-                      ;; Adding new field
-                      (and field-data (not= field-data ""))
-                      (let [parsed (js->clj (js/JSON.parse field-data) :keywordize-keys true)]
-                        (add-field-control! (:name parsed) (:type parsed) raw-x raw-y ctrl-key? section)))))}
+       :on-drag-over #(.preventDefault %)
+       :on-click #(when (or (.. % -target -classList (contains "section-body"))
+                            (.. % -target -classList (contains "controls-container")))
+                    (state/select-report-control! {:section section}))
+       :on-drop #(handle-section-drop! section %)}
       (if (empty? controls)
-        [:div.section-empty
-         (if (= section :detail)
-           "Drag fields here"
-           "")]
+        [:div.section-empty (if (= section :detail) "Drag fields here" "")]
         [section-controls section controls selected grid-size])]]))
 
 (defn report-canvas

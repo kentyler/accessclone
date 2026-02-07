@@ -8,6 +8,23 @@
             [app.views.form-editor :as form-editor]
             [app.views.access-database-viewer :as access-db-viewer]))
 
+(defn- grid-size-selector [local-grid-size]
+  [:div.options-section
+   [:h4 "Form Designer"]
+   [:div.option-row
+    [:label "Grid Size (pixels)"]
+    [:select
+     {:value @local-grid-size
+      :on-change #(reset! local-grid-size (js/parseInt (.. % -target -value) 10))}
+     [:option {:value 4} "4"]
+     [:option {:value 6} "6"]
+     [:option {:value 8} "8 (Access default)"]
+     [:option {:value 10} "10"]
+     [:option {:value 12} "12"]
+     [:option {:value 16} "16"]
+     [:option {:value 20} "20"]]]
+   [:p.option-hint "Hold Ctrl while dragging for pixel-perfect positioning"]])
+
 (defn options-dialog
   "Tools > Options dialog for app configuration"
   []
@@ -20,29 +37,10 @@
           {:on-click #(.stopPropagation %)}
           [:div.dialog-header
            [:h3 "Options"]
-           [:button.dialog-close
-            {:on-click #(state/close-options-dialog!)}
-            "\u00D7"]]
-          [:div.dialog-body
-           [:div.options-section
-            [:h4 "Form Designer"]
-            [:div.option-row
-             [:label "Grid Size (pixels)"]
-             [:select
-              {:value @local-grid-size
-               :on-change #(reset! local-grid-size (js/parseInt (.. % -target -value) 10))}
-              [:option {:value 4} "4"]
-              [:option {:value 6} "6"]
-              [:option {:value 8} "8 (Access default)"]
-              [:option {:value 10} "10"]
-              [:option {:value 12} "12"]
-              [:option {:value 16} "16"]
-              [:option {:value 20} "20"]]]
-            [:p.option-hint "Hold Ctrl while dragging for pixel-perfect positioning"]]]
+           [:button.dialog-close {:on-click #(state/close-options-dialog!)} "\u00D7"]]
+          [:div.dialog-body [grid-size-selector local-grid-size]]
           [:div.dialog-footer
-           [:button.secondary-btn
-            {:on-click #(state/close-options-dialog!)}
-            "Cancel"]
+           [:button.secondary-btn {:on-click #(state/close-options-dialog!)} "Cancel"]
            [:button.primary-btn
             {:on-click (fn []
                          (state/set-grid-size! @local-grid-size)
@@ -157,16 +155,40 @@
       {:empty-hint "Ask me anything about your database, forms, or code. I can help you find records, write queries, and create functions."
        :placeholder "Type a message..."})))
 
+(defn- chat-messages-list [messages loading? empty-hint messages-end]
+  [:div.chat-messages
+   (if (empty? messages)
+     [:div.chat-empty empty-hint]
+     (for [[idx msg] (map-indexed vector messages)]
+       ^{:key idx}
+       [chat-message msg]))
+   (when loading?
+     [:div.chat-message.assistant
+      [:div.message-content.typing "Thinking..."]])
+   [:div {:ref #(reset! messages-end %)}]])
+
+(defn- chat-input-area [input loading? placeholder]
+  [:div.chat-input-area
+   [:textarea.chat-input
+    {:value input
+     :placeholder placeholder
+     :disabled loading?
+     :on-change #(state/set-chat-input! (.. % -target -value))
+     :on-key-down (fn [e]
+                    (when (and (= (.-key e) "Enter")
+                               (not (.-shiftKey e)))
+                      (.preventDefault e)
+                      (state/send-chat-message!)))}]
+   [:button.chat-send
+    {:on-click state/send-chat-message!
+     :disabled (or loading? (empty? (clojure.string/trim input)))}
+    "Send"]])
+
 (defn chat-panel []
-  (let [messages (:chat-messages @state/app-state)
-        input (:chat-input @state/app-state)
-        loading? (:chat-loading? @state/app-state)
-        open? (:chat-panel-open? @state/app-state)
-        messages-end (r/atom nil)]
-    ;; Scroll to bottom when messages change
+  (let [messages-end (r/atom nil)]
     (r/create-class
      {:component-did-update
-      (fn [this]
+      (fn [_this]
         (when-let [el @messages-end]
           (.scrollIntoView el #js {:behavior "smooth"})))
       :reagent-render
@@ -179,36 +201,12 @@
           [:aside.chat-panel {:class (when-not open? "collapsed")}
            [:div.chat-header
             [:span.chat-title "Assistant"]
-            [:button.chat-toggle
-             {:on-click state/toggle-chat-panel!}
+            [:button.chat-toggle {:on-click state/toggle-chat-panel!}
              (if open? "\u00BB" "\u00AB")]]
            (when open?
              [:<>
-              [:div.chat-messages
-               (if (empty? messages)
-                 [:div.chat-empty empty-hint]
-                 (for [[idx msg] (map-indexed vector messages)]
-                   ^{:key idx}
-                   [chat-message msg]))
-               (when loading?
-                 [:div.chat-message.assistant
-                  [:div.message-content.typing "Thinking..."]])
-               [:div {:ref #(reset! messages-end %)}]]
-              [:div.chat-input-area
-               [:textarea.chat-input
-                {:value input
-                 :placeholder placeholder
-                 :disabled loading?
-                 :on-change #(state/set-chat-input! (.. % -target -value))
-                 :on-key-down (fn [e]
-                                (when (and (= (.-key e) "Enter")
-                                           (not (.-shiftKey e)))
-                                  (.preventDefault e)
-                                  (state/send-chat-message!)))}]
-               [:button.chat-send
-                {:on-click state/send-chat-message!
-                 :disabled (or loading? (empty? (clojure.string/trim input)))}
-                "Send"]]])]))})))
+              [chat-messages-list messages loading? empty-hint messages-end]
+              [chat-input-area input loading? placeholder]])]))})))
 
 (defn app []
   [:div.app

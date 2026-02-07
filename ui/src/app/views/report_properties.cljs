@@ -203,94 +203,79 @@
 ;; PROPERTIES PANEL
 ;; ============================================================
 
-(defn properties-panel
-  "Access-style Property Sheet for reports with tabs"
-  []
-  (let [report-editor (:report-editor @state/app-state)
-        selected (:selected-control report-editor)
-        active-tab (or (:properties-tab report-editor) :format)
+(defn- resolve-selection
+  "Determine the selection state and return a map of resolved values."
+  [report-editor]
+  (let [selected (:selected-control report-editor)
         current (:current report-editor)
-        ;; Get controls from the selected section
         section-key (when selected (:section selected))
         idx (when selected (:idx selected))
         controls (when section-key (or (get-in current [section-key :controls]) []))
         selected-control (when (and section-key idx (< idx (count controls)))
                            (get controls idx))
-        ;; Determine selection state
         is-control? (some? selected-control)
         is-section? (and (some? section-key) (nil? idx))
-        is-group-section? (and is-section?
-                               (let [n (name section-key)]
-                                 (or (str/starts-with? n "group-header-")
-                                     (str/starts-with? n "group-footer-"))))
-        group-idx (when is-group-section? (ru/parse-group-index section-key))
-        ;; Selection type label
-        selection-type (cond
-                         is-control? (name (:type selected-control))
-                         is-section? (ru/section-display-name section-key)
-                         :else "Report")
-        ;; Property definitions
-        property-defs (cond
-                        is-control? control-property-defs
-                        is-section? section-property-defs
-                        :else report-property-defs)
-        ;; Value getters/setters
-        section-data (when is-section? (get current section-key))
-        grouping-data (when (and is-group-section? group-idx)
-                        (get-in current [:grouping group-idx]))
-        get-value (cond
-                    is-control? #(get selected-control %)
-                    is-section? #(get section-data %)
-                    :else #(get current %))
-        on-change (cond
-                    is-control? #(state/update-report-control! section-key idx %1 %2)
-                    is-section? #(state/set-report-definition!
-                                  (assoc-in current [section-key %1] %2))
-                    :else #(state/set-report-definition! (assoc current %1 %2)))
-        ;; Group-level value getter/setter
-        get-group-value (when grouping-data
-                          #(get grouping-data %))
-        on-group-change (when (and is-group-section? group-idx)
-                          (fn [prop-key value]
-                            (state/set-report-definition!
-                             (assoc-in current [:grouping group-idx prop-key] value))))]
+        is-group? (and is-section?
+                       (let [n (name section-key)]
+                         (or (str/starts-with? n "group-header-")
+                             (str/starts-with? n "group-footer-"))))
+        group-idx (when is-group? (ru/parse-group-index section-key))
+        section-data (when is-section? (get current section-key))]
+    {:is-control? is-control? :is-section? is-section? :is-group? is-group?
+     :section-key section-key :idx idx :group-idx group-idx
+     :selected-control selected-control :section-data section-data
+     :selection-type (cond is-control? (name (:type selected-control))
+                           is-section? (ru/section-display-name section-key)
+                           :else "Report")
+     :property-defs (cond is-control? control-property-defs
+                          is-section? section-property-defs
+                          :else report-property-defs)
+     :get-value (cond is-control? #(get selected-control %)
+                      is-section? #(get section-data %)
+                      :else #(get current %))
+     :on-change (cond is-control? #(state/update-report-control! section-key idx %1 %2)
+                      is-section? #(state/set-report-definition! (assoc-in current [section-key %1] %2))
+                      :else #(state/set-report-definition! (assoc current %1 %2)))
+     :grouping-data (when (and is-group? group-idx) (get-in current [:grouping group-idx]))
+     :on-group-change (when (and is-group? group-idx)
+                        (fn [k v] (state/set-report-definition!
+                                    (assoc-in current [:grouping group-idx k] v))))}))
+
+(defn- grouping-section
+  "Render grouping properties if on a group section."
+  [sel]
+  (when (and (:is-group? sel) (:grouping-data sel) (:on-group-change sel))
+    [:div
+     [:div.property-category "Grouping"]
+     [properties-tab-content (get group-level-property-defs :data [])
+      #(get (:grouping-data sel) %) (:on-group-change sel)]]))
+
+(defn properties-panel
+  "Access-style Property Sheet for reports with tabs"
+  []
+  (let [report-editor (:report-editor @state/app-state)
+        active-tab (or (:properties-tab report-editor) :format)
+        sel (resolve-selection report-editor)]
     [:div.property-sheet
      [:div.property-sheet-header
       [:span.property-sheet-title "Property Sheet"]
-      [:span.selection-type (str "Selection type: " selection-type)]]
+      [:span.selection-type (str "Selection type: " (:selection-type sel))]]
      [:div.property-sheet-tabs
       (for [tab [:format :data :event :other :all]]
         ^{:key tab}
         [:button.tab-btn
          {:class (when (= tab active-tab) "active")
           :on-click #(swap! state/app-state assoc-in [:report-editor :properties-tab] tab)}
-         (case tab
-           :format "Format"
-           :data "Data"
-           :event "Event"
-           :other "Other"
-           :all "All")])]
+         (case tab :format "Format" :data "Data" :event "Event" :other "Other" :all "All")])]
      [:div.property-sheet-content
       (if (= active-tab :all)
-        ;; Show all properties
         [:div
-         (for [[category props] property-defs]
+         (for [[category props] (:property-defs sel)]
            ^{:key category}
-           [:div
-            [:div.property-category (name category)]
-            [properties-tab-content props get-value on-change]])
-         ;; Group-level properties when on a group section
-         (when (and is-group-section? get-group-value on-group-change)
-           [:div
-            [:div.property-category "Grouping"]
-            [properties-tab-content (get group-level-property-defs :data [])
-             get-group-value on-group-change]])]
-        ;; Show single category
+           [:div [:div.property-category (name category)]
+            [properties-tab-content props (:get-value sel) (:on-change sel)]])
+         [grouping-section sel]]
         [:div
-         [properties-tab-content (get property-defs active-tab []) get-value on-change]
-         ;; Merge group-level into Data tab for group sections
-         (when (and (= active-tab :data) is-group-section? get-group-value on-group-change)
-           [:div
-            [:div.property-category "Grouping"]
-            [properties-tab-content (get group-level-property-defs :data [])
-             get-group-value on-group-change]])])]]))
+         [properties-tab-content (get (:property-defs sel) active-tab [])
+          (:get-value sel) (:on-change sel)]
+         (when (= active-tab :data) [grouping-section sel])])]]))

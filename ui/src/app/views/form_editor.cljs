@@ -115,6 +115,36 @@
                      (state/set-view-mode! :design))}
         "Design View"]])))
 
+(defn- popup-view [current-def modal?]
+  [:div.editor-body.view-mode
+   [:div.popup-overlay
+    {:class (when modal? "modal")
+     :on-click #(state/hide-context-menu!)}
+    [:div.popup-window
+     [:div.popup-title-bar
+      {:on-context-menu (fn [e]
+                          (.preventDefault e)
+                          (.stopPropagation e)
+                          (state/show-context-menu! (.-clientX e) (.-clientY e)))}
+      [:span.popup-title (or (:caption current-def) (:name current-def) "Form")]
+      [:button.popup-close {:on-click #(state/close-current-tab!)} "\u2715"]]
+     [form-view/form-view]]
+    [popup-context-menu]]])
+
+(defn- form-editor-body [view-mode current-def]
+  (if (= view-mode :view)
+    (let [popup? (not= 0 (:popup current-def))
+          modal? (and popup? (not= 0 (:modal current-def)))]
+      (if popup?
+        [popup-view current-def modal?]
+        [:div.editor-body.view-mode
+         [:div.editor-center [form-view/form-view]]]))
+    [:div.editor-body
+     [:div.editor-center [form-design/form-canvas]]
+     [:div.editor-right
+      [form-properties/properties-panel]
+      [form-design/field-list]]]))
+
 (defn form-editor
   "Main form editor component"
   []
@@ -122,46 +152,14 @@
         editing-form-id (get-in @state/app-state [:form-editor :form-id])
         view-mode (state/get-view-mode)]
     (when (and active-tab (= (:type active-tab) :forms))
-      ;; Load form data when tab changes to a different form
       (let [form (first (filter #(= (:id %) (:id active-tab))
                                 (get-in @state/app-state [:objects :forms])))]
         (when (and form (not= (:id form) editing-form-id))
           (state/load-form-for-editing! form)))
-      (let [current-def (get-in @state/app-state [:form-editor :current])
-            popup? (and (= view-mode :view)
-                        (not= 0 (:popup current-def)))
-            modal? (and popup? (not= 0 (:modal current-def)))]
-        [:div.form-editor
-         [form-toolbar]
-         [lint-errors-panel]
-         (if (= view-mode :view)
-           (if popup?
-             ;; Popup view mode - floating window
-             [:div.editor-body.view-mode
-              [:div.popup-overlay
-               {:class (when modal? "modal")
-                :on-click #(state/hide-context-menu!)}
-               [:div.popup-window
-                [:div.popup-title-bar
-                 {:on-context-menu (fn [e]
-                                     (.preventDefault e)
-                                     (.stopPropagation e)
-                                     (state/show-context-menu! (.-clientX e) (.-clientY e)))}
-                 [:span.popup-title (or (:caption current-def) (:name current-def) "Form")]
-                 [:button.popup-close {:on-click #(state/close-current-tab!)} "\u2715"]]
-                [form-view/form-view]]
-               [popup-context-menu]]]
-             ;; Inline view mode
-             [:div.editor-body.view-mode
-              [:div.editor-center
-               [form-view/form-view]]])
-           ;; Design mode - form with properties and field panels
-           [:div.editor-body
-            [:div.editor-center
-             [form-design/form-canvas]]
-            [:div.editor-right
-             [form-properties/properties-panel]
-             [form-design/field-list]]])]))))
+      [:div.form-editor
+       [form-toolbar]
+       [lint-errors-panel]
+       [form-editor-body view-mode (get-in @state/app-state [:form-editor :current])]])))
 
 (defn object-editor
   "Routes to the appropriate editor based on active tab type"

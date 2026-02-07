@@ -508,21 +508,36 @@
     ;; Open a tab for the new table
     (swap! state/app-state assoc :active-tab {:type :tables :id :new-table})))
 
+(defn- validate-new-table-name
+  "Validate a new table name, returning error vector or nil."
+  [table-name]
+  (seq (cond-> []
+         (or (nil? table-name) (= "" table-name))
+         (conj {:message "Table name is required."})
+         (and (not= "" (or table-name ""))
+              (not (re-matches #"^[a-zA-Z_][a-zA-Z0-9_]*$" (or table-name ""))))
+         (conj {:message "Invalid table name. Use letters, digits, underscores."}))))
+
+(defn- refresh-tables-and-open!
+  "Re-fetch tables from API and open the named table."
+  [table-name]
+  (go
+    (let [response (<! (http/get (str state/api-base "/api/tables")
+                                  {:headers (state/db-headers)}))]
+      (when (:success response)
+        (let [table-list (mapv #(assoc % :id (:name %)) (get-in response [:body :tables]))]
+          (swap! state/app-state assoc-in [:objects :tables] table-list)
+          (when-let [new-table (first (filter #(= (:name %) table-name) table-list))]
+            (state/open-object! :tables (:id new-table))))))))
+
 (defn save-new-table!
   "Create new table via POST"
   []
   (let [table-name (get-in @state/app-state [:table-viewer :new-table-name])
         fields (get-in @state/app-state [:table-viewer :design-fields])
         description (get-in @state/app-state [:table-viewer :table-description])
-        ;; Pre-validate name first
-        name-errors (cond-> []
-                      (or (nil? table-name) (= "" table-name))
-                      (conj {:message "Table name is required."})
-                      (and (not= "" (or table-name ""))
-                           (not (re-matches #"^[a-zA-Z_][a-zA-Z0-9_]*$" (or table-name ""))))
-                      (conj {:message "Invalid table name. Use letters, digits, underscores."}))
-        field-errors (validate-design-fields fields)
-        all-errors (seq (concat name-errors field-errors))]
+        all-errors (seq (concat (validate-new-table-name table-name)
+                                (validate-design-fields fields)))]
     (swap! state/app-state assoc-in [:table-viewer :design-errors] nil)
     (if all-errors
       (swap! state/app-state assoc-in [:table-viewer :design-errors] (vec all-errors))
@@ -533,23 +548,11 @@
                                                       :description description}
                                         :headers (state/db-headers)}))]
           (if (:success response)
-            (do
-              (println "New table created:" table-name)
-              (populate-graph!)
-              ;; Re-fetch tables and open the new one
-              (let [tables-response (<! (http/get (str state/api-base "/api/tables")
-                                                   {:headers (state/db-headers)}))]
-                (when (:success tables-response)
-                  (let [tables (get-in tables-response [:body :tables])
-                        table-list (mapv (fn [t] (assoc t :id (:name t))) tables)]
-                    (swap! state/app-state assoc-in [:objects :tables] table-list)
-                    (let [new-table (first (filter #(= (:name %) table-name) table-list))]
-                      (when new-table
-                        (state/open-object! :tables (:id new-table))))))))
-            (do
-              (println "Error creating table:" (:body response))
-              (swap! state/app-state assoc-in [:table-viewer :design-errors]
-                     [{:message (get-in response [:body :error] "Failed to create table")}]))))))))
+            (do (println "New table created:" table-name)
+                (populate-graph!)
+                (<! (refresh-tables-and-open! table-name)))
+            (swap! state/app-state assoc-in [:table-viewer :design-errors]
+                   [{:message (get-in response [:body :error] "Failed to create table")}])))))))
 
 (defn set-new-table-name!
   "Set the name for a new table"

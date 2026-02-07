@@ -148,6 +148,46 @@
   (reset! resize-state {:section section
                         :start-y (.-clientY e)}))
 
+(defn- parse-drop-data
+  "Extract drop coordinates and data from a drag event."
+  [e]
+  (let [rect (.getBoundingClientRect (.-currentTarget e))
+        raw-x (- (.-clientX e) (.-left rect))
+        raw-y (- (.-clientY e) (.-top rect))
+        offset-data (.getData (.-dataTransfer e) "application/x-offset")
+        offset (when (and offset-data (not= offset-data ""))
+                 (js->clj (js/JSON.parse offset-data) :keywordize-keys true))]
+    {:x (if offset (- raw-x (:x offset)) raw-x)
+     :y (if offset (- raw-y (:y offset)) raw-y)
+     :raw-x raw-x :raw-y raw-y
+     :ctrl-key? (.-ctrlKey e)
+     :control-idx (.getData (.-dataTransfer e) "application/x-control-idx")
+     :from-section (keyword (.getData (.-dataTransfer e) "application/x-section"))
+     :field-data (.getData (.-dataTransfer e) "application/x-field")}))
+
+(defn- handle-section-drop!
+  "Handle a drop event on a form section."
+  [section e]
+  (.preventDefault e)
+  (let [{:keys [x y raw-x raw-y ctrl-key? control-idx from-section field-data]}
+        (parse-drop-data e)]
+    (cond
+      (and control-idx (not= control-idx ""))
+      (move-control! (js/parseInt control-idx 10) x y ctrl-key? (or from-section section))
+
+      (and field-data (not= field-data ""))
+      (let [parsed (js->clj (js/JSON.parse field-data) :keywordize-keys true)]
+        (add-field-control! (:name parsed) (:type parsed) raw-x raw-y ctrl-key? section)))))
+
+(defn- section-body-style
+  "Build the style map for a section body."
+  [height grid-size back-color]
+  (cond-> {:height height
+           :background-image (str "radial-gradient(circle, #ccc 1px, transparent 1px)")
+           :background-size (str grid-size "px " grid-size "px")}
+    (and back-color (not= back-color ""))
+    (assoc :background-color back-color)))
+
 (defn form-section
   "A single form section (header, detail, or footer)"
   [section form-def selected grid-size]
@@ -155,73 +195,54 @@
         controls (form-utils/get-section-controls form-def section)
         section-label (case section :header "Form Header" :detail "Detail" :footer "Form Footer")
         can-resize? (not= section :header)
-        section-data (get form-def section)
-        back-color (:back-color section-data)
-        section-selected? (and selected
-                               (:section selected)
-                               (nil? (:idx selected))
+        section-selected? (and selected (:section selected) (nil? (:idx selected))
                                (= (:section selected) section))]
-    [:div.form-section
-     {:class (name section)}
+    [:div.form-section {:class (name section)}
      [:div.section-divider
       {:class (when can-resize? "resizable")
-       :title (if can-resize?
-                (str "Drag to resize " (name (form-utils/get-section-above section)))
-                section-label)
-       :on-mouse-down (when can-resize? (fn [e] (start-resize! section e)))}
+       :title (if can-resize? (str "Drag to resize " (name (form-utils/get-section-above section))) section-label)
+       :on-mouse-down (when can-resize? #(start-resize! section %))}
       [:span.section-label section-label]]
      [:div.section-body
       {:class (when section-selected? "selected")
-       :style (cond-> {:height height
-                        :background-image (str "radial-gradient(circle, #ccc 1px, transparent 1px)")
-                        :background-size (str grid-size "px " grid-size "px")}
-                (and back-color (not= back-color ""))
-                (assoc :background-color back-color))
-       :on-drag-over (fn [e] (.preventDefault e))
-       :on-click (fn [e]
-                   (when (or (.. e -target -classList (contains "section-body"))
-                             (.. e -target -classList (contains "controls-container")))
-                     (state/select-control! {:section section})))
-       :on-drop (fn [e]
-                  (.preventDefault e)
-                  (let [rect (.getBoundingClientRect (.-currentTarget e))
-                        raw-x (- (.-clientX e) (.-left rect))
-                        raw-y (- (.-clientY e) (.-top rect))
-                        ctrl-key? (.-ctrlKey e)
-                        control-idx (.getData (.-dataTransfer e) "application/x-control-idx")
-                        from-section (keyword (.getData (.-dataTransfer e) "application/x-section"))
-                        offset-data (.getData (.-dataTransfer e) "application/x-offset")
-                        offset (when (and offset-data (not= offset-data ""))
-                                 (js->clj (js/JSON.parse offset-data) :keywordize-keys true))
-                        x (if offset (- raw-x (:x offset)) raw-x)
-                        y (if offset (- raw-y (:y offset)) raw-y)
-                        field-data (.getData (.-dataTransfer e) "application/x-field")]
-                    (cond
-                      ;; Moving existing control (same or different section)
-                      (and control-idx (not= control-idx ""))
-                      (if (= from-section section)
-                        ;; Same section - just move
-                        (move-control! (js/parseInt control-idx 10) x y ctrl-key? section)
-                        ;; Different section - remove from old, add to new
-                        ;; (for now, just move within same section)
-                        (move-control! (js/parseInt control-idx 10) x y ctrl-key? (or from-section section)))
-
-                      ;; Adding new field
-                      (and field-data (not= field-data ""))
-                      (let [parsed (js->clj (js/JSON.parse field-data) :keywordize-keys true)]
-                        (add-field-control! (:name parsed) (:type parsed) raw-x raw-y ctrl-key? section)))))}
+       :style (section-body-style height grid-size (:back-color (get form-def section)))
+       :on-drag-over #(.preventDefault %)
+       :on-click #(when (or (.. % -target -classList (contains "section-body"))
+                            (.. % -target -classList (contains "controls-container")))
+                    (state/select-control! {:section section}))
+       :on-drop #(handle-section-drop! section %)}
       (if (empty? controls)
-        [:div.section-empty
-         (if (= section :detail)
-           "Drag fields here"
-           "")]
+        [:div.section-empty (if (= section :detail) "Drag fields here" "")]
         [section-controls section controls selected grid-size])]
-     ;; Footer has a bottom resize edge
      (when (= section :footer)
        [:div.section-bottom-resize
-        {:on-mouse-down (fn [e]
-                          (.preventDefault e)
-                          (reset! resize-state {:section :footer :start-y (.-clientY e)}))}])]))
+        {:on-mouse-down #(do (.preventDefault %)
+                             (reset! resize-state {:section :footer :start-y (.-clientY %)}))}])]))
+
+(defn- ctx-menu-item
+  "A context menu item that stops propagation and hides menu."
+  [label action & [class]]
+  [:div.context-menu-item
+   {:class class
+    :on-click (fn [e] (.stopPropagation e) (state/hide-context-menu!) (action))}
+   label])
+
+(defn- form-context-menu
+  "Context menu for the form canvas header."
+  []
+  (let [ctx-menu (:context-menu @state/app-state)]
+    (when (:visible? ctx-menu)
+      [:div.context-menu
+       {:style {:left (:x ctx-menu) :top (:y ctx-menu)}}
+       [ctx-menu-item "Save" #(if (= (state/get-view-mode) :view)
+                                (state/save-current-record!) (state/save-form!))]
+       [ctx-menu-item "Close" state/close-current-tab!]
+       [ctx-menu-item "Close All" state/close-all-tabs!]
+       [:div.context-menu-separator]
+       [ctx-menu-item "Form View" #(state/set-view-mode! :view)
+        (when (= (state/get-view-mode) :view) "active")]
+       [ctx-menu-item "Design View" #(state/set-view-mode! :design)
+        (when (= (state/get-view-mode) :design) "active")]])))
 
 (defn form-canvas
   "The design surface where controls are placed"
@@ -229,79 +250,32 @@
   (let [form-editor (:form-editor @state/app-state)
         current (:current form-editor)
         selected (:selected-control form-editor)
-        grid-size (state/get-grid-size)
-        resizing? @resize-state]
+        grid-size (state/get-grid-size)]
     [:div.form-canvas
      {:tab-index 0
-      :class (when resizing? "resizing")
+      :class (when @resize-state "resizing")
       :on-click (fn [_] (state/hide-context-menu!))
-      :on-mouse-move (fn [e] (when resizing? (handle-resize! current e)))
+      :on-mouse-move (fn [e] (when @resize-state (handle-resize! current e)))
       :on-mouse-up (fn [_] (stop-resize!))
       :on-mouse-leave (fn [_] (stop-resize!))
       :on-key-down (fn [e]
                      (state/hide-context-menu!)
-                     (when (and selected
-                                (or (= (.-key e) "Delete")
-                                    (= (.-key e) "Backspace")))
+                     (when (and selected (or (= (.-key e) "Delete") (= (.-key e) "Backspace")))
                        (.preventDefault e)
                        (state/delete-control! (:section selected) (:idx selected))))}
      [:div.canvas-header
       [:div.form-selector
        {:class (when (nil? selected) "selected")
-        :on-click (fn [e]
-                    (.stopPropagation e)
-                    (state/select-control! nil))
-        :on-context-menu (fn [e]
-                           (.preventDefault e)
-                           (.stopPropagation e)
-                           (state/show-context-menu! (.-clientX e) (.-clientY e)))
+        :on-click #(do (.stopPropagation %) (state/select-control! nil))
+        :on-context-menu #(do (.preventDefault %) (.stopPropagation %)
+                              (state/show-context-menu! (.-clientX %) (.-clientY %)))
         :title "Select form to edit properties (right-click for menu)"}]
       [:span "Form Design View"]
-      ;; Context menu
-      (let [ctx-menu (:context-menu @state/app-state)]
-        (when (:visible? ctx-menu)
-          [:div.context-menu
-           {:style {:left (:x ctx-menu) :top (:y ctx-menu)}}
-           [:div.context-menu-item
-            {:on-click (fn [e]
-                         (.stopPropagation e)
-                         (state/hide-context-menu!)
-                         (if (= (state/get-view-mode) :view)
-                           (state/save-current-record!)
-                           (state/save-form!)))}
-            "Save"]
-           [:div.context-menu-item
-            {:on-click (fn [e]
-                         (.stopPropagation e)
-                         (state/hide-context-menu!)
-                         (state/close-current-tab!))}
-            "Close"]
-           [:div.context-menu-item
-            {:on-click (fn [e]
-                         (.stopPropagation e)
-                         (state/hide-context-menu!)
-                         (state/close-all-tabs!))}
-            "Close All"]
-           [:div.context-menu-separator]
-           [:div.context-menu-item
-            {:class (when (= (state/get-view-mode) :view) "active")
-             :on-click (fn [e]
-                         (.stopPropagation e)
-                         (state/hide-context-menu!)
-                         (state/set-view-mode! :view))}
-            "Form View"]
-           [:div.context-menu-item
-            {:class (when (= (state/get-view-mode) :design) "active")
-             :on-click (fn [e]
-                         (.stopPropagation e)
-                         (state/hide-context-menu!)
-                         (state/set-view-mode! :design))}
-            "Design View"]]))]
+      [form-context-menu]]
      [:div.canvas-body.sections-container
       [form-section :header current selected grid-size]
       [form-section :detail current selected grid-size]
       [form-section :footer current selected grid-size]]
-     ;; Record navigation bar (hidden when navigation-buttons is 0)
      (when-not (= 0 (:navigation-buttons current))
        [:div.record-nav-bar
         [:span.nav-label "Record:"]

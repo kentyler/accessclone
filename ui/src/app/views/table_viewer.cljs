@@ -100,78 +100,60 @@
         :disabled disabled
         :on-change #(on-change (.. % -target -value))}])]])
 
+(defn- field-size-property
+  "Render the field size property row based on type."
+  [field-idx field field-type]
+  (cond
+    (or (= field-type "Short Text") (= (:type field) "character varying"))
+    [editable-property-row "Field Size"
+     (or (:maxLength field) 255)
+     #(state-table/update-design-field! field-idx :maxLength %)
+     {:type :number}]
+    (= field-type "Number")
+    [editable-property-row "Field Size"
+     (or (:fieldSize field) "Long Integer")
+     #(state-table/update-design-field! field-idx :fieldSize %)
+     {:options number-field-sizes}]
+    :else
+    [property-row "Field Size" (field-size-display field)]))
+
+(defn- column-data-properties
+  "Render data properties (caption, default, validation, required, indexed)."
+  [field-idx field]
+  [:<>
+   [editable-property-row "Caption" (:description field)
+    #(state-table/update-design-field! field-idx :description %)]
+   [editable-property-row "Default Value" (:default field)
+    #(state-table/update-design-field! field-idx :default %)]
+   [property-row "Validation Rule" (:checkConstraint field)]
+   [property-row "Validation Text" nil true]
+   [editable-property-row "Required" (if (:nullable field) "No" "Yes")
+    #(state-table/update-design-field! field-idx :nullable (= % "No"))
+    {:options ["No" "Yes"]}]
+   [property-row "Allow Zero Length" nil true]
+   [editable-property-row "Indexed" (indexed-display field)
+    #(state-table/update-design-field! field-idx :indexed
+       (case % "Yes (Duplicates OK)" "yes" "Yes (No Duplicates)" "unique" nil))
+    {:options ["No" "Yes (Duplicates OK)" "Yes (No Duplicates)"]}]])
+
 (defn editable-column-properties
   "Editable property sheet for a selected field in design mode"
   [field-idx field]
-  (let [field-type (display-type field)
-        is-varchar (or (= field-type "Short Text")
-                       (= (:type field) "character varying"))
-        is-number (= field-type "Number")]
-    [:div.field-properties
-     [:div.field-properties-header "Field Properties"]
-     [:div.field-properties-tab "General"]
-     [:div.field-properties-body
-      ;; Field Size — depends on type
-      (cond
-        is-varchar
-        [editable-property-row "Field Size"
-         (or (:maxLength field) 255)
-         #(state-table/update-design-field! field-idx :maxLength %)
-         {:type :number}]
-
-        is-number
-        [editable-property-row "Field Size"
-         (or (:fieldSize field) "Long Integer")
-         #(state-table/update-design-field! field-idx :fieldSize %)
-         {:options number-field-sizes}]
-
-        :else
-        [property-row "Field Size" (field-size-display field)])
-
-      [property-row "New Values" nil true]
-      [property-row "Format" nil true]
-      [property-row "Input Mask" nil true]
-
-      ;; Caption (maps to description/COMMENT ON COLUMN)
-      [editable-property-row "Caption"
-       (:description field)
-       #(state-table/update-design-field! field-idx :description %)]
-
-      ;; Default Value
-      [editable-property-row "Default Value"
-       (:default field)
-       #(state-table/update-design-field! field-idx :default %)]
-
-      ;; Validation Rule (read-only)
-      [property-row "Validation Rule" (:checkConstraint field)]
-      [property-row "Validation Text" nil true]
-
-      ;; Required (inverted nullable)
-      [editable-property-row "Required"
-       (if (:nullable field) "No" "Yes")
-       #(state-table/update-design-field! field-idx :nullable (= % "No"))
-       {:options ["No" "Yes"]}]
-
-      [property-row "Allow Zero Length" nil true]
-
-      ;; Indexed
-      [editable-property-row "Indexed"
-       (indexed-display field)
-       #(state-table/update-design-field! field-idx :indexed
-          (case %
-            "Yes (Duplicates OK)" "yes"
-            "Yes (No Duplicates)" "unique"
-            nil))
-       {:options ["No" "Yes (Duplicates OK)" "Yes (No Duplicates)"]}]
-
-      ;; Info rows
-      [property-row "Primary Key" (if (:isPrimaryKey field) "Yes" "No")]
-      (when (:isForeignKey field)
-        [property-row "Foreign Key" (str "-> " (:foreignTable field))])
-
-      [property-row "Unicode Compression" nil true]
-      [property-row "IME Mode" nil true]
-      [property-row "Text Align" nil true]]]))
+  [:div.field-properties
+   [:div.field-properties-header "Field Properties"]
+   [:div.field-properties-tab "General"]
+   [:div.field-properties-body
+    [field-size-property field-idx field (display-type field)]
+    [property-row "New Values" nil true]
+    [property-row "Format" nil true]
+    [property-row "Input Mask" nil true]
+    [column-data-properties field-idx field]
+    [property-row "Primary Key" (if (:isPrimaryKey field) "Yes" "No")]
+    (when (:isForeignKey field)
+      [property-row "Foreign Key" (str "-> " (:foreignTable field))])
+    [property-row "Unicode Compression" nil true]
+    [property-row "IME Mode" nil true]
+    [property-row "Text Align" nil true]]])
 
 (defn editable-table-properties
   "Editable property sheet for table-level info"
@@ -192,6 +174,25 @@
 ;; EDITABLE UPPER GRID
 ;; ============================================================
 
+(defn- design-field-input
+  "Inline text input for design grid cell."
+  [idx prop value placeholder]
+  [:input.design-field-input
+   {:type "text" :value (or value "") :placeholder (or placeholder "")
+    :on-click #(do (.stopPropagation %) (state-table/select-design-field! idx))
+    :on-change #(state-table/update-design-field! idx prop (.. % -target -value))}])
+
+(defn- design-type-select
+  "Type dropdown for design grid."
+  [idx field]
+  (let [dt (display-type field)]
+    [:select.design-type-select
+     {:value dt :on-click #(.stopPropagation %)
+      :on-change #(state-table/update-design-field! idx :type (.. % -target -value))}
+     (for [t data-type-options] ^{:key t} [:option {:value t} t])
+     (when-not (some #{dt} data-type-options)
+       [:option {:value (:type field)} (:type field)])]))
+
 (defn editable-column-row
   "Editable row in the design grid"
   [idx field selected?]
@@ -201,32 +202,9 @@
    [:td.col-name
     (when (:isPrimaryKey field) [:span.pk-icon {:title "Primary Key"} "\uD83D\uDD11"])
     (when (:isForeignKey field) [:span.fk-icon {:title (str "Foreign Key to " (:foreignTable field))} "\uD83D\uDD17"])
-    [:input.design-field-input
-     {:type "text"
-      :value (or (:name field) "")
-      :placeholder "Field Name"
-      :on-click #(do (.stopPropagation %)
-                     (state-table/select-design-field! idx))
-      :on-change #(state-table/update-design-field! idx :name (.. % -target -value))}]]
-   [:td.col-type
-    [:select.design-type-select
-     {:value (display-type field)
-      :on-click #(.stopPropagation %)
-      :on-change #(state-table/update-design-field! idx :type (.. % -target -value))}
-     (for [t data-type-options]
-       ^{:key t}
-       [:option {:value t} t])
-     ;; If the current type is a raw PG type not in our options, show it
-     (when-not (some #{(display-type field)} data-type-options)
-       [:option {:value (:type field)} (:type field)])]]
-   [:td.col-description
-    [:input.design-field-input
-     {:type "text"
-      :value (or (:description field) "")
-      :placeholder ""
-      :on-click #(do (.stopPropagation %)
-                     (state-table/select-design-field! idx))
-      :on-change #(state-table/update-design-field! idx :description (.. % -target -value))}]]
+    [design-field-input idx :name (:name field) "Field Name"]]
+   [:td.col-type [design-type-select idx field]]
+   [:td.col-description [design-field-input idx :description (:description field) ""]]
    [:td.col-actions
     [:button.delete-field-btn
      {:title "Delete field"
@@ -277,47 +255,35 @@
        :auto-focus true
        :on-change #(state-table/set-new-table-name! (.. % -target -value))}]]))
 
+(defn- design-column-grid
+  "Upper pane column grid for design view."
+  [fields selected-idx]
+  [:div.design-upper-pane
+   [:table.structure-table
+    [:thead
+     [:tr [:th "Field Name"] [:th "Data Type"] [:th "Description"] [:th.col-actions-header ""]]]
+    [:tbody
+     (if (seq fields)
+       (map-indexed (fn [idx field]
+                      ^{:key idx}
+                      [editable-column-row idx field (= idx selected-idx)])
+                    fields)
+       [:tr [:td {:col-span 4} "No columns \u2014 click below to add"]])
+     [new-field-ghost-row]]]])
+
 (defn design-view
   "Design view showing table structure with editable property sheet"
   []
   (let [table-info (get-in @state/app-state [:table-viewer :table-info])
-        new-table? (get-in @state/app-state [:table-viewer :new-table?])
-        ;; Initialize design fields from table-info if not yet done
-        _ (when (and (nil? (get-in @state/app-state [:table-viewer :design-fields]))
-                     table-info)
+        _ (when (and (nil? (get-in @state/app-state [:table-viewer :design-fields])) table-info)
             (state-table/init-design-editing!))
         fields (get-in @state/app-state [:table-viewer :design-fields] [])
-        errors (get-in @state/app-state [:table-viewer :design-errors])
         selected-idx (get-in @state/app-state [:table-viewer :selected-field])
         selected-field (when (number? selected-idx) (get fields selected-idx))]
     [:div.table-design-view
-     ;; New table name bar
-     (when new-table?
-       [new-table-name-bar])
-
-     ;; Error panel
-     [design-errors-panel errors]
-
-     ;; Upper pane — editable column grid
-     [:div.design-upper-pane
-      [:table.structure-table
-       [:thead
-        [:tr
-         [:th "Field Name"]
-         [:th "Data Type"]
-         [:th "Description"]
-         [:th.col-actions-header ""]]]
-       [:tbody
-        (if (seq fields)
-          (map-indexed
-            (fn [idx field]
-              ^{:key idx}
-              [editable-column-row idx field (= idx selected-idx)])
-            fields)
-          [:tr [:td {:col-span 4} "No columns — click below to add"]])
-        [new-field-ghost-row]]]]
-
-     ;; Lower pane — editable property sheet
+     (when (get-in @state/app-state [:table-viewer :new-table?]) [new-table-name-bar])
+     [design-errors-panel (get-in @state/app-state [:table-viewer :design-errors])]
+     [design-column-grid fields selected-idx]
      [:div.design-lower-pane
       (if selected-field
         [editable-column-properties selected-idx selected-field]
@@ -327,6 +293,11 @@
 ;; CONTEXT MENU
 ;; ============================================================
 
+(defn- menu-action [label action-fn & [class]]
+  [(if class :div.menu-item.danger :div.menu-item)
+   {:on-click #(do (action-fn) (state-table/hide-table-context-menu!))}
+   label])
+
 (defn context-menu
   "Right-click context menu for datasheet"
   []
@@ -335,87 +306,68 @@
       [:div.context-menu
        {:style {:left (:x menu) :top (:y menu)}
         :on-mouse-leave #(state-table/hide-table-context-menu!)}
-       [:div.menu-item
-        {:on-click #(do (state-table/new-table-record!)
-                        (state-table/hide-table-context-menu!))}
-        "New Record"]
+       [menu-action "New Record" state-table/new-table-record!]
        [:div.menu-divider]
-       [:div.menu-item
-        {:on-click #(do (state-table/cut-table-cell!)
-                        (state-table/hide-table-context-menu!))}
-        "Cut"]
-       [:div.menu-item
-        {:on-click #(do (state-table/copy-table-cell!)
-                        (state-table/hide-table-context-menu!))}
-        "Copy"]
-       [:div.menu-item
-        {:on-click #(do (state-table/paste-table-cell!)
-                        (state-table/hide-table-context-menu!))}
-        "Paste"]
+       [menu-action "Cut" state-table/cut-table-cell!]
+       [menu-action "Copy" state-table/copy-table-cell!]
+       [menu-action "Paste" state-table/paste-table-cell!]
        [:div.menu-divider]
-       [:div.menu-item.danger
-        {:on-click #(do (when (js/confirm "Delete this record?")
-                          (state-table/delete-table-record!))
-                        (state-table/hide-table-context-menu!))}
-        "Delete Record"]])))
+       [menu-action "Delete Record"
+        #(when (js/confirm "Delete this record?") (state-table/delete-table-record!))
+        :danger]])))
 
 ;; ============================================================
 ;; DATASHEET VIEW - Editable grid of data
 ;; ============================================================
 
+(defn- cell-key-handler
+  "Handle keyboard events in an editing cell."
+  [e]
+  (case (.-key e)
+    "Enter" (do (state-table/save-table-cell! (.. e -target -value))
+                (state-table/stop-editing-cell!))
+    "Escape" (state-table/stop-editing-cell!)
+    "Tab" (do (.preventDefault e)
+              (state-table/save-table-cell! (.. e -target -value))
+              (state-table/stop-editing-cell!)
+              (state-table/move-to-next-cell! (.-shiftKey e)))
+    nil))
+
+(defn- editing-cell-input
+  "Render an input for an actively editing cell."
+  [value]
+  [:td.editing
+   [:input.cell-input
+    {:type "text" :auto-focus true
+     :default-value (if (nil? value) "" (str value))
+     :on-blur #(do (state-table/save-table-cell! (.. % -target -value))
+                   (state-table/stop-editing-cell!))
+     :on-key-down cell-key-handler}]])
+
+(defn- display-cell
+  "Render a read-only cell with selection and context menu support."
+  [row-idx col-name value is-selected]
+  (let [display-value (cond (nil? value) "" (boolean? value) (if value "Yes" "No") :else (str value))]
+    [:td {:class (str (when (nil? value) "null-value ") (when is-selected "selected"))
+          :on-click #(state-table/select-table-cell! row-idx col-name)
+          :on-double-click #(state-table/start-editing-cell! row-idx col-name)
+          :on-context-menu (fn [e]
+                             (.preventDefault e)
+                             (state-table/select-table-cell! row-idx col-name)
+                             (state-table/show-table-context-menu! (.-clientX e) (.-clientY e)))}
+     display-value]))
+
 (defn editable-cell
   "A cell that can be edited on double-click"
   [row-idx col-name value col-type]
-  (let [editing? (get-in @state/app-state [:table-viewer :editing])
-        is-editing (and editing?
-                        (= (:row editing?) row-idx)
-                        (= (:col editing?) col-name))]
-    (fn [row-idx col-name value col-type]
-      (let [editing? (get-in @state/app-state [:table-viewer :editing])
-            is-editing (and editing?
-                            (= (:row editing?) row-idx)
-                            (= (:col editing?) col-name))
-            selected (get-in @state/app-state [:table-viewer :selected])
-            is-selected (and selected
-                             (= (:row selected) row-idx)
-                             (= (:col selected) col-name))
-            display-value (cond
-                            (nil? value) ""
-                            (boolean? value) (if value "Yes" "No")
-                            :else (str value))]
-        (if is-editing
-          [:td.editing
-           [:input.cell-input
-            {:type "text"
-             :auto-focus true
-             :default-value (if (nil? value) "" (str value))
-             :on-blur (fn [e]
-                        (let [new-value (.. e -target -value)]
-                          (state-table/save-table-cell! new-value)
-                          (state-table/stop-editing-cell!)))
-             :on-key-down (fn [e]
-                            (case (.-key e)
-                              "Enter" (do
-                                        (let [new-value (.. e -target -value)]
-                                          (state-table/save-table-cell! new-value))
-                                        (state-table/stop-editing-cell!))
-                              "Escape" (state-table/stop-editing-cell!)
-                              "Tab" (do
-                                      (.preventDefault e)
-                                      (let [new-value (.. e -target -value)]
-                                        (state-table/save-table-cell! new-value))
-                                      (state-table/stop-editing-cell!)
-                                      (state-table/move-to-next-cell! (.-shiftKey e)))
-                              nil))}]]
-          [:td {:class (str (when (nil? value) "null-value ")
-                            (when is-selected "selected"))
-                :on-click #(state-table/select-table-cell! row-idx col-name)
-                :on-double-click #(state-table/start-editing-cell! row-idx col-name)
-                :on-context-menu (fn [e]
-                                   (.preventDefault e)
-                                   (state-table/select-table-cell! row-idx col-name)
-                                   (state-table/show-table-context-menu! (.-clientX e) (.-clientY e)))}
-           display-value])))))
+  (fn [row-idx col-name value col-type]
+    (let [editing? (get-in @state/app-state [:table-viewer :editing])
+          is-editing (and editing? (= (:row editing?) row-idx) (= (:col editing?) col-name))
+          selected (get-in @state/app-state [:table-viewer :selected])
+          is-selected (and selected (= (:row selected) row-idx) (= (:col selected) col-name))]
+      (if is-editing
+        [editing-cell-input value]
+        [display-cell row-idx col-name value is-selected]))))
 
 (defn data-row
   "Single row in the datasheet"
@@ -433,45 +385,33 @@
        ^{:key name}
        [editable-cell row-idx name (get record (keyword name)) type])]))
 
+(defn- datasheet-table
+  "Render the data table with header and rows."
+  [fields records]
+  [:div.datasheet-container
+   [:table.datasheet
+    [:thead
+     [:tr [:th.row-header "#"]
+      (for [{:keys [name]} fields]
+        ^{:key name} [:th name])]]
+    [:tbody
+     (if (seq records)
+       (map-indexed (fn [idx record] ^{:key idx} [data-row record fields idx]) records)
+       [:tr [:td {:col-span (inc (count fields))} "No records"]])]]])
+
 (defn datasheet-view
   "Datasheet view showing table data with editing"
   []
-  (let [table-info (get-in @state/app-state [:table-viewer :table-info])
-        fields (:fields table-info)
+  (let [fields (:fields (get-in @state/app-state [:table-viewer :table-info]))
         records (get-in @state/app-state [:table-viewer :records] [])
         loading? (get-in @state/app-state [:table-viewer :loading?])]
     [:div.table-datasheet-view
      {:on-click #(when (= (.-target %) (.-currentTarget %))
                    (state-table/hide-table-context-menu!))}
-     (cond
-       loading?
-       [:div.loading-data "Loading data..."]
-
-       (empty? fields)
-       [:div.no-columns "No columns defined"]
-
-       :else
-       [:div.datasheet-container
-        [:table.datasheet
-         [:thead
-          [:tr
-           [:th.row-header "#"]
-           (for [{:keys [name]} fields]
-             ^{:key name}
-             [:th name])]]
-         [:tbody
-          (if (seq records)
-            (map-indexed
-             (fn [idx record]
-               ^{:key idx}
-               [data-row record fields idx])
-             records)
-            [:tr [:td {:col-span (inc (count fields))} "No records"]])]]])
-
-     ;; Context menu
+     (cond loading? [:div.loading-data "Loading data..."]
+           (empty? fields) [:div.no-columns "No columns defined"]
+           :else [datasheet-table fields records])
      [context-menu]
-
-     ;; Record count
      [:div.record-count
       (str (count records) " record" (when (not= 1 (count records)) "s"))
       " \u00B7 Double-click to edit \u00B7 Right-click for menu"]]))
@@ -479,6 +419,43 @@
 ;; ============================================================
 ;; TOOLBAR
 ;; ============================================================
+
+(defn- toolbar-view-toggle
+  "View mode toggle buttons (Design / Datasheet)."
+  [view-mode new-table?]
+  (when-not new-table?
+    [:<>
+     [:button.toolbar-btn
+      {:class (when (= view-mode :design) "active")
+       :on-click #(state-table/set-table-view-mode! :design)} "Design"]
+     [:button.toolbar-btn
+      {:class (when (= view-mode :datasheet) "active")
+       :on-click #(state-table/set-table-view-mode! :datasheet)} "Datasheet"]]))
+
+(defn- toolbar-design-actions
+  "Design mode field actions (PK toggle, delete)."
+  [selected-idx]
+  [:<>
+   [:button.toolbar-btn
+    {:title "Toggle Primary Key"
+     :on-click #(state-table/toggle-design-pk! selected-idx)} "PK"]
+   [:button.toolbar-btn
+    {:title "Delete Field"
+     :on-click #(when (js/confirm "Delete this field?")
+                  (state-table/remove-design-field! selected-idx))} "Delete Field"]])
+
+(defn- toolbar-right-buttons
+  "Right side toolbar buttons based on view mode."
+  [view-mode dirty? new-table?]
+  (case view-mode
+    :design [:<>
+             [:button.secondary-btn {:disabled (not dirty?) :on-click #(state-table/revert-design!)} "Undo All"]
+             [:button.primary-btn {:disabled (not dirty?)
+                                   :on-click #(if new-table? (state-table/save-new-table!) (state-table/save-table-design!))} "Save"]]
+    :datasheet [:<>
+                [:button.primary-btn {:on-click #(state-table/new-table-record!)} "+ New"]
+                [:button.secondary-btn {:on-click #(state-table/refresh-table-data!)} "Refresh"]]
+    nil))
 
 (defn table-toolbar
   "Toolbar with view toggle, design actions, and new record button"
@@ -489,52 +466,11 @@
         selected-idx (get-in @state/app-state [:table-viewer :selected-field])]
     [:div.table-toolbar
      [:div.toolbar-left
-      (when-not new-table?
-        [:<>
-         [:button.toolbar-btn
-          {:class (when (= view-mode :design) "active")
-           :title "Design View"
-           :on-click #(state-table/set-table-view-mode! :design)}
-          "Design"]
-         [:button.toolbar-btn
-          {:class (when (= view-mode :datasheet) "active")
-           :title "Datasheet View"
-           :on-click #(state-table/set-table-view-mode! :datasheet)}
-          "Datasheet"]])
+      [toolbar-view-toggle view-mode new-table?]
       (when (and (= view-mode :design) (number? selected-idx))
-        [:<>
-         [:button.toolbar-btn
-          {:title "Toggle Primary Key"
-           :on-click #(state-table/toggle-design-pk! selected-idx)}
-          "PK"]
-         [:button.toolbar-btn
-          {:title "Delete Field"
-           :on-click #(when (js/confirm "Delete this field?")
-                        (state-table/remove-design-field! selected-idx))}
-          "Delete Field"]])]
+        [toolbar-design-actions selected-idx])]
      [:div.toolbar-right
-      (cond
-        (= view-mode :design)
-        [:<>
-         [:button.secondary-btn
-          {:disabled (not dirty?)
-           :on-click #(state-table/revert-design!)}
-          "Undo All"]
-         [:button.primary-btn
-          {:disabled (not dirty?)
-           :on-click #(if new-table?
-                        (state-table/save-new-table!)
-                        (state-table/save-table-design!))}
-          "Save"]]
-
-        (= view-mode :datasheet)
-        [:<>
-         [:button.primary-btn
-          {:on-click #(state-table/new-table-record!)}
-          "+ New"]
-         [:button.secondary-btn
-          {:on-click #(state-table/refresh-table-data!)}
-          "Refresh"]])]]))
+      [toolbar-right-buttons view-mode dirty? new-table?]]]))
 
 ;; ============================================================
 ;; MAIN COMPONENT

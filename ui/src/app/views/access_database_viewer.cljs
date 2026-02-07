@@ -42,80 +42,68 @@
    2 :vertical
    3 :both})
 
+(defn- control-base
+  "Build base control map with geometry, font, colors, data binding, caption."
+  [ctrl]
+  (cond-> {:type (keyword (:type ctrl))
+           :name (:name ctrl)
+           :x (twips->px (:left ctrl))
+           :y (twips->px (:top ctrl))
+           :width (twips->px (:width ctrl))
+           :height (twips->px (:height ctrl))}
+    (:fontName ctrl)      (assoc :font-name (:fontName ctrl))
+    (:fontSize ctrl)      (assoc :font-size (:fontSize ctrl))
+    (:fontBold ctrl)      (assoc :font-bold true)
+    (:fontItalic ctrl)    (assoc :font-italic true)
+    (:fontUnderline ctrl) (assoc :font-underline true)
+    (:foreColor ctrl)     (assoc :fore-color (access-color->hex (:foreColor ctrl)))
+    (:backColor ctrl)     (assoc :back-color (access-color->hex (:backColor ctrl)))
+    (:borderColor ctrl)   (assoc :border-color (access-color->hex (:borderColor ctrl)))
+    (:controlSource ctrl) (assoc :field (:controlSource ctrl))
+    (:caption ctrl)       (assoc :text (:caption ctrl))
+    (:format ctrl)        (assoc :format (:format ctrl))
+    (:tooltip ctrl)       (assoc :tooltip (:tooltip ctrl))
+    (:tag ctrl)           (assoc :tag (:tag ctrl))
+    (false? (:visible ctrl)) (assoc :visible false)))
+
+(defn- apply-form-control-props
+  "Apply form-specific properties to a base control map."
+  [base ctrl]
+  (cond-> base
+    (:defaultValue ctrl)   (assoc :default-value (:defaultValue ctrl))
+    (:inputMask ctrl)      (assoc :input-mask (:inputMask ctrl))
+    (:validationRule ctrl) (assoc :validation-rule (:validationRule ctrl))
+    (:validationText ctrl) (assoc :validation-text (:validationText ctrl))
+    (:tabIndex ctrl)       (assoc :tab-index (:tabIndex ctrl))
+    (:parentPage ctrl)     (assoc :parent-page (:parentPage ctrl))
+    (false? (:enabled ctrl)) (assoc :enabled false)
+    (:locked ctrl)           (assoc :locked true)
+    (:rowSource ctrl)    (assoc :row-source (:rowSource ctrl))
+    (:boundColumn ctrl)  (assoc :bound-column (:boundColumn ctrl))
+    (:columnCount ctrl)  (assoc :column-count (:columnCount ctrl))
+    (:columnWidths ctrl) (assoc :column-widths (:columnWidths ctrl))
+    (:limitToList ctrl)  (assoc :limit-to-list true)
+    (:sourceForm ctrl)      (assoc :source-form (:sourceForm ctrl))
+    (:linkChildFields ctrl) (assoc :link-child-fields [(:linkChildFields ctrl)])
+    (:linkMasterFields ctrl)(assoc :link-master-fields [(:linkMasterFields ctrl)])
+    (:pages ctrl)     (assoc :pages (:pages ctrl))
+    (:pageIndex ctrl) (assoc :page-index (:pageIndex ctrl))
+    (:picture ctrl)  (assoc :picture (:picture ctrl))
+    (:sizeMode ctrl) (assoc :size-mode (keyword (:sizeMode ctrl)))
+    (:hasClickEvent ctrl)        (assoc :has-click-event true)
+    (:hasDblClickEvent ctrl)     (assoc :has-dblclick-event true)
+    (:hasChangeEvent ctrl)       (assoc :has-change-event true)
+    (:hasEnterEvent ctrl)        (assoc :has-enter-event true)
+    (:hasExitEvent ctrl)         (assoc :has-exit-event true)
+    (:hasBeforeUpdateEvent ctrl) (assoc :has-before-update-event true)
+    (:hasAfterUpdateEvent ctrl)  (assoc :has-after-update-event true)
+    (:hasGotFocusEvent ctrl)     (assoc :has-gotfocus-event true)
+    (:hasLostFocusEvent ctrl)    (assoc :has-lostfocus-event true)))
+
 (defn convert-control
   "Convert a single Access control JSON object to PolyAccess format"
   [ctrl]
-  (let [base {:type (keyword (:type ctrl))
-              :name (:name ctrl)
-              :x (twips->px (:left ctrl))
-              :y (twips->px (:top ctrl))
-              :width (twips->px (:width ctrl))
-              :height (twips->px (:height ctrl))}]
-    (cond-> base
-      ;; Font
-      (:fontName ctrl)      (assoc :font-name (:fontName ctrl))
-      (:fontSize ctrl)      (assoc :font-size (:fontSize ctrl))
-      (:fontBold ctrl)      (assoc :font-bold true)
-      (:fontItalic ctrl)    (assoc :font-italic true)
-      (:fontUnderline ctrl) (assoc :font-underline true)
-
-      ;; Colors
-      (:foreColor ctrl)   (assoc :fore-color (access-color->hex (:foreColor ctrl)))
-      (:backColor ctrl)   (assoc :back-color (access-color->hex (:backColor ctrl)))
-      (:borderColor ctrl) (assoc :border-color (access-color->hex (:borderColor ctrl)))
-
-      ;; Data binding
-      (:controlSource ctrl) (assoc :field (:controlSource ctrl))
-
-      ;; Caption → text (PolyAccess convention)
-      (:caption ctrl) (assoc :text (:caption ctrl))
-
-      ;; Other properties
-      (:defaultValue ctrl)   (assoc :default-value (:defaultValue ctrl))
-      (:format ctrl)         (assoc :format (:format ctrl))
-      (:inputMask ctrl)      (assoc :input-mask (:inputMask ctrl))
-      (:validationRule ctrl) (assoc :validation-rule (:validationRule ctrl))
-      (:validationText ctrl) (assoc :validation-text (:validationText ctrl))
-      (:tooltip ctrl)        (assoc :tooltip (:tooltip ctrl))
-      (:tag ctrl)            (assoc :tag (:tag ctrl))
-      (:tabIndex ctrl)       (assoc :tab-index (:tabIndex ctrl))
-      (:parentPage ctrl)     (assoc :parent-page (:parentPage ctrl))
-
-      ;; States
-      (false? (:enabled ctrl)) (assoc :enabled false)
-      (:locked ctrl)           (assoc :locked true)
-      (false? (:visible ctrl)) (assoc :visible false)
-
-      ;; Combo/List box
-      (:rowSource ctrl)    (assoc :row-source (:rowSource ctrl))
-      (:boundColumn ctrl)  (assoc :bound-column (:boundColumn ctrl))
-      (:columnCount ctrl)  (assoc :column-count (:columnCount ctrl))
-      (:columnWidths ctrl) (assoc :column-widths (:columnWidths ctrl))
-      (:limitToList ctrl)  (assoc :limit-to-list true)
-
-      ;; Subform
-      (:sourceForm ctrl)      (assoc :source-form (:sourceForm ctrl))
-      (:linkChildFields ctrl) (assoc :link-child-fields [(:linkChildFields ctrl)])
-      (:linkMasterFields ctrl)(assoc :link-master-fields [(:linkMasterFields ctrl)])
-
-      ;; Tab control
-      (:pages ctrl)     (assoc :pages (:pages ctrl))
-      (:pageIndex ctrl) (assoc :page-index (:pageIndex ctrl))
-
-      ;; Image
-      (:picture ctrl)  (assoc :picture (:picture ctrl))
-      (:sizeMode ctrl) (assoc :size-mode (keyword (:sizeMode ctrl)))
-
-      ;; Events
-      (:hasClickEvent ctrl)        (assoc :has-click-event true)
-      (:hasDblClickEvent ctrl)     (assoc :has-dblclick-event true)
-      (:hasChangeEvent ctrl)       (assoc :has-change-event true)
-      (:hasEnterEvent ctrl)        (assoc :has-enter-event true)
-      (:hasExitEvent ctrl)         (assoc :has-exit-event true)
-      (:hasBeforeUpdateEvent ctrl) (assoc :has-before-update-event true)
-      (:hasAfterUpdateEvent ctrl)  (assoc :has-after-update-event true)
-      (:hasGotFocusEvent ctrl)     (assoc :has-gotfocus-event true)
-      (:hasLostFocusEvent ctrl)    (assoc :has-lostfocus-event true))))
+  (apply-form-control-props (control-base ctrl) ctrl))
 
 (defn extract-record-source
   "Extract table name from record source (may be a SELECT query)"
@@ -153,62 +141,21 @@
 (defn convert-report-control
   "Convert a single Access report control JSON object to PolyAccess format"
   [ctrl]
-  (let [base {:type (keyword (:type ctrl))
-              :name (:name ctrl)
-              :x (twips->px (:left ctrl))
-              :y (twips->px (:top ctrl))
-              :width (twips->px (:width ctrl))
-              :height (twips->px (:height ctrl))}]
-    (cond-> base
-      ;; Font
-      (:fontName ctrl)      (assoc :font-name (:fontName ctrl))
-      (:fontSize ctrl)      (assoc :font-size (:fontSize ctrl))
-      (:fontBold ctrl)      (assoc :font-bold true)
-      (:fontItalic ctrl)    (assoc :font-italic true)
-      (:fontUnderline ctrl) (assoc :font-underline true)
-
-      ;; Colors
-      (:foreColor ctrl)   (assoc :fore-color (access-color->hex (:foreColor ctrl)))
-      (:backColor ctrl)   (assoc :back-color (access-color->hex (:backColor ctrl)))
-      (:borderColor ctrl) (assoc :border-color (access-color->hex (:borderColor ctrl)))
-
-      ;; Data binding
-      (:controlSource ctrl) (assoc :field (:controlSource ctrl))
-
-      ;; Caption -> text (PolyAccess convention)
-      (:caption ctrl) (assoc :text (:caption ctrl))
-
-      ;; Format
-      (:format ctrl) (assoc :format (:format ctrl))
-
-      ;; Tooltip / Tag
-      (:tooltip ctrl) (assoc :tooltip (:tooltip ctrl))
-      (:tag ctrl)     (assoc :tag (:tag ctrl))
-
-      ;; Visibility
-      (false? (:visible ctrl)) (assoc :visible false)
-
-      ;; Report-specific control properties
-      (:runningSum ctrl)    (assoc :running-sum (get running-sum-map (:runningSum ctrl)))
-      (:canGrow ctrl)       (assoc :can-grow true)
-      (:canShrink ctrl)     (assoc :can-shrink true)
-      (:hideDuplicates ctrl)(assoc :hide-duplicates true)
-
-      ;; Subreport
-      (:sourceReport ctrl)     (assoc :source-report (:sourceReport ctrl))
-      (:linkChildFields ctrl)  (assoc :link-child-fields [(:linkChildFields ctrl)])
-      (:linkMasterFields ctrl) (assoc :link-master-fields [(:linkMasterFields ctrl)])
-
-      ;; Combo/List box
-      (:rowSource ctrl)    (assoc :row-source (:rowSource ctrl))
-      (:boundColumn ctrl)  (assoc :bound-column (:boundColumn ctrl))
-      (:columnCount ctrl)  (assoc :column-count (:columnCount ctrl))
-      (:columnWidths ctrl) (assoc :column-widths (:columnWidths ctrl))
-
-      ;; Events
-      (:hasFormatEvent ctrl) (assoc :has-format-event true)
-      (:hasPrintEvent ctrl)  (assoc :has-print-event true)
-      (:hasClickEvent ctrl)  (assoc :has-click-event true))))
+  (cond-> (control-base ctrl)
+    (:runningSum ctrl)    (assoc :running-sum (get running-sum-map (:runningSum ctrl)))
+    (:canGrow ctrl)       (assoc :can-grow true)
+    (:canShrink ctrl)     (assoc :can-shrink true)
+    (:hideDuplicates ctrl)(assoc :hide-duplicates true)
+    (:sourceReport ctrl)     (assoc :source-report (:sourceReport ctrl))
+    (:linkChildFields ctrl)  (assoc :link-child-fields [(:linkChildFields ctrl)])
+    (:linkMasterFields ctrl) (assoc :link-master-fields [(:linkMasterFields ctrl)])
+    (:rowSource ctrl)    (assoc :row-source (:rowSource ctrl))
+    (:boundColumn ctrl)  (assoc :bound-column (:boundColumn ctrl))
+    (:columnCount ctrl)  (assoc :column-count (:columnCount ctrl))
+    (:columnWidths ctrl) (assoc :column-widths (:columnWidths ctrl))
+    (:hasFormatEvent ctrl) (assoc :has-format-event true)
+    (:hasPrintEvent ctrl)  (assoc :has-print-event true)
+    (:hasClickEvent ctrl)  (assoc :has-click-event true)))
 
 (defn convert-report-section
   "Convert a report section JSON object to PolyAccess format"
@@ -230,48 +177,46 @@
       (:hasPrintEvent section)   (assoc :has-print-event true)
       (:hasRetreatEvent section) (assoc :has-retreat-event true))))
 
+(defn- convert-grouping
+  "Convert Access grouping array to PolyAccess format."
+  [grouping-data]
+  (mapv (fn [grp]
+          {:field (:field grp)
+           :group-header (boolean (:groupHeader grp))
+           :group-footer (boolean (:groupFooter grp))
+           :sort-order (if (= (:sortOrder grp) 1) "descending" "ascending")
+           :group-on (get group-on-map (:groupOn grp) :each-value)
+           :group-interval (or (:groupInterval grp) 1)
+           :keep-together (get keep-together-map (:keepTogether grp) :none)})
+        (or grouping-data [])))
+
+(defn- build-report-base
+  "Build base report definition with standard sections."
+  [report-data section-map]
+  (let [empty-section {:height 0 :controls []}]
+    {:name (:name report-data)
+     :record-source (extract-record-source (:recordSource report-data))
+     :report-width (twips->px (:reportWidth report-data))
+     :page-header-option (or (:pageHeader report-data) 0)
+     :page-footer-option (or (:pageFooter report-data) 0)
+     :grouping (convert-grouping (:grouping report-data))
+     :report-header (get section-map :report-header empty-section)
+     :page-header (get section-map :page-header empty-section)
+     :detail (get section-map :detail empty-section)
+     :page-footer (get section-map :page-footer empty-section)
+     :report-footer (get section-map :report-footer empty-section)}))
+
 (defn convert-access-report
   "Convert Access report JSON metadata to PolyAccess report definition"
   [report-data]
-  (let [sections (or (:sections report-data) [])
-        ;; Build a map of section-name -> converted section
-        section-map (into {} (map (fn [sec]
+  (let [section-map (into {} (map (fn [sec]
                                     [(keyword (:name sec))
                                      (convert-report-section sec)])
-                                  sections))
-        record-source (extract-record-source (:recordSource report-data))
-        ;; Convert grouping array
-        grouping (mapv (fn [grp]
-                         (cond-> {:field (:field grp)
-                                  :group-header (boolean (:groupHeader grp))
-                                  :group-footer (boolean (:groupFooter grp))
-                                  :sort-order (if (= (:sortOrder grp) 1) "descending" "ascending")
-                                  :group-on (get group-on-map (:groupOn grp) :each-value)
-                                  :group-interval (or (:groupInterval grp) 1)
-                                  :keep-together (get keep-together-map (:keepTogether grp) :none)}))
-                       (or (:grouping report-data) []))]
-    (cond-> {:name (:name report-data)
-             :record-source record-source
-             :report-width (twips->px (:reportWidth report-data))
-             :page-header-option (or (:pageHeader report-data) 0)
-             :page-footer-option (or (:pageFooter report-data) 0)
-             :grouping grouping
-             ;; Standard sections (use empty defaults if missing)
-             :report-header (get section-map :report-header {:height 0 :controls []})
-             :page-header (get section-map :page-header {:height 0 :controls []})
-             :detail (get section-map :detail {:height 0 :controls []})
-             :page-footer (get section-map :page-footer {:height 0 :controls []})
-             :report-footer (get section-map :report-footer {:height 0 :controls []})}
-
-      ;; Caption
-      (:caption report-data) (assoc :caption (:caption report-data))
-
-      ;; Group header/footer sections (dynamic keys)
-      ;; Merge in any group-header-N / group-footer-N sections
-      (seq (filter #(re-find #"^group-" (name (key %))) section-map))
-      (merge (into {} (filter #(re-find #"^group-" (name (key %))) section-map)))
-
-      ;; Report-level events
+                                  (or (:sections report-data) [])))
+        group-sections (into {} (filter #(re-find #"^group-" (name (key %))) section-map))]
+    (cond-> (build-report-base report-data section-map)
+      (:caption report-data)            (assoc :caption (:caption report-data))
+      (seq group-sections)              (merge group-sections)
       (:hasOpenEvent report-data)       (assoc :has-open-event true)
       (:hasCloseEvent report-data)      (assoc :has-close-event true)
       (:hasActivateEvent report-data)   (assoc :has-activate-event true)
@@ -282,59 +227,43 @@
 
 ;; ============================================================
 
+(defn- build-form-sections
+  "Build header/detail/footer sections from Access form data."
+  [form-data]
+  (let [by-section (group-by #(or (:section %) 0) (or (:controls form-data) []))
+        sections (or (:sections form-data) {})]
+    {:header {:height (twips->px (:headerHeight sections))
+              :controls (mapv convert-control (get by-section 1 []))}
+     :detail {:height (twips->px (:detailHeight sections))
+              :controls (mapv convert-control (get by-section 0 []))}
+     :footer {:height (twips->px (:footerHeight sections))
+              :controls (mapv convert-control (get by-section 2 []))}}))
+
+(defn- bool->int [v] (if (false? v) 0 1))
+
 (defn convert-access-form
   "Convert Access form JSON metadata to PolyAccess form definition"
   [form-data]
-  (let [controls (or (:controls form-data) [])
-        ;; Group controls by section (0=detail, 1=header, 2=footer)
-        by-section (group-by #(or (:section %) 0) controls)
-        header-ctrls (mapv convert-control (get by-section 1 []))
-        detail-ctrls (mapv convert-control (get by-section 0 []))
-        footer-ctrls (mapv convert-control (get by-section 2 []))
-        sections (or (:sections form-data) {})
-        record-source (extract-record-source (:recordSource form-data))]
-    (cond-> {:name (:name form-data)
-             :record-source record-source
-             :default-view (get default-view-map (:defaultView form-data) "Single Form")
-             :form-width (twips->px (:formWidth form-data))
-             :header {:height (twips->px (:headerHeight sections))
-                      :controls header-ctrls}
-             :detail {:height (twips->px (:detailHeight sections))
-                      :controls detail-ctrls}
-             :footer {:height (twips->px (:footerHeight sections))
-                      :controls footer-ctrls}
-             :navigation-buttons (if (false? (:navigationButtons form-data)) 0 1)
-             :record-selectors (if (false? (:recordSelectors form-data)) 0 1)
-             :allow-additions (if (false? (:allowAdditions form-data)) 0 1)
-             :allow-deletions (if (false? (:allowDeletions form-data)) 0 1)
-             :allow-edits (if (false? (:allowEdits form-data)) 0 1)
-             :dividing-lines (if (false? (:dividingLines form-data)) 0 1)}
-
-      ;; Caption
+  (let [sections (build-form-sections form-data)]
+    (cond-> (merge {:name (:name form-data)
+                    :record-source (extract-record-source (:recordSource form-data))
+                    :default-view (get default-view-map (:defaultView form-data) "Single Form")
+                    :form-width (twips->px (:formWidth form-data))
+                    :navigation-buttons (bool->int (:navigationButtons form-data))
+                    :record-selectors (bool->int (:recordSelectors form-data))
+                    :allow-additions (bool->int (:allowAdditions form-data))
+                    :allow-deletions (bool->int (:allowDeletions form-data))
+                    :allow-edits (bool->int (:allowEdits form-data))
+                    :dividing-lines (bool->int (:dividingLines form-data))}
+                   sections)
       (:caption form-data) (assoc :text (:caption form-data))
-
-      ;; Filter (only if FilterOn is true)
-      (and (:filter form-data) (:filterOn form-data))
-      (assoc :filter (:filter form-data))
-
-      ;; Order By (only if OrderByOn is true)
-      (and (:orderBy form-data) (:orderByOn form-data))
-      (assoc :order-by (:orderBy form-data))
-
-      ;; Scroll bars
+      (and (:filter form-data) (:filterOn form-data)) (assoc :filter (:filter form-data))
+      (and (:orderBy form-data) (:orderByOn form-data)) (assoc :order-by (:orderBy form-data))
       (:scrollBars form-data) (assoc :scroll-bars (get scroll-bars-map (:scrollBars form-data) :both))
-
-      ;; Popup / Modal
       (:popup form-data) (assoc :popup 1)
       (:modal form-data) (assoc :modal 1)
-
-      ;; Data entry
       (:dataEntry form-data) (assoc :data-entry 1)
-
-      ;; Background color
       (:backColor form-data) (assoc :back-color (access-color->hex (:backColor form-data)))
-
-      ;; Events
       (:hasLoadEvent form-data)         (assoc :has-load-event true)
       (:hasOpenEvent form-data)         (assoc :has-open-event true)
       (:hasCloseEvent form-data)        (assoc :has-close-event true)
@@ -392,54 +321,25 @@
             (load-access-database-contents! loaded_path))
           (println "Import state restored:" loaded_path))))))
 
+(defn- fetch-existing-names!
+  "Fetch object names from an API endpoint and store in target-existing."
+  [headers endpoint body-key obj-type extract-fn]
+  (go
+    (let [response (<! (http/get (str api-base endpoint) {:headers headers}))]
+      (when (:success response)
+        (let [names (set (extract-fn (get-in response [:body body-key] [])))]
+          (swap! viewer-state assoc-in [:target-existing obj-type] names))))))
+
 (defn load-target-existing!
   "Load existing object names from the target database to flag already-imported items"
   [database-id]
   (when database-id
     (let [headers {"X-Database-ID" database-id}]
-      ;; Load forms (API returns plain strings, not objects)
-      (go
-        (let [response (<! (http/get (str api-base "/api/forms")
-                                     {:headers headers}))]
-          (when (:success response)
-            (let [names (set (get-in response [:body :forms] []))]
-              (swap! viewer-state assoc-in [:target-existing :forms] names)))))
-      ;; Load tables
-      (go
-        (let [response (<! (http/get (str api-base "/api/tables")
-                                     {:headers headers}))]
-          (when (:success response)
-            (let [names (->> (get-in response [:body :tables] [])
-                             (map :name)
-                             set)]
-              (swap! viewer-state assoc-in [:target-existing :tables] names)))))
-      ;; Load queries
-      (go
-        (let [response (<! (http/get (str api-base "/api/queries")
-                                     {:headers headers}))]
-          (when (:success response)
-            (let [names (->> (get-in response [:body :queries] [])
-                             (map :name)
-                             set)]
-              (swap! viewer-state assoc-in [:target-existing :queries] names)))))
-      ;; Load functions/modules
-      (go
-        (let [response (<! (http/get (str api-base "/api/functions")
-                                     {:headers headers}))]
-          (when (:success response)
-            (let [names (->> (get-in response [:body :functions] [])
-                             (map :name)
-                             set)]
-              (swap! viewer-state assoc-in [:target-existing :modules] names)))))
-      ;; Load reports
-      (go
-        (let [response (<! (http/get (str api-base "/api/reports")
-                                     {:headers headers}))]
-          (when (:success response)
-            (let [names (->> (get-in response [:body :reports] [])
-                             (map :name)
-                             set)]
-              (swap! viewer-state assoc-in [:target-existing :reports] names))))))))
+      (fetch-existing-names! headers "/api/forms" :forms :forms identity)
+      (fetch-existing-names! headers "/api/tables" :tables :tables #(map :name %))
+      (fetch-existing-names! headers "/api/queries" :queries :queries #(map :name %))
+      (fetch-existing-names! headers "/api/functions" :functions :modules #(map :name %))
+      (fetch-existing-names! headers "/api/reports" :reports :reports identity))))
 
 (defn load-import-history!
   "Load import history for the current Access database"
@@ -609,41 +509,36 @@
         names (get-in @viewer-state [:target-existing obj-type] #{})]
     (set (map clojure.string/lower-case names))))
 
+(defn- render-import-item
+  "Render a single item in the import object list."
+  [item object-type selected already-imported]
+  (let [item-name (get-item-name item)
+        item-detail (get-item-detail object-type item)
+        imported? (contains? already-imported (clojure.string/lower-case item-name))]
+    ^{:key item-name}
+    [:li.import-item
+     {:class (str (when (contains? selected item-name) "selected")
+                  (when imported? " imported"))
+      :on-click #(toggle-selection! item-name)}
+     [:input {:type "checkbox"
+              :checked (contains? selected item-name)
+              :on-click #(.stopPropagation %)
+              :on-change #(toggle-selection! item-name)}]
+     [:span.item-name item-name]
+     (when imported? [:span.imported-badge "imported"])
+     (when item-detail [:span.item-detail item-detail])]))
+
 (defn object-list []
-  (let [{:keys [object-type forms reports tables queries modules selected loading?]} @viewer-state
-        items (case object-type
-                :forms forms
-                :reports reports
-                :tables tables
-                :queries queries
-                :modules modules
-                [])
+  (let [{:keys [object-type selected loading?]} @viewer-state
+        items (get @viewer-state object-type [])
         already-imported (imported-names)]
     [:div.access-object-list
-     (if loading?
-       [:div.loading "Loading..."]
-       (if (empty? items)
-         [:div.empty-list (str "No " (name object-type) " found")]
-         [:ul.import-list
-          (for [item items]
-            (let [item-name (get-item-name item)
-                  item-detail (get-item-detail object-type item)
-                  imported? (contains? already-imported (clojure.string/lower-case item-name))]
-              ^{:key item-name}
-              [:li.import-item
-               {:class (str (when (contains? selected item-name) "selected")
-                            (when imported? " imported"))
-                :on-click #(toggle-selection! item-name)}
-               [:input {:type "checkbox"
-                        :checked (contains? selected item-name)
-                        :on-click #(.stopPropagation %)
-                        :on-change #(toggle-selection! item-name)}]
-               [:span.item-name item-name]
-               (when imported?
-                 [:span.imported-badge "imported"])
-               (when item-detail
-                 [:span.item-detail item-detail])]))]))]))
-
+     (cond
+       loading? [:div.loading "Loading..."]
+       (empty? items) [:div.empty-list (str "No " (name object-type) " found")]
+       :else [:ul.import-list
+              (for [item items]
+                [render-import-item item object-type selected already-imported])])]))
 (defn format-timestamp [ts]
   (when ts
     (let [d (js/Date. ts)]
@@ -710,10 +605,29 @@
          {:on-click #(import-selected! access-db-path target-database-id)}
          (str "Import " (count selected) " " (name object-type))])]]))
 
+(defn- viewer-loaded-content
+  "Render the main viewer content when a database is loaded."
+  [loaded-path error loading?]
+  (let [access-db (first (filter #(= (:path %) loaded-path)
+                                  (get-in @state/app-state [:objects :access_databases])))]
+    [:<>
+     [:div.viewer-header
+      [:div.viewer-header-top
+       [:div
+        [:h2 (or (:name access-db) (some-> loaded-path (.split "\\") last))]
+        [:div.db-path loaded-path]]
+       [target-database-selector]]]
+     [:div.viewer-body
+      [:div.viewer-main
+       (cond
+         error [:div.error-message error]
+         loading? [:div.loading-spinner "Loading..."]
+         :else [:<> [object-type-dropdown] [toolbar loaded-path] [object-list]])]
+      [:div.viewer-sidebar [import-log-panel]]]]))
+
 (defn access-database-viewer
   "Main viewer component for an Access database"
   []
-  ;; Restore saved import state on first mount if nothing is loaded
   (let [restored? (r/atom false)]
     (r/create-class
      {:component-did-mount
@@ -723,39 +637,10 @@
           (restore-import-state!)))
       :reagent-render
       (fn []
-        (let [{:keys [loading? error loaded-path]} @viewer-state
-              access-db (when loaded-path
-                          (first (filter #(= (:path %) loaded-path)
-                                         (get-in @state/app-state [:objects :access_databases]))))]
-
+        (let [{:keys [loading? error loaded-path]} @viewer-state]
           [:div.access-database-viewer
-     (if-not loaded-path
-       [:div.welcome-panel
-        [:h2 "Access Database Import"]
-        [:p "Select a database from the sidebar, or click Scan to find .accdb files."]]
-
-       [:<>
-        [:div.viewer-header
-         [:div.viewer-header-top
-          [:div
-           [:h2 (or (:name access-db) (some-> loaded-path (.split "\\") last))]
-           [:div.db-path loaded-path]]
-          [target-database-selector]]]
-
-        [:div.viewer-body
-         [:div.viewer-main
-          (cond
-            error
-            [:div.error-message error]
-
-            loading?
-            [:div.loading-spinner "Loading..."]
-
-            :else
-            [:<>
-             [object-type-dropdown]
-             [toolbar loaded-path]
-             [object-list]])]
-
-         [:div.viewer-sidebar
-          [import-log-panel]]]])]))})))
+           (if-not loaded-path
+             [:div.welcome-panel
+              [:h2 "Access Database Import"]
+              [:p "Select a database from the sidebar, or click Scan to find .accdb files."]]
+             [viewer-loaded-content loaded-path error loading?])]))})))

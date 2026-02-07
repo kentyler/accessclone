@@ -46,7 +46,7 @@ const pool = new Pool({
 });
 
 // Initialize databases router first to get currentDatabaseId getter
-const databasesRouter = databasesRoutes(pool, (source, msg, err) => logError(pool, source, msg, err));
+const databasesRouter = databasesRoutes(pool);
 
 // Test database connection and initialize on startup
 pool.query('SELECT NOW()')
@@ -151,7 +151,7 @@ app.use('/api/events', eventsRoutes(pool, logEvent));
 app.use('/api/chat', chatRoutes(pool, secrets));
 app.use('/api/forms', formsRoutes(pool));
 app.use('/api/reports', reportsRoutes(pool));
-app.use('/api/config', configRoutes(SETTINGS_DIR));
+app.use('/api/config', configRoutes(SETTINGS_DIR, pool));
 app.use('/api/lint', lintRoutes(pool, secrets));
 app.use('/api/graph', graphRoutes(pool));
 app.use('/api/access-import', accessImportRoutes(pool));

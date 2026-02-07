@@ -5,6 +5,7 @@
 
 const express = require('express');
 const router = express.Router();
+const { logError } = require('../lib/events');
 
 const {
   findNode,
@@ -49,6 +50,7 @@ module.exports = function(pool) {
       res.json(node);
     } catch (err) {
       console.error('Error getting node:', err);
+      logError(pool, 'GET /api/graph/node/:id', 'Failed to get node', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });
@@ -68,6 +70,7 @@ module.exports = function(pool) {
       res.json({ nodes });
     } catch (err) {
       console.error('Error querying nodes:', err);
+      logError(pool, 'GET /api/graph/nodes', 'Failed to query nodes', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });
@@ -90,6 +93,7 @@ module.exports = function(pool) {
       res.json(node);
     } catch (err) {
       console.error('Error finding node:', err);
+      logError(pool, 'GET /api/graph/find', 'Failed to find node', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });
@@ -105,6 +109,7 @@ module.exports = function(pool) {
       res.json(node);
     } catch (err) {
       console.error('Error creating node:', err);
+      logError(pool, 'POST /api/graph/node', 'Failed to create node', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });
@@ -119,6 +124,7 @@ module.exports = function(pool) {
       res.json({ success: deleted });
     } catch (err) {
       console.error('Error deleting node:', err);
+      logError(pool, 'DELETE /api/graph/node/:id', 'Failed to delete node', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });
@@ -135,6 +141,7 @@ module.exports = function(pool) {
       res.json({ edges });
     } catch (err) {
       console.error('Error getting edges:', err);
+      logError(pool, 'GET /api/graph/edges/:nodeId', 'Failed to get edges', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });
@@ -150,6 +157,7 @@ module.exports = function(pool) {
       res.json(edge);
     } catch (err) {
       console.error('Error creating edge:', err);
+      logError(pool, 'POST /api/graph/edge', 'Failed to create edge', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });
@@ -169,6 +177,7 @@ module.exports = function(pool) {
       res.json({ success: deleted });
     } catch (err) {
       console.error('Error deleting edge:', err);
+      logError(pool, 'DELETE /api/graph/edge', 'Failed to delete edge', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });
@@ -188,6 +197,7 @@ module.exports = function(pool) {
       res.json({ dependencies: deps });
     } catch (err) {
       console.error('Error traversing dependencies:', err);
+      logError(pool, 'GET /api/graph/dependencies/:nodeId', 'Failed to traverse dependencies', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });
@@ -203,6 +213,7 @@ module.exports = function(pool) {
       res.json({ prose });
     } catch (err) {
       console.error('Error rendering dependencies:', err);
+      logError(pool, 'GET /api/graph/dependencies/:nodeId/prose', 'Failed to render dependencies', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });
@@ -217,6 +228,7 @@ module.exports = function(pool) {
       res.json({ intents });
     } catch (err) {
       console.error('Error getting intents:', err);
+      logError(pool, 'GET /api/graph/intents', 'Failed to get intents', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });
@@ -231,6 +243,7 @@ module.exports = function(pool) {
       res.json({ prose });
     } catch (err) {
       console.error('Error rendering intents:', err);
+      logError(pool, 'GET /api/graph/intents/prose', 'Failed to render intents', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });
@@ -245,6 +258,7 @@ module.exports = function(pool) {
       res.json({ prose });
     } catch (err) {
       console.error('Error getting structures for intent:', err);
+      logError(pool, 'GET /api/graph/intent/:id/structures', 'Failed to get structures for intent', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });
@@ -259,6 +273,7 @@ module.exports = function(pool) {
       res.json({ prose });
     } catch (err) {
       console.error('Error getting intents for structure:', err);
+      logError(pool, 'GET /api/graph/structure/:id/intents', 'Failed to get intents for structure', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });
@@ -278,6 +293,7 @@ module.exports = function(pool) {
       res.json(result);
     } catch (err) {
       console.error('Error creating intent:', err);
+      logError(pool, 'POST /api/graph/intent', 'Failed to create intent', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });
@@ -294,6 +310,7 @@ module.exports = function(pool) {
       res.json({ success: confirmed });
     } catch (err) {
       console.error('Error confirming intent:', err);
+      logError(pool, 'POST /api/graph/intent/confirm', 'Failed to confirm intent', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });
@@ -308,6 +325,7 @@ module.exports = function(pool) {
       res.json({ prose });
     } catch (err) {
       console.error('Error getting database overview:', err);
+      logError(pool, 'GET /api/graph/database/:databaseId/overview', 'Failed to get database overview', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });
@@ -327,6 +345,7 @@ module.exports = function(pool) {
       res.json({ prose });
     } catch (err) {
       console.error('Error getting impact analysis:', err);
+      logError(pool, 'GET /api/graph/impact', 'Failed to get impact analysis', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });
@@ -341,6 +360,7 @@ module.exports = function(pool) {
       res.json({ success: true, stats });
     } catch (err) {
       console.error('Error populating graph:', err);
+      logError(pool, 'POST /api/graph/populate', 'Failed to populate graph', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });
@@ -355,6 +375,7 @@ module.exports = function(pool) {
       res.json({ success: true });
     } catch (err) {
       console.error('Error clearing graph:', err);
+      logError(pool, 'POST /api/graph/clear', 'Failed to clear graph', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });

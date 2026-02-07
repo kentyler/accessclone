@@ -551,7 +551,8 @@
     (println "Calling session function:" function-name)
     (let [session-resp (<! (http/post (str api-base "/api/session")))]
       (if-not (:success session-resp)
-        (println "Error creating session:" (:body session-resp))
+        (do (println "Error creating session:" (:body session-resp))
+            (log-event! "error" "Failed to create session" "call-session-function" {:response (:body session-resp)}))
         (let [session-id (get-in session-resp [:body :sessionId])
               state-vars (build-session-state-vars
                            (get-in @app-state [:form-editor :current-record] {}))]
@@ -561,9 +562,10 @@
           (let [func-resp (<! (http/post (str api-base "/api/session/function/" function-name)
                                          {:json-params {:sessionId session-id}}))]
             (if-not (:success func-resp)
-              (js/alert (str "Error calling " function-name ": "
-                             (get-in func-resp [:body :details]
-                                     (get-in func-resp [:body :error] "Unknown error"))))
+              (do (log-event! "error" (str "Failed to call function: " function-name) "call-session-function" {:response (:body func-resp)})
+                  (js/alert (str "Error calling " function-name ": "
+                                 (get-in func-resp [:body :details]
+                                         (get-in func-resp [:body :error] "Unknown error")))))
               (do
                 (<! (handle-session-response! (:body func-resp) session-id))
                 (when on-complete (on-complete (:body func-resp))))))
@@ -610,7 +612,8 @@
           (when (seq data)
             (swap! app-state assoc-in [:form-editor :current-record] (first data)))
           (fire-form-event! :on-load))
-        (println "Error loading data:" (:body response))))))
+        (do (println "Error loading data:" (:body response))
+            (log-error! "Failed to load form records" "load-form-records" {:response (:body response)}))))))
 
 (defn set-view-mode! [mode]
   "Set form view mode - :design or :view"
@@ -697,7 +700,8 @@
           (swap! app-state assoc-in [:form-editor :records (dec pos)] new-record)
           (swap! app-state assoc-in [:form-editor :current-record] new-record)
           (swap! app-state assoc-in [:form-editor :record-dirty?] false))
-        (println "Error inserting record:" (:body response))))))
+        (do (println "Error inserting record:" (:body response))
+            (log-error! "Failed to insert record" "save-record" {:response (:body response)}))))))
 
 (defn- do-update-record!
   "Update an existing record via API and update state."
@@ -712,7 +716,8 @@
           (swap! app-state assoc-in [:form-editor :records (dec pos)] updated-record)
           (swap! app-state assoc-in [:form-editor :current-record] updated-record)
           (swap! app-state assoc-in [:form-editor :record-dirty?] false))
-        (println "Error updating record:" (:body response))))))
+        (do (println "Error updating record:" (:body response))
+            (log-error! "Failed to update record" "save-record" {:response (:body response)}))))))
 
 (defn- check-no-pk?
   "Return true if table has no detectable PK and record isn't explicitly new."
@@ -792,7 +797,8 @@
                 (do (update-state-after-delete!
                       (vec (concat (subvec records 0 (dec pos)) (subvec records pos))) pos)
                     (println "Record deleted successfully"))
-                (println "Error deleting record:" (:body response))))))))))
+                (do (println "Error deleting record:" (:body response))
+                    (log-error! "Failed to delete record" "delete-record" {:response (:body response)}))))))))))
 (defn get-record-source-fields
   "Get fields for a record source (table or query)"
   [record-source]
@@ -894,6 +900,7 @@
                      (:body response))
               (do
                 (println "Error fetching subform definition:" source-form-name)
+                (log-event! "error" (str "Failed to fetch subform definition: " source-form-name) "fetch-subform-definition")
                 (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :definition]
                        {:error true})))))))))
 
@@ -927,6 +934,7 @@
                        (vec data)))
               (do
                 (println "Error fetching subform records:" source-form-name (:body response))
+                (log-event! "error" (str "Failed to fetch subform records: " source-form-name) "fetch-subform-records" {:response (:body response)})
                 (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :records]
                        [])))))))))
 
@@ -954,6 +962,7 @@
                                            :headers (db-headers)}))]
               (when-not (:success response)
                 (println "Error saving subform cell:" (:body response))
+                (log-event! "error" "Failed to save subform cell" "save-subform-cell" {:response (:body response)})
                 ;; Clear filter-key to force re-fetch
                 (swap! app-state assoc-in (conj cache-path :filter-key) nil)))))))))
 
@@ -983,7 +992,8 @@
                 (println "Subform record created")
                 ;; Clear filter-key to force re-fetch
                 (swap! app-state assoc-in (conj cache-path :filter-key) nil))
-              (println "Error creating subform record:" (:body response)))))))))
+              (do (println "Error creating subform record:" (:body response))
+                  (log-event! "error" "Failed to create subform record" "new-subform-record" {:response (:body response)})))))))))
 
 (defn delete-subform-record!
   "Delete a child record from a subform by row index."
@@ -1008,7 +1018,8 @@
                   (println "Subform record deleted")
                   ;; Clear filter-key to force re-fetch
                   (swap! app-state assoc-in (conj cache-path :filter-key) nil))
-                (println "Error deleting subform record:" (:body response))))))))))
+                (do (println "Error deleting subform record:" (:body response))
+                    (log-event! "error" "Failed to delete subform record" "delete-subform-record" {:response (:body response)}))))))))))
 
 (def ^:private yes-no-form-props
   "Form properties that use yes/no (1/0) values."
@@ -1142,7 +1153,8 @@
                               (assoc % :definition definition) %)
                            forms)))
             (setup-form-editor! (:id form) definition))
-          (println "Error loading form:" (:filename form)))))))
+          (do (println "Error loading form:" (:filename form))
+              (log-error! (str "Failed to load form: " (:filename form)) "load-form-for-editing" {:form (:filename form)})))))))
 
 (defn select-control! [idx]
   (swap! app-state assoc-in [:form-editor :selected-control] idx))
@@ -1264,7 +1276,9 @@
               (let [data (get-in response [:body :data])]
                 (println "Report preview: loaded" (count data) "records from" record-source)
                 (swap! app-state assoc-in [:report-editor :records] (vec data)))
-              (println "Error loading report data:" (:body response)))))))))
+              (do (println "Error loading report data:" (:body response))
+                  (log-error! "Failed to load report preview data" "set-report-view-mode" {:response (:body response)})))))))))
+
 
 (defn get-report-view-mode []
   (get-in @app-state [:report-editor :view-mode] :design))
@@ -1334,7 +1348,8 @@
                               (assoc % :definition definition) %)
                            reports)))
             (setup-report-editor! (:id report) definition))
-          (println "Error loading report:" (:filename report)))))))
+          (do (println "Error loading report:" (:filename report))
+              (log-error! (str "Failed to load report: " (:filename report)) "load-report-for-editing" {:report (:filename report)})))))))
 
 (defn do-save-report!
   "Actually save the report"

@@ -7,8 +7,9 @@ const express = require('express');
 const fs = require('fs').promises;
 const path = require('path');
 const router = express.Router();
+const { logError } = require('../lib/events');
 
-module.exports = function(settingsDir) {
+module.exports = function(settingsDir, pool) {
   /**
    * GET /api/config
    * Read app configuration from settings/config.json
@@ -24,6 +25,7 @@ module.exports = function(settingsDir) {
         res.json({ "form-designer": { "grid-size": 8 } });
       } else {
         console.error('Error reading config:', err);
+        logError(pool, 'GET /api/config', 'Failed to read config', err);
         res.status(500).json({ error: 'Failed to read config' });
       }
     }
@@ -46,6 +48,7 @@ module.exports = function(settingsDir) {
       res.json({ success: true });
     } catch (err) {
       console.error('Error saving config:', err);
+      logError(pool, 'PUT /api/config', 'Failed to save config', err);
       res.status(500).json({ error: 'Failed to save config' });
     }
   });

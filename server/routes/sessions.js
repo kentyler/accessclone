@@ -5,6 +5,7 @@
 
 const express = require('express');
 const router = express.Router();
+const { logEvent, logError } = require('../lib/events');
 
 module.exports = function(pool) {
   /**
@@ -23,6 +24,7 @@ module.exports = function(pool) {
       }
     } catch (err) {
       console.error('Error fetching UI state:', err);
+      logEvent(pool, 'warning', 'GET /api/session/ui-state', 'Failed to fetch UI state', { databaseId: req.databaseId, details: { error: err.message } });
       res.json({}); // Return empty on error, don't fail
     }
   });
@@ -44,6 +46,7 @@ module.exports = function(pool) {
       res.json({ success: true });
     } catch (err) {
       console.error('Error saving UI state:', err);
+      logError(pool, 'PUT /api/session/ui-state', 'Failed to save UI state', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to save UI state' });
     }
   });
@@ -64,6 +67,7 @@ module.exports = function(pool) {
       }
     } catch (err) {
       console.error('Error fetching import state:', err);
+      logEvent(pool, 'warning', 'GET /api/session/import-state', 'Failed to fetch import state', { databaseId: req.databaseId, details: { error: err.message } });
       res.json({});
     }
   });
@@ -85,6 +89,7 @@ module.exports = function(pool) {
       res.json({ success: true });
     } catch (err) {
       console.error('Error saving import state:', err);
+      logError(pool, 'PUT /api/session/import-state', 'Failed to save import state', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to save import state' });
     }
   });
@@ -99,6 +104,7 @@ module.exports = function(pool) {
       res.json({ sessionId: result.rows[0].session_id });
     } catch (err) {
       console.error('Error creating session:', err);
+      logError(pool, 'POST /api/session', 'Failed to create session', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to create session', details: err.message });
     }
   });
@@ -113,6 +119,7 @@ module.exports = function(pool) {
       res.json({ success: true });
     } catch (err) {
       console.error('Error clearing session:', err);
+      logError(pool, 'DELETE /api/session/:id', 'Failed to clear session', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to clear session', details: err.message });
     }
   });
@@ -134,6 +141,7 @@ module.exports = function(pool) {
       res.json({ state });
     } catch (err) {
       console.error('Error fetching session state:', err);
+      logError(pool, 'GET /api/session/:id/state', 'Failed to fetch session state', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to fetch session state', details: err.message });
     }
   });
@@ -158,6 +166,7 @@ module.exports = function(pool) {
       res.json({ success: true });
     } catch (err) {
       console.error('Error setting session state:', err);
+      logError(pool, 'PUT /api/session/:id/state', 'Failed to set session state', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to set session state', details: err.message });
     }
   });
@@ -203,6 +212,7 @@ module.exports = function(pool) {
       });
     } catch (err) {
       console.error('Error calling function:', err);
+      logError(pool, 'POST /api/session/function/:name', 'Failed to call function', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to call function', details: err.message });
     }
   });

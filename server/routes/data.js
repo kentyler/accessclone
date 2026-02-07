@@ -5,6 +5,7 @@
 
 const express = require('express');
 const router = express.Router();
+const { logError } = require('../lib/events');
 
 module.exports = function(pool) {
   /**
@@ -92,6 +93,7 @@ module.exports = function(pool) {
       });
     } catch (err) {
       console.error('Error fetching data:', err);
+      logError(pool, 'GET /api/data/:source', 'Failed to fetch data', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to fetch data', details: err.message });
     }
   });
@@ -136,6 +138,7 @@ module.exports = function(pool) {
       res.json({ data: result.rows[0] });
     } catch (err) {
       console.error('Error fetching record:', err);
+      logError(pool, 'GET /api/data/:source/:id', 'Failed to fetch record', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to fetch record', details: err.message });
     }
   });
@@ -167,6 +170,7 @@ module.exports = function(pool) {
       res.status(201).json({ data: result.rows[0] });
     } catch (err) {
       console.error('Error inserting record:', err);
+      logError(pool, 'POST /api/data/:table', 'Failed to insert record', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to insert record', details: err.message });
     }
   });
@@ -221,6 +225,7 @@ module.exports = function(pool) {
       res.json({ data: result.rows[0] });
     } catch (err) {
       console.error('Error updating record:', err);
+      logError(pool, 'PUT /api/data/:table/:id', 'Failed to update record', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to update record', details: err.message });
     }
   });
@@ -265,6 +270,7 @@ module.exports = function(pool) {
       res.json({ success: true, deleted: result.rows[0] });
     } catch (err) {
       console.error('Error deleting record:', err);
+      logError(pool, 'DELETE /api/data/:table/:id', 'Failed to delete record', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to delete record', details: err.message });
     }
   });

@@ -26,6 +26,7 @@ module.exports = function(pool, logEvent) {
       });
       res.json({ success: true });
     } catch (err) {
+      console.error('Error logging event:', err);
       res.status(500).json({ error: err.message });
     }
   });

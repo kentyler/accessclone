@@ -6,6 +6,7 @@
 
 const express = require('express');
 const router = express.Router();
+const { logError } = require('../lib/events');
 
 // Validation rules
 const VALID_CONTROL_TYPES = [
@@ -661,6 +662,7 @@ function createRouter(pool, secrets) {
       });
     } catch (err) {
       console.error('Database-wide validation failed:', err);
+      logError(pool, 'POST /api/lint/validate', 'Database-wide validation failed', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Validation failed', details: err.message });
     }
   });

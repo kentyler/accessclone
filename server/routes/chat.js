@@ -5,6 +5,7 @@
 
 const express = require('express');
 const router = express.Router();
+const { logEvent, logError } = require('../lib/events');
 
 // Import graph modules for dependency/intent tools
 const { findNode, findNodeById, traverseDependencies } = require('../graph/query');
@@ -266,6 +267,7 @@ Keep responses concise and helpful. When discussing code or SQL, use markdown co
               toolResult = { error: `${node_type} "${node_name}" not found in the graph` };
             }
           } catch (err) {
+            logEvent(pool, 'warning', 'POST /api/chat/tool', 'Chat tool error: query_dependencies', { databaseId: req.databaseId, details: { tool: 'query_dependencies', error: err.message } });
             toolResult = { error: err.message };
           }
         } else if (toolUse.name === 'query_intent') {
@@ -289,6 +291,7 @@ Keep responses concise and helpful. When discussing code or SQL, use markdown co
               }
             }
           } catch (err) {
+            logEvent(pool, 'warning', 'POST /api/chat/tool', 'Chat tool error: query_intent', { databaseId: req.databaseId, details: { tool: 'query_intent', error: err.message } });
             toolResult = { error: err.message };
           }
         } else if (toolUse.name === 'propose_intent') {
@@ -304,6 +307,7 @@ Keep responses concise and helpful. When discussing code or SQL, use markdown co
               message: `Created intent "${intent_name}" and linked ${result.linked} structure(s)`
             };
           } catch (err) {
+            logEvent(pool, 'warning', 'POST /api/chat/tool', 'Chat tool error: propose_intent', { databaseId: req.databaseId, details: { tool: 'propose_intent', error: err.message } });
             toolResult = { error: err.message };
           }
         } else if (toolUse.name === 'search_records' && form_context?.record_source) {
@@ -389,6 +393,7 @@ Keep responses concise and helpful. When discussing code or SQL, use markdown co
               };
             } catch (queryErr) {
               await client.query('ROLLBACK').catch(() => {});
+              logEvent(pool, 'warning', 'POST /api/chat/tool', 'Chat tool error: analyze_data', { databaseId: req.databaseId, details: { tool: 'analyze_data', error: queryErr.message } });
               toolResult = { error: queryErr.message };
             } finally {
               client.release();
@@ -449,6 +454,7 @@ Keep responses concise and helpful. When discussing code or SQL, use markdown co
       res.json({ message: assistantMessage });
     } catch (err) {
       console.error('Error in chat:', err);
+      logError(pool, 'POST /api/chat', 'Chat request failed', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });

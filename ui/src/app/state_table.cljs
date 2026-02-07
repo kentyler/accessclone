@@ -64,7 +64,8 @@
       (if (:success response)
         (let [data (get-in response [:body :data] [])]
           (swap! state/app-state assoc-in [:table-viewer :records] (vec data)))
-        (println "Error loading table data:" (:body response))))))
+        (do (println "Error loading table data:" (:body response))
+            (state/log-error! "Failed to load table data" "load-table" {:response (:body response)}))))))
 
 (defn refresh-table-data!
   "Refresh the current table's data"
@@ -80,7 +81,8 @@
           (if (:success response)
             (let [data (get-in response [:body :data] [])]
               (swap! state/app-state assoc-in [:table-viewer :records] (vec data)))
-            (println "Error refreshing table data:" (:body response))))))))
+            (do (println "Error refreshing table data:" (:body response))
+                (state/log-error! "Failed to refresh table data" "refresh-table" {:response (:body response)}))))))))
 
 ;; Cell selection and editing
 (defn select-table-cell!
@@ -128,6 +130,7 @@
             (println "Cell saved:" col-name "=" new-value)
             (do
               (println "Error saving cell:" (:body response))
+              (state/log-error! "Failed to save table cell" "save-table-cell" {:response (:body response)})
               ;; Revert on error
               (refresh-table-data!))))))))
 
@@ -225,7 +228,8 @@
           (do
             (println "New record created")
             (refresh-table-data!))
-          (println "Error creating record:" (:body response)))))))
+          (do (println "Error creating record:" (:body response))
+              (state/log-error! "Failed to create table record" "new-table-record" {:response (:body response)})))))))
 
 ;; Delete record
 (defn delete-table-record!
@@ -247,7 +251,8 @@
               (println "Record deleted")
               (swap! state/app-state assoc-in [:table-viewer :selected] nil)
               (refresh-table-data!))
-            (println "Error deleting record:" (:body response))))))))
+            (do (println "Error deleting record:" (:body response))
+                (state/log-error! "Failed to delete table record" "delete-table-record" {:response (:body response)}))))))))
 
 ;; ============================================================
 ;; DESIGN EDITING — working copy, dirty tracking, save/revert
@@ -478,6 +483,7 @@
               (reload-table-after-save! table-name))
             (do
               (println "Error saving table design:" (:body response))
+              (state/log-error! "Failed to save table design" "save-table-design" {:response (:body response)})
               (swap! state/app-state assoc-in [:table-viewer :design-errors]
                      [{:message (get-in response [:body :error] "Failed to save")}]))))))))
 

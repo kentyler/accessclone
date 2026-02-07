@@ -5,6 +5,7 @@
 
 const express = require('express');
 const router = express.Router();
+const { logError } = require('../lib/events');
 
 const NAME_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
@@ -193,6 +194,7 @@ module.exports = function(pool) {
       res.json({ tables });
     } catch (err) {
       console.error('Error fetching tables:', err);
+      logError(pool, 'GET /api/tables', 'Failed to fetch tables', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to fetch tables', details: err.message });
     }
   });
@@ -242,6 +244,7 @@ module.exports = function(pool) {
       res.json({ queries });
     } catch (err) {
       console.error('Error fetching queries:', err);
+      logError(pool, 'GET /api/queries', 'Failed to fetch queries', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to fetch queries', details: err.message });
     }
   });
@@ -275,6 +278,7 @@ module.exports = function(pool) {
       });
     } catch (err) {
       console.error('Error running query:', err);
+      logError(pool, 'POST /api/queries/run', 'Failed to run query', err, { databaseId: req.databaseId });
       res.status(400).json({ error: err.message });
     }
   });
@@ -312,6 +316,7 @@ module.exports = function(pool) {
       });
     } catch (err) {
       console.error('Error fetching functions:', err);
+      logError(pool, 'GET /api/functions', 'Failed to fetch functions', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to fetch functions', details: err.message });
     }
   });
@@ -393,6 +398,7 @@ module.exports = function(pool) {
     } catch (err) {
       await client.query('ROLLBACK');
       console.error('Error creating table:', err);
+      logError(pool, 'POST /api/tables', 'Failed to create table', err, { databaseId: req.databaseId });
       res.status(400).json({ error: err.message });
     } finally {
       client.release();
@@ -613,6 +619,7 @@ module.exports = function(pool) {
     } catch (err) {
       await client.query('ROLLBACK');
       console.error('Error modifying table:', err);
+      logError(pool, 'PUT /api/tables/:table', 'Failed to modify table', err, { databaseId: req.databaseId });
       res.status(400).json({ error: err.message });
     } finally {
       client.release();
@@ -635,6 +642,7 @@ module.exports = function(pool) {
       res.json({ success: true });
     } catch (err) {
       console.error('Error dropping table:', err);
+      logError(pool, 'DELETE /api/tables/:table', 'Failed to drop table', err, { databaseId: req.databaseId });
       res.status(400).json({ error: err.message });
     }
   });

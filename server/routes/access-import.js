@@ -5,6 +5,7 @@
 
 const express = require('express');
 const router = express.Router();
+const { logError } = require('../lib/events');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs').promises;
@@ -127,6 +128,7 @@ module.exports = function(pool) {
       });
     } catch (err) {
       console.error('Error scanning for Access databases:', err);
+      logError(pool, 'GET /api/access-import/scan', 'Failed to scan for Access databases', err);
       res.status(500).json({ error: 'Failed to scan for databases' });
     }
   });
@@ -218,6 +220,7 @@ module.exports = function(pool) {
       });
     } catch (err) {
       console.error('Error getting database details:', err);
+      logError(pool, 'GET /api/access-import/database', 'Failed to get database details', err, { details: { path: req.query.path } });
       res.status(500).json({ error: 'Failed to get database details' });
     }
   });
@@ -277,6 +280,7 @@ module.exports = function(pool) {
       });
     } catch (err) {
       console.error('Error exporting form:', err);
+      logError(pool, 'POST /api/access-import/export-form', 'Failed to export form', err, { details: { databasePath, formName, targetDatabaseId } });
       await logImport('error', err.message);
       res.status(500).json({ error: err.message || 'Failed to export form' });
     }
@@ -338,6 +342,7 @@ module.exports = function(pool) {
       });
     } catch (err) {
       console.error('Error exporting report:', err);
+      logError(pool, 'POST /api/access-import/export-report', 'Failed to export report', err, { details: { databasePath, reportName, targetDatabaseId } });
       await logImport('error', err.message);
       res.status(500).json({ error: err.message || 'Failed to export report' });
     }
@@ -377,6 +382,7 @@ module.exports = function(pool) {
       res.json({ history: result.rows });
     } catch (err) {
       console.error('Error fetching import history:', err);
+      logError(pool, 'GET /api/access-import/history', 'Failed to fetch import history', err);
       res.status(500).json({ error: 'Failed to fetch import history' });
     }
   });

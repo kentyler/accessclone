@@ -6,6 +6,7 @@
 
 const express = require('express');
 const router = express.Router();
+const { logEvent, logError } = require('../lib/events');
 
 /**
  * Extract record-source from JSON content string
@@ -42,6 +43,7 @@ function createRouter(pool) {
       res.json({ reports, details: result.rows });
     } catch (err) {
       console.error('Error listing reports:', err);
+      logError(pool, 'GET /api/reports', 'Failed to list reports', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to list reports' });
     }
   });
@@ -74,6 +76,7 @@ function createRouter(pool) {
       }
     } catch (err) {
       console.error('Error reading report:', err);
+      logError(pool, 'GET /api/reports/:name', 'Failed to read report', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to read report' });
     }
   });
@@ -97,6 +100,7 @@ function createRouter(pool) {
       res.json({ versions: result.rows });
     } catch (err) {
       console.error('Error listing report versions:', err);
+      logError(pool, 'GET /api/reports/:name/versions', 'Failed to list report versions', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to list versions' });
     }
   });
@@ -129,6 +133,7 @@ function createRouter(pool) {
       }
     } catch (err) {
       console.error('Error reading report version:', err);
+      logError(pool, 'GET /api/reports/:name/versions/:version', 'Failed to read report version', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to read report version' });
     }
   });
@@ -185,6 +190,7 @@ function createRouter(pool) {
         // populateFromReport may not exist yet - that's fine
         if (graphErr.code !== 'MODULE_NOT_FOUND' && !graphErr.message.includes('populateFromReport')) {
           console.error('Error populating graph from report:', graphErr.message);
+          logEvent(pool, 'warning', 'PUT /api/reports/:name', 'Graph population failed after report save', { databaseId, details: { error: graphErr.message } });
         }
       }
 
@@ -192,6 +198,7 @@ function createRouter(pool) {
       res.json({ success: true, name: reportName, version: newVersion, database_id: databaseId });
     } catch (err) {
       console.error('Error saving report:', err);
+      logError(pool, 'PUT /api/reports/:name', 'Failed to save report', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to save report' });
     }
   });
@@ -252,6 +259,7 @@ function createRouter(pool) {
       });
     } catch (err) {
       console.error('Error rolling back report:', err);
+      logError(pool, 'POST /api/reports/:name/rollback/:version', 'Failed to rollback report', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to rollback report' });
     }
   });
@@ -280,6 +288,7 @@ function createRouter(pool) {
       res.json({ success: true });
     } catch (err) {
       console.error('Error deleting report:', err);
+      logError(pool, 'DELETE /api/reports/:name', 'Failed to delete report', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to delete report' });
     }
   });

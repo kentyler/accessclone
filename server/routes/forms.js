@@ -6,6 +6,7 @@
 
 const express = require('express');
 const router = express.Router();
+const { logEvent, logError } = require('../lib/events');
 
 /**
  * Extract record-source from JSON content string
@@ -42,6 +43,7 @@ function createRouter(pool) {
       res.json({ forms, details: result.rows });
     } catch (err) {
       console.error('Error listing forms:', err);
+      logError(pool, 'GET /api/forms', 'Failed to list forms', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to list forms' });
     }
   });
@@ -67,6 +69,7 @@ function createRouter(pool) {
       res.json(JSON.parse(result.rows[0].definition));
     } catch (err) {
       console.error('Error reading form:', err);
+      logError(pool, 'GET /api/forms/:name', 'Failed to read form', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to read form' });
     }
   });
@@ -90,6 +93,7 @@ function createRouter(pool) {
       res.json({ versions: result.rows });
     } catch (err) {
       console.error('Error listing form versions:', err);
+      logError(pool, 'GET /api/forms/:name/versions', 'Failed to list form versions', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to list versions' });
     }
   });
@@ -117,6 +121,7 @@ function createRouter(pool) {
       res.json(JSON.parse(result.rows[0].definition));
     } catch (err) {
       console.error('Error reading form version:', err);
+      logError(pool, 'GET /api/forms/:name/versions/:version', 'Failed to read form version', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to read form version' });
     }
   });
@@ -169,6 +174,7 @@ function createRouter(pool) {
         await populateFromForm(pool, formName, content, databaseId);
       } catch (graphErr) {
         console.error('Error populating graph from form:', graphErr.message);
+        logEvent(pool, 'warning', 'PUT /api/forms/:name', 'Graph population failed after form save', { databaseId, details: { error: graphErr.message } });
         // Don't fail the save if graph population fails
       }
 
@@ -176,6 +182,7 @@ function createRouter(pool) {
       res.json({ success: true, name: formName, version: newVersion, database_id: databaseId });
     } catch (err) {
       console.error('Error saving form:', err);
+      logError(pool, 'PUT /api/forms/:name', 'Failed to save form', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to save form' });
     }
   });
@@ -236,6 +243,7 @@ function createRouter(pool) {
       });
     } catch (err) {
       console.error('Error rolling back form:', err);
+      logError(pool, 'POST /api/forms/:name/rollback/:version', 'Failed to rollback form', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to rollback form' });
     }
   });
@@ -264,6 +272,7 @@ function createRouter(pool) {
       res.json({ success: true });
     } catch (err) {
       console.error('Error deleting form:', err);
+      logError(pool, 'DELETE /api/forms/:name', 'Failed to delete form', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to delete form' });
     }
   });

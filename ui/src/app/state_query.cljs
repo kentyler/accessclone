@@ -55,5 +55,6 @@
             (swap! state/app-state assoc-in [:query-viewer :result-fields] (vec fields)))
           (do
             (println "Error running query:" (:body response))
+            (state/log-event! "error" "Query execution failed" "run-query" {:response (:body response)})
             (swap! state/app-state assoc-in [:query-viewer :error]
                    (get-in response [:body :error] "Query failed"))))))))

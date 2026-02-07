@@ -5,8 +5,9 @@
 
 const express = require('express');
 const router = express.Router();
+const { logError } = require('../lib/events');
 
-module.exports = function(pool, logError) {
+module.exports = function(pool) {
   // Track current database (server-side state)
   // Initialized to null, set on first request or via initializeDefault()
   let currentDatabaseId = null;
@@ -55,7 +56,7 @@ module.exports = function(pool, logError) {
       });
     } catch (err) {
       console.error('Error fetching databases:', err);
-      await logError('/api/databases', 'Failed to fetch databases', err);
+      logError(pool, 'GET /api/databases', 'Failed to fetch databases', err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -93,6 +94,7 @@ module.exports = function(pool, logError) {
       });
     } catch (err) {
       console.error('Error switching database:', err);
+      logError(pool, 'POST /api/databases/switch', 'Failed to switch database', err, { databaseId: database_id });
       res.status(500).json({ error: err.message });
     }
   });

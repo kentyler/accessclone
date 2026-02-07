@@ -2,6 +2,7 @@
   "Form view mode - live data entry with record navigation"
   (:require [reagent.core :as r]
             [app.state :as state]
+            [app.state-form :as state-form]
             [app.views.form-utils :as fu]
             [app.views.expressions :as expr]
             [clojure.string :as str]))
@@ -29,18 +30,18 @@
   (cond
     (and (map? on-click-prop) (:action on-click-prop))
     (case (keyword (:action on-click-prop))
-      :save-record   #(state/save-current-record!)
-      :new-record    #(state/new-record!)
-      :delete-record #(when (js/confirm "Delete this record?") (state/delete-current-record!))
-      :close-form    #(state/close-current-tab!)
-      :refresh       #(state/set-view-mode! :view)
+      :save-record   #(state-form/save-current-record!)
+      :new-record    #(state-form/new-record!)
+      :delete-record #(when (js/confirm "Delete this record?") (state-form/delete-current-record!))
+      :close-form    #(state-form/close-current-tab!)
+      :refresh       #(state-form/set-view-mode! :view)
       #(js/alert (str "Unknown action: " (:action on-click-prop))))
 
     (and (map? on-click-prop) (:function on-click-prop))
-    #(state/call-session-function! (:function on-click-prop))
+    #(state-form/call-session-function! (:function on-click-prop))
 
     (and (string? on-click-prop) (not (str/blank? on-click-prop)))
-    #(state/call-session-function! on-click-prop)
+    #(state-form/call-session-function! on-click-prop)
 
     :else nil))
 
@@ -49,15 +50,15 @@
   [text-lower button-text]
   (cond
     (or (= text-lower "close") (str/includes? text-lower "close form"))
-    #(state/close-current-tab!)
+    #(state-form/close-current-tab!)
     (or (= text-lower "save") (str/includes? text-lower "save record"))
-    #(state/save-current-record!)
+    #(state-form/save-current-record!)
     (or (= text-lower "new record") (= text-lower "new") (str/includes? text-lower "add new"))
-    #(state/new-record!)
+    #(state-form/new-record!)
     (or (= text-lower "delete") (= text-lower "delete record"))
-    #(when (js/confirm "Delete this record?") (state/delete-current-record!))
+    #(when (js/confirm "Delete this record?") (state-form/delete-current-record!))
     (or (= text-lower "refresh") (= text-lower "requery"))
-    #(state/set-view-mode! :view)
+    #(state-form/set-view-mode! :view)
     :else
     #(js/alert (str "Button clicked: " button-text))))
 
@@ -102,7 +103,7 @@
 (defn- row-source-options
   "Build option elements from cached row-source data."
   [ctrl]
-  (let [cached (when-let [rs (:row-source ctrl)] (state/get-row-source-options rs))
+  (let [cached (when-let [rs (:row-source ctrl)] (state-form/get-row-source-options rs))
         rows (when (map? cached) (:rows cached))
         fields (when (map? cached) (:fields cached))
         bound-col (:bound-column ctrl)
@@ -113,7 +114,7 @@
           ^{:key idx} [:option {:value bv} display])))))
 
 (defn render-combobox [ctrl field value on-change opts]
-  (when-let [rs (:row-source ctrl)] (state/fetch-row-source! rs))
+  (when-let [rs (:row-source ctrl)] (state-form/fetch-row-source! rs))
   (fn [ctrl field value on-change {:keys [allow-edits?]}]
     [:select.view-select
      {:value (str (or value "")) :disabled (not allow-edits?)
@@ -140,7 +141,7 @@
     [:div.view-image-placeholder "\uD83D\uDDBC No Image"]))
 
 (defn render-listbox [ctrl field value on-change opts]
-  (when-let [rs (:row-source ctrl)] (state/fetch-row-source! rs))
+  (when-let [rs (:row-source ctrl)] (state-form/fetch-row-source! rs))
   (fn [ctrl field value on-change {:keys [allow-edits?]}]
     [:select.view-listbox
      {:multiple true :size (or (:list-rows ctrl) 5)
@@ -241,14 +242,14 @@
      [:div.subform-toolbar
       (when allow-additions?
         [:button {:title "New Record"
-                  :on-click #(state/new-subform-record!
+                  :on-click #(state-form/new-subform-record!
                                source-form link-child-fields link-master-fields current-record)}
          "+"])
       (when (and allow-deletions? @selected)
         [:button.subform-delete-btn
          {:title "Delete Record"
           :on-click #(when (js/confirm "Delete this record?")
-                       (state/delete-subform-record! source-form (:row @selected))
+                       (state-form/delete-subform-record! source-form (:row @selected))
                        (reset! selected nil)
                        (reset! editing nil))}
          "\u2715"])])])
@@ -339,7 +340,7 @@
         selected (r/atom nil)
         editing (r/atom nil)
         edit-value (r/atom "")]
-    (when source-form (state/fetch-subform-definition! source-form))
+    (when source-form (state-form/fetch-subform-definition! source-form))
     (fn [ctrl _field _value _on-change _opts]
       (let [source-form (or (:source-form ctrl) (:source_form ctrl))
             link-child (or (:link-child-fields ctrl) (:link_child_fields ctrl))
@@ -350,7 +351,7 @@
             {:keys [allow-edits? allow-additions? allow-deletions? child-rs]}
             (subform-definition-props definition)
             _ (when (and source-form child-rs (seq link-child) (seq link-master))
-                (state/fetch-subform-records! source-form child-rs link-child link-master current-record))
+                (state-form/fetch-subform-records! source-form child-rs link-child link-master current-record))
             records (when source-form
                       (get-in @state/app-state [:form-editor :subform-cache source-form :records]))
             commit-edit! (fn []
@@ -359,7 +360,7 @@
                                                     (get (nth records row) col) ""))
                                    new-val @edit-value]
                                (when (not= old-val new-val)
-                                 (state/save-subform-cell! source-form row col new-val)))
+                                 (state-form/save-subform-cell! source-form row col new-val)))
                              (reset! editing nil)))]
         [:div.view-subform
          [subform-toolbar source-form definition allow-additions? allow-deletions?
@@ -406,19 +407,19 @@
 
 (defn show-record-menu [e]
   (.preventDefault e)
-  (state/show-form-context-menu! (.-clientX e) (.-clientY e)))
+  (state-form/show-form-context-menu! (.-clientX e) (.-clientY e)))
 
 (defn- context-menu-item
   "Render a single context menu item with enabled/disabled logic."
   [label enabled? on-click & [class]]
   [:div.menu-item
    {:class (str (when class (str class " ")) (when-not enabled? "disabled"))
-    :on-click #(when enabled? (on-click) (state/hide-form-context-menu!))}
+    :on-click #(when enabled? (on-click) (state-form/hide-form-context-menu!))}
    label])
 
 (defn form-record-context-menu []
   (let [menu (get-in @state/app-state [:form-editor :context-menu])
-        has-clip? (some? @state/form-clipboard)
+        has-clip? (some? @state-form/form-clipboard)
         can-edit? (not= 0 (get-in @state/app-state [:form-editor :current :allow-edits]))
         can-add? (not= 0 (get-in @state/app-state [:form-editor :current :allow-additions]))
         can-del? (not= 0 (get-in @state/app-state [:form-editor :current :allow-deletions]))
@@ -426,14 +427,14 @@
     (when (:visible menu)
       [:div.context-menu
        {:style {:left (:x menu) :top (:y menu)}
-        :on-mouse-leave #(state/hide-form-context-menu!)}
-       [context-menu-item "Cut" (and has-rec? can-edit? can-del?) state/cut-form-record!]
-       [context-menu-item "Copy" has-rec? state/copy-form-record!]
-       [context-menu-item "Paste" (and has-clip? can-add?) state/paste-form-record!]
+        :on-mouse-leave #(state-form/hide-form-context-menu!)}
+       [context-menu-item "Cut" (and has-rec? can-edit? can-del?) state-form/cut-form-record!]
+       [context-menu-item "Copy" has-rec? state-form/copy-form-record!]
+       [context-menu-item "Paste" (and has-clip? can-add?) state-form/paste-form-record!]
        [:div.menu-divider]
-       [context-menu-item "New Record" can-add? state/new-record!]
+       [context-menu-item "New Record" can-add? state-form/new-record!]
        [context-menu-item "Delete Record" (and has-rec? can-del?)
-        #(when (js/confirm "Delete this record?") (state/delete-current-record!)) "danger"]])))
+        #(when (js/confirm "Delete this record?") (state-form/delete-current-record!)) "danger"]])))
 
 ;; ============================================================
 ;; RECORD SELECTOR & SECTIONS
@@ -491,7 +492,7 @@
 (defn tentative-new-row [form-def show-selectors?]
   [:div.view-section.detail.continuous-row.tentative-row
    {:style {:height (fu/get-section-height form-def :detail)}
-    :on-click #(state/new-record!)}
+    :on-click #(state-form/new-record!)}
    (when show-selectors? [record-selector false true])
    [:div.view-controls-container]])
 
@@ -522,19 +523,19 @@
         at-last? (>= cur total)]
     [:div.record-nav-bar
      [:span.nav-label "Record:"]
-     [nav-btn "First" (or no-recs? at-first?) #(state/navigate-to-record! 1) "|◀"]
-     [nav-btn "Previous" (or no-recs? at-first?) #(state/navigate-to-record! (dec cur)) "◀"]
+     [nav-btn "First" (or no-recs? at-first?) #(state-form/navigate-to-record! 1) "|◀"]
+     [nav-btn "Previous" (or no-recs? at-first?) #(state-form/navigate-to-record! (dec cur)) "◀"]
      [:span.record-counter (if (pos? total) (str cur " of " total) "0 of 0")]
-     [nav-btn "Next" (or no-recs? at-last?) #(state/navigate-to-record! (inc cur)) "▶"]
-     [nav-btn "Last" (or no-recs? at-last?) #(state/navigate-to-record! total) "▶|"]
-     [nav-btn "New Record" (not allow-additions?) state/new-record! "▶*"]
+     [nav-btn "Next" (or no-recs? at-last?) #(state-form/navigate-to-record! (inc cur)) "▶"]
+     [nav-btn "Last" (or no-recs? at-last?) #(state-form/navigate-to-record! total) "▶|"]
+     [nav-btn "New Record" (not allow-additions?) state-form/new-record! "▶*"]
      [:button.nav-btn.delete-btn
       {:title "Delete Record" :disabled (or no-recs? (not allow-deletions?))
-       :on-click #(when (js/confirm "Delete this record?") (state/delete-current-record!))} "✕"]
+       :on-click #(when (js/confirm "Delete this record?") (state-form/delete-current-record!))} "✕"]
      [:span.nav-separator]
      [:button.nav-btn.save-btn
       {:title "Save Record" :class (when record-dirty? "dirty")
-       :disabled (not record-dirty?) :on-click state/save-current-record!}
+       :disabled (not record-dirty?) :on-click state-form/save-current-record!}
       "Save"]]))
 
 (defn- canvas-context-menu
@@ -546,16 +547,16 @@
                           (fn [e] (.stopPropagation e) (state/hide-context-menu!) (action)))]
         [:div.context-menu
          {:style {:left (:x ctx-menu) :top (:y ctx-menu)}}
-         [:div.context-menu-item {:on-click (dismiss-and state/save-current-record!)} "Save"]
-         [:div.context-menu-item {:on-click (dismiss-and state/close-current-tab!)} "Close"]
-         [:div.context-menu-item {:on-click (dismiss-and state/close-all-tabs!)} "Close All"]
+         [:div.context-menu-item {:on-click (dismiss-and state-form/save-current-record!)} "Save"]
+         [:div.context-menu-item {:on-click (dismiss-and state-form/close-current-tab!)} "Close"]
+         [:div.context-menu-item {:on-click (dismiss-and state-form/close-all-tabs!)} "Close All"]
          [:div.context-menu-separator]
          [:div.context-menu-item
-          {:class (when (= (state/get-view-mode) :view) "active")
-           :on-click (dismiss-and #(state/set-view-mode! :view))} "Form View"]
+          {:class (when (= (state-form/get-view-mode) :view) "active")
+           :on-click (dismiss-and #(state-form/set-view-mode! :view))} "Form View"]
          [:div.context-menu-item
-          {:class (when (= (state/get-view-mode) :design) "active")
-           :on-click (dismiss-and #(state/set-view-mode! :design))} "Design View"]]))))
+          {:class (when (= (state-form/get-view-mode) :design) "active")
+           :on-click (dismiss-and #(state-form/set-view-mode! :design))} "Design View"]]))))
 
 (defn- continuous-form-body
   "Render the continuous form body with header, scrolling detail rows, and footer."
@@ -612,8 +613,8 @@
         record-pos (or (:record-position fe) {:current 0 :total 0})
         record-source (:record-source current)
         continuous? (= (or (:default-view current) "Single Form") "Continuous Forms")
-        on-change (fn [field value] (state/update-record-field! field value))
-        on-select (fn [idx] (state/navigate-to-record! (inc idx)))
+        on-change (fn [field value] (state-form/update-record-field! field value))
+        on-select (fn [idx] (state-form/navigate-to-record! (inc idx)))
         opts (form-view-opts current)
         scroll-bars (or (:scroll-bars current) :both)
         has-data? (and record-source
@@ -621,7 +622,7 @@
                            (and continuous? (:allow-additions? opts))))]
     [:div.form-canvas.view-mode
      {:style (when-let [bc (:back-color current)] {:background-color bc})
-      :on-click #(do (state/hide-form-context-menu!) (state/hide-context-menu!))}
+      :on-click #(do (state-form/hide-form-context-menu!) (state/hide-context-menu!))}
      [form-canvas-header continuous? record-source]
      [:div.canvas-body.view-mode-body
       {:style (cond-> {}

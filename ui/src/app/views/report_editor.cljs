@@ -2,6 +2,7 @@
   "Report editor/designer - replaces Access report design view"
   (:require [clojure.string]
             [app.state :as state]
+            [app.state-report :as state-report]
             [app.views.report-properties :as report-properties]
             [app.views.report-design :as report-design]
             [app.views.report-view :as report-view]))
@@ -24,7 +25,7 @@
        [:div.lint-errors-header
         [:span.lint-errors-title "Report Validation Errors"]
         [:button.lint-errors-close
-         {:on-click state/clear-report-lint-errors!}
+         {:on-click state-report/clear-report-lint-errors!}
          "\u00D7"]]
        [:ul.lint-errors-list
         (for [[idx error] (map-indexed vector errors)]
@@ -37,35 +38,35 @@
          {:on-click #(ask-ai-to-fix-report-errors! errors)}
          "Ask AI to Help Fix"]
         [:button.secondary-btn
-         {:on-click state/clear-report-lint-errors!}
+         {:on-click state-report/clear-report-lint-errors!}
          "Dismiss"]]])))
 
 (defn report-toolbar
   "Toolbar with report actions"
   []
   (let [dirty? (get-in @state/app-state [:report-editor :dirty?])
-        view-mode (state/get-report-view-mode)]
+        view-mode (state-report/get-report-view-mode)]
     [:div.form-toolbar
      [:div.toolbar-left
       [:button.toolbar-btn
        {:class (when (= view-mode :design) "active")
         :title "Design View"
-        :on-click #(state/set-report-view-mode! :design)}
+        :on-click #(state-report/set-report-view-mode! :design)}
        "Design"]
       [:button.toolbar-btn
        {:class (when (= view-mode :preview) "active")
         :title "Preview"
-        :on-click #(state/set-report-view-mode! :preview)}
+        :on-click #(state-report/set-report-view-mode! :preview)}
        "Preview"]]
      [:div.toolbar-right
       [:button.secondary-btn
        {:disabled (not dirty?)
         :on-click #(let [original (get-in @state/app-state [:report-editor :original])]
-                     (state/set-report-definition! original))}
+                     (state-report/set-report-definition! original))}
        "Undo"]
       [:button.primary-btn
        {:disabled (not dirty?)
-        :on-click state/save-report!}
+        :on-click state-report/save-report!}
        "Save"]]]))
 
 (defn report-editor
@@ -73,13 +74,13 @@
   []
   (let [active-tab (:active-tab @state/app-state)
         editing-report-id (get-in @state/app-state [:report-editor :report-id])
-        view-mode (state/get-report-view-mode)]
+        view-mode (state-report/get-report-view-mode)]
     (when (and active-tab (= (:type active-tab) :reports))
       ;; Load report data when tab changes to a different report
       (let [report (first (filter #(= (:id %) (:id active-tab))
                                   (get-in @state/app-state [:objects :reports])))]
         (when (and report (not= (:id report) editing-report-id))
-          (state/load-report-for-editing! report)))
+          (state-report/load-report-for-editing! report)))
       (let [current-def (get-in @state/app-state [:report-editor :current])
             is-edn? (= "edn" (:_format current-def))]
         [:div.form-editor

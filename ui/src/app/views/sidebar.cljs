@@ -2,6 +2,7 @@
   "Access-style collapsible sidebar with object navigation"
   (:require [reagent.core :as r]
             [app.state :as state]
+            [app.state-form :as state-form]
             [app.state-table :as state-table]
             [app.views.access-database-viewer :as access-db-viewer]))
 
@@ -33,7 +34,7 @@
     (case object-type
       :forms
       [:button.new-object-btn
-       {:on-click #(state/create-new-form!)}
+       {:on-click #(state-form/create-new-form!)}
        [:span.icon "+"]
        [:span "New Form"]]
 

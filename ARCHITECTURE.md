@@ -35,7 +35,9 @@ Shared metadata lives in the `shared` schema:
 The frontend uses a **single Reagent atom** (`app-state`) rather than re-frame. All mutations go through explicitly-named functions with `!` suffixes in the state modules:
 
 ```
-state.cljs          Core state: forms, reports, records, navigation, sessions
+state.cljs          Core state: shared helpers, loading, tabs, UI persistence, chat, config
+state_form.cljs     Form editor: records, navigation, sessions, row-source/subform cache
+state_report.cljs   Report editor: definition, preview, normalization
 state_table.cljs    Table viewer: cell editing, clipboard, design mode
 state_query.cljs    Query viewer: SQL editing, result display
 ```
@@ -113,7 +115,7 @@ All errors are logged to `shared.events` via helpers in `server/lib/events.js`:
 - `logError(pool, source, message, err, { databaseId })` — for actual errors (includes stack trace)
 - `logEvent(pool, 'warning', source, message, { databaseId, details })` — for non-fatal issues
 
-Frontend equivalents in `state.cljs`:
+Frontend equivalents in `state.cljs` (core):
 - `log-error!` — shows UI error banner + logs to server
 - `log-event!` — logs to server without UI disruption
 
@@ -125,7 +127,7 @@ The `shared._nodes` and `shared._edges` tables track structural relationships (t
 
 Definitions are stored as JSON in `shared.forms` and `shared.reports` with append-only versioning. Each save creates a new row with an incremented version number. The `is_current` flag marks the active version; previous versions are retained for history.
 
-On load, definitions pass through `normalize-form-definition` / `normalize-report-definition` which coerces types (keywords, yes/no values, numbers) to handle JSON round-trip losiness.
+On load, definitions pass through `normalize-form-definition` (in `state_form.cljs`) / `normalize-report-definition` (in `state_report.cljs`) which coerce types (keywords, yes/no values, numbers) to handle JSON round-trip losiness.
 
 ## Key Design Decisions
 

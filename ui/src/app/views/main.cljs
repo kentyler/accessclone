@@ -3,6 +3,7 @@
   (:require [reagent.core :as r]
             [clojure.string :as str]
             [app.state :as state]
+            [app.state-form :as state-form]
             [app.views.sidebar :as sidebar]
             [app.views.tabs :as tabs]
             [app.views.form-editor :as form-editor]
@@ -118,7 +119,7 @@
    [:p "Select an object from the sidebar to open it, or create a new form."]
    [:div.quick-actions
     [:button.primary-btn
-     {:on-click #(state/create-new-form!)}
+     {:on-click #(state-form/create-new-form!)}
      "Create New Form"]]])
 
 (defn main-area []

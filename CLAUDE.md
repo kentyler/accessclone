@@ -34,7 +34,7 @@ This is PolyAccess (formerly CloneTemplate), a platform for converting MS Access
 - New records marked with `:__new__ true` to distinguish INSERT from UPDATE
 - Close button in forms calls `close-tab!` to close current tab
 - Popup Forms: `:popup 1` renders as floating window; `:modal 1` adds full-screen backdrop (z-index 900)
-- `normalize-form-definition` in state.cljs normalizes form data on load: coerces control `:type` to keyword, yes/no props to 0/1 integers (with defaults), and numeric props to numbers — across form-level and all sections
+- `normalize-form-definition` in state_form.cljs normalizes form data on load: coerces control `:type` to keyword, yes/no props to 0/1 integers (with defaults), and numeric props to numbers — across form-level and all sections
 
 ### Report Editor (ui/src/app/views/report_editor.cljs)
 - Reports are **banded** (unlike forms which have 3 fixed sections: header/detail/footer). A banded report has 5 standard bands plus dynamic group bands that repeat based on data grouping:
@@ -43,7 +43,7 @@ This is PolyAccess (formerly CloneTemplate), a platform for converting MS Access
 - Preview: Read-only page layout with live data, group break detection, banded section rendering
 - Property Sheet: Access-style tabbed interface (Format/Data/Event/Other/All) for report-level, section (band), group-level, and control properties
 - Group-level properties (field, sort-order, group-on, group-interval, keep-together) stored in `:grouping` array, edited via Data tab when a group band is selected
-- `normalize-report-definition` in state.cljs normalizes report data on load (same pattern as forms)
+- `normalize-report-definition` in state_report.cljs normalizes report data on load (same pattern as forms)
 - EDN-format legacy reports (from PowerShell export) display as read-only preformatted text
 - Files: report_editor.cljs (orchestrator), report_design.cljs (design surface), report_properties.cljs (property sheet), report_view.cljs (preview), report_utils.cljs (utilities)
 
@@ -70,14 +70,23 @@ This is PolyAccess (formerly CloneTemplate), a platform for converting MS Access
 - Shows function signature (arguments, return type)
 - All editing done via AI chat
 
-### State Management (ui/src/app/state.cljs)
+### State Management
+State is split across three modules that share a single Reagent atom (`app-state`):
+
+**Core state** (`ui/src/app/state.cljs`):
+- Shared helpers, loading/error, database selection, tabs, UI persistence, chat, config
+- `load-databases!` / `switch-database!` reload all 5 object types: tables, queries, functions, forms, reports
+- Records use keyword keys internally, converted to strings for API
+
+**Form state** (`ui/src/app/state_form.cljs`):
 - `set-view-mode!` - Switches between :design and :view modes, loads data
 - `save-current-record!` - Handles both INSERT (new) and UPDATE (existing)
 - `navigate-to-record!` - Auto-saves before navigation
-- Records use keyword keys internally, converted to strings for API
-- UI state persistence: saves/restores open tabs across sessions
-- `load-databases!` / `switch-database!` reload all 5 object types: tables, queries, functions, forms, reports
-- Report state: `set-report-definition!`, `load-report-for-editing!`, `save-report!`, `set-report-view-mode!`, `select-report-control!`, `update-report-control!`, `delete-report-control!`
+- Row-source cache, subform cache, clipboard, form normalization
+- `create-new-form!`, `load-form-for-editing!`, `save-form!`, `select-control!`, `update-control!`, `delete-control!`
+
+**Report state** (`ui/src/app/state_report.cljs`):
+- `set-report-definition!`, `load-report-for-editing!`, `save-report!`, `set-report-view-mode!`, `select-report-control!`, `update-report-control!`, `delete-report-control!`
 
 ### Error Logging (shared.events)
 All errors are logged to the `shared.events` table for persistent diagnostics.
@@ -154,5 +163,5 @@ If a form's View mode shows no records but the table has data:
    Fix: field lookup is now case-insensitive (normalized to lowercase).
 2. The `:type` property was a string `"text-box"` after save+reload (JSON round-trip converts
    keywords to strings), but the `case` statement matched only keywords `:text-box`.
-   Fix: `normalize-form-definition` in state.cljs now coerces all control `:type` values to keywords,
+   Fix: `normalize-form-definition` in state_form.cljs now coerces all control `:type` values to keywords,
    plus yes/no and number properties, on load. Code can safely match keywords directly.

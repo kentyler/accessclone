@@ -2,6 +2,7 @@
   "Property sheet panel for the report editor"
   (:require [clojure.string :as str]
             [app.state :as state]
+            [app.state-report :as state-report]
             [app.views.report-utils :as ru]))
 
 ;; ============================================================
@@ -233,12 +234,12 @@
      :get-value (cond is-control? #(get selected-control %)
                       is-section? #(get section-data %)
                       :else #(get current %))
-     :on-change (cond is-control? #(state/update-report-control! section-key idx %1 %2)
-                      is-section? #(state/set-report-definition! (assoc-in current [section-key %1] %2))
-                      :else #(state/set-report-definition! (assoc current %1 %2)))
+     :on-change (cond is-control? #(state-report/update-report-control! section-key idx %1 %2)
+                      is-section? #(state-report/set-report-definition! (assoc-in current [section-key %1] %2))
+                      :else #(state-report/set-report-definition! (assoc current %1 %2)))
      :grouping-data (when (and is-group? group-idx) (get-in current [:grouping group-idx]))
      :on-group-change (when (and is-group? group-idx)
-                        (fn [k v] (state/set-report-definition!
+                        (fn [k v] (state-report/set-report-definition!
                                     (assoc-in current [:grouping group-idx k] v))))}))
 
 (defn- grouping-section

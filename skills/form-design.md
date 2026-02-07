@@ -242,7 +242,7 @@ Form with filter controls and results list:
 
 ## Type Handling
 
-`normalize-form-definition` in `state.cljs` coerces all control `:type` values to keywords
+`normalize-form-definition` in `state_form.cljs` coerces all control `:type` values to keywords
 on load (along with yes/no and number properties). Code can match keywords directly:
 
 ```clojure
@@ -261,7 +261,7 @@ Yes/no form properties (`:popup`, `:modal`, `:allow-additions`, `:allow-deletion
 can arrive as booleans (`true`/`false`), strings (`"true"`/`"false"`), integers (`1`/`0`),
 or `nil` depending on whether the form was imported from Access or saved through the UI.
 
-`normalize-form-definition` in `state.cljs` coerces all of these to `0` or `1` on load.
+`normalize-form-definition` in `state_form.cljs` coerces all of these to `0` or `1` on load.
 Defaults match Access conventions (e.g., `allow-additions` defaults to `1`, `popup` defaults to `0`).
 
 **When writing code that checks yes/no properties, assume integer 0/1 values:**

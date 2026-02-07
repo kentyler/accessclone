@@ -47,10 +47,12 @@ server/           Node.js/Express backend
   lib/            Shared utilities (events.js for logging)
   graph/          Dependency graph logic
 ui/src/app/       ClojureScript frontend
-  state.cljs      Core state management
+  state.cljs        Core state (shared helpers, loading, tabs, chat, config)
+  state_form.cljs   Form editor state (records, navigation, row-source cache)
+  state_report.cljs Report editor state (definition, preview, normalization)
   state_table.cljs  Table-specific state
   state_query.cljs  Query-specific state
-  views/          Reagent UI components
+  views/            Reagent UI components
 skills/           AI-assisted conversion guides
 sql/              Database schema definitions
 scripts/          PowerShell scripts for Access import
@@ -67,7 +69,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed architecture documentation.
 - Source naming convention: `"METHOD /api/path"` (e.g., `"GET /api/tables"`).
 
 ### Frontend (ClojureScript)
-- State mutations live in `state.cljs`, `state_table.cljs`, `state_query.cljs`.
+- State mutations live in `state.cljs`, `state_form.cljs`, `state_report.cljs`, `state_table.cljs`, `state_query.cljs`.
 - UI components live in `ui/src/app/views/`.
 - Side-effecting functions must end with `!` (e.g., `save-record!`).
 - Error sites should call `log-error!` (shows UI banner + logs to server) or `log-event!` (logs to server only).

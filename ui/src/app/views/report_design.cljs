@@ -2,6 +2,7 @@
   "Report design surface - drag-drop editor for report controls"
   (:require [reagent.core :as r]
             [app.state :as state]
+            [app.state-report :as state-report]
             [app.views.report-utils :as ru]))
 
 (defn field-item
@@ -63,7 +64,7 @@
                        :width 150
                        :height 18}
         new-controls (vec (conj controls label-control new-control))]
-    (state/set-report-definition!
+    (state-report/set-report-definition!
      (assoc-in current [section :controls] new-controls))))
 
 (defn move-control!
@@ -75,7 +76,7 @@
         snapped-x (ru/snap-to-grid new-x ctrl-key?)
         snapped-y (ru/snap-to-grid new-y ctrl-key?)]
     (when (< control-idx (count controls))
-      (state/set-report-definition!
+      (state-report/set-report-definition!
        (assoc-in current [section :controls]
                  (update controls control-idx
                          (fn [ctrl]
@@ -95,7 +96,7 @@
          :draggable true
          :on-click (fn [e]
                      (.stopPropagation e)
-                     (state/select-report-control! {:section section :idx idx}))
+                     (state-report/select-report-control! {:section section :idx idx}))
          :on-drag-start (fn [e]
                           (let [rect (.getBoundingClientRect (.-target e))
                                 offset-x (- (.-clientX e) (.-left rect))
@@ -109,7 +110,7 @@
         [:button.control-delete
          {:on-click (fn [e]
                       (.stopPropagation e)
-                      (state/delete-report-control! section idx))
+                      (state-report/delete-report-control! section idx))
           :title "Delete"}
          "\u00D7"]])]))
 
@@ -126,7 +127,7 @@
           current-height (ru/get-section-height report-def section)
           new-height (max 20 (+ current-height delta))]
       (reset! resize-state {:section section :start-y current-y})
-      (state/set-report-definition!
+      (state-report/set-report-definition!
        (assoc-in report-def [section :height] new-height)))))
 
 (defn stop-resize! []
@@ -187,7 +188,7 @@
        :on-drag-over #(.preventDefault %)
        :on-click #(when (or (.. % -target -classList (contains "section-body"))
                             (.. % -target -classList (contains "controls-container")))
-                    (state/select-report-control! {:section section}))
+                    (state-report/select-report-control! {:section section}))
        :on-drop #(handle-section-drop! section %)}
       (if (empty? controls)
         [:div.section-empty (if (= section :detail) "Drag fields here" "")]
@@ -213,13 +214,13 @@
                                 (or (= (.-key e) "Delete")
                                     (= (.-key e) "Backspace")))
                        (.preventDefault e)
-                       (state/delete-report-control! (:section selected) (:idx selected))))}
+                       (state-report/delete-report-control! (:section selected) (:idx selected))))}
      [:div.canvas-header
       [:div.form-selector
        {:class (when (nil? selected) "selected")
         :on-click (fn [e]
                     (.stopPropagation e)
-                    (state/select-report-control! nil))
+                    (state-report/select-report-control! nil))
         :title "Select report to edit properties"}]
       [:span "Report Design View"]]
      [:div.canvas-body.sections-container

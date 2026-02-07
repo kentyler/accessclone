@@ -1,6 +1,7 @@
 (ns app.views.form-properties
   "Property sheet panel for the form editor"
   (:require [app.state :as state]
+            [app.state-form :as state-form]
             [app.views.form-utils :as form-utils]))
 
 ;; Property definitions for each control type
@@ -186,10 +187,10 @@
                     is-section? #(get section-data %)
                     :else #(get current %))
         on-change (cond
-                    is-control? #(state/update-control! section-key idx %1 %2)
-                    is-section? #(state/set-form-definition!
+                    is-control? #(state-form/update-control! section-key idx %1 %2)
+                    is-section? #(state-form/set-form-definition!
                                   (assoc-in current [section-key %1] %2))
-                    :else #(state/set-form-definition! (assoc current %1 %2)))]
+                    :else #(state-form/set-form-definition! (assoc current %1 %2)))]
     [:div.property-sheet
      [:div.property-sheet-header
       [:span.property-sheet-title "Property Sheet"]

@@ -1,5 +1,5 @@
 (ns app.state
-  "Application state management"
+  "Application state management - core module"
   (:require [reagent.core :as r]
             [cljs-http.client :as http]
             [cljs.core.async :refer [go <!]]
@@ -9,10 +9,7 @@
 
 ;; Forward declarations for functions used before definition
 (declare load-tables! load-queries! load-functions! load-access-databases!
-         save-ui-state! save-current-record! save-form! save-form-to-file!
-         get-record-source-fields delete-current-record! load-form-for-editing!
-         load-forms! load-reports! save-report! save-report-to-file!
-         filename->display-name)
+         save-ui-state! load-forms! load-reports! filename->display-name)
 
 ;; Application state atom
 (defonce app-state
@@ -107,10 +104,10 @@
     {"X-Database-ID" db-id}))
 
 ;; ============================================================
-;; SHARED HELPERS (used by multiple functions below)
+;; SHARED HELPERS (used by form/report modules)
 ;; ============================================================
 
-(defn- parse-access-filter
+(defn parse-access-filter
   "Parse Access-style filter like \"[col]='val' AND col2='val2'\" into {col val}."
   [filter-str]
   (when (and filter-str (not (str/blank? filter-str)))
@@ -121,7 +118,7 @@
                   m))
               {} parts))))
 
-(defn- build-data-query-params
+(defn build-data-query-params
   "Build query params map from order-by and filter strings."
   [order-by filter-str]
   (let [filter-map (parse-access-filter filter-str)]
@@ -132,7 +129,7 @@
                           (assoc :orderDir "desc"))))
       (seq filter-map) (assoc :filter (.stringify js/JSON (clj->js filter-map))))))
 
-(defn- record->api-map
+(defn record->api-map
   "Convert internal record to API-ready map: strip :__new__, keyword keys to strings."
   [record]
   (reduce-kv
@@ -141,26 +138,16 @@
           (assoc m (if (keyword? k) (name k) k) v)))
     {} record))
 
-(defn- detect-pk-field
+(defn detect-pk-field
   "Find primary key field name from fields list, defaulting to 'id'."
   [fields]
   (or (some #(when (:pk %) (:name %)) fields) "id"))
 
-(defn- pk-value-for-record
+(defn pk-value-for-record
   "Get the primary key value from a record."
   [record pk-field-name]
   (or (get record (keyword pk-field-name))
       (get record pk-field-name)))
-
-(defn- build-session-state-vars
-  "Convert a record to session state vars map for session-state API."
-  [record]
-  (reduce-kv
-    (fn [m k v]
-      (if (= k :__new__) m
-          (assoc m (if (keyword? k) (name k) (str k))
-                 {:value (str v) :type "text"})))
-    {} record))
 
 ;; Event logging
 (defn log-event!
@@ -341,33 +328,6 @@
   ;; Save UI state
   (save-ui-state!))
 
-(defn close-all-tabs!
-  "Close all open tabs"
-  []
-  ;; Auto-save dirty record before closing
-  (when (get-in @app-state [:form-editor :record-dirty?])
-    (save-current-record!))
-  ;; Auto-save dirty form definition before closing
-  (when (get-in @app-state [:form-editor :dirty?])
-    (save-form!))
-  (swap! app-state assoc
-         :open-objects []
-         :active-tab nil
-         :form-editor nil))
-
-(defn close-current-tab!
-  "Close the currently active tab"
-  []
-  (let [active (:active-tab @app-state)]
-    (when active
-      ;; Auto-save dirty record before closing
-      (when (get-in @app-state [:form-editor :record-dirty?])
-        (save-current-record!))
-      ;; Auto-save dirty form definition before closing
-      (when (get-in @app-state [:form-editor :dirty?])
-        (save-form!))
-      (close-tab! (:type active) (:id active)))))
-
 ;; Context menu
 (defn show-context-menu! [x y]
   (swap! app-state assoc :context-menu {:x x :y y :visible? true}))
@@ -375,679 +335,23 @@
 (defn hide-context-menu! []
   (swap! app-state assoc-in [:context-menu :visible?] false))
 
-;; Form-view record context menu & clipboard
-(def form-clipboard (atom nil))
-
-(defn show-form-context-menu! [x y]
-  (swap! app-state assoc-in [:form-editor :context-menu]
-         {:visible true :x x :y y}))
-
-(defn hide-form-context-menu! []
-  (swap! app-state assoc-in [:form-editor :context-menu :visible] false))
-
-(defn copy-form-record!
-  "Copy the current record to the form clipboard"
-  []
-  (let [record (get-in @app-state [:form-editor :current-record])]
-    (reset! form-clipboard (dissoc record :__new__ :id))))
-
-(defn cut-form-record!
-  "Copy the current record to clipboard, then delete it"
-  []
-  (copy-form-record!)
-  (delete-current-record!))
-
-(defn paste-form-record!
-  "Create a new record pre-filled with clipboard values"
-  []
-  (when-let [data @form-clipboard]
-    (let [total (get-in @app-state [:form-editor :record-position :total] 0)
-          new-record (assoc data :__new__ true)]
-      (swap! app-state update-in [:form-editor :records] #(conj (vec %) new-record))
-      (swap! app-state assoc-in [:form-editor :current-record] new-record)
-      (swap! app-state assoc-in [:form-editor :record-position] {:current (inc total) :total (inc total)})
-      (swap! app-state assoc-in [:form-editor :record-dirty?] true))))
-
-;; Form creation
-(defn create-new-form! []
-  (let [existing-forms (get-in @app-state [:objects :forms])
-        new-id (inc (reduce max 0 (map :id existing-forms)))
-        new-form {:id new-id
-                  :name (str "Form" new-id)
-                  :definition {:type :form
-                               :record-source nil
-                               :controls []}}]
-    (add-object! :forms new-form)
-    (open-object! :forms new-id)))
-
-;; Form editor
-(defn set-form-definition! [definition]
-  (swap! app-state assoc-in [:form-editor :current] definition)
-  (swap! app-state assoc-in [:form-editor :dirty?]
-         (not= definition (get-in @app-state [:form-editor :original]))))
-
-(defn clear-lint-errors! []
-  (swap! app-state assoc-in [:form-editor :lint-errors] nil))
-
-(defn set-lint-errors! [errors]
-  (swap! app-state assoc-in [:form-editor :lint-errors] errors))
-
-(defn clear-report-lint-errors! []
-  (swap! app-state assoc-in [:report-editor :lint-errors] nil))
-
-(defn set-report-lint-errors! [errors]
-  (swap! app-state assoc-in [:report-editor :lint-errors] errors))
-
-(defn do-save-form!
-  "Actually save the form (called after lint passes)"
-  []
-  (let [current (get-in @app-state [:form-editor :current])
-        form-id (get-in @app-state [:form-editor :form-id])]
-    (when (and form-id current)
-      ;; Update the form in objects list
-      (update-object! :forms form-id {:definition current})
-      ;; Update the tab name if form name changed
-      (swap! app-state update :open-objects
-             (fn [tabs]
-               (mapv (fn [tab]
-                       (if (and (= (:type tab) :forms)
-                                (= (:id tab) form-id))
-                         (assoc tab :name (:name current))
-                         tab))
-                     tabs)))
-      ;; Mark as clean
-      (swap! app-state assoc-in [:form-editor :dirty?] false)
-      (swap! app-state assoc-in [:form-editor :original] current)
-      ;; Save to file
-      (let [form (first (filter #(= (:id %) form-id)
-                                (get-in @app-state [:objects :forms])))]
-        (save-form-to-file! form)))))
-
-(defn save-form!
-  "Lint the form and save if valid"
-  []
-  (let [current (get-in @app-state [:form-editor :current])
-        form-id (get-in @app-state [:form-editor :form-id])
-        ;; Get form name from objects list
-        form-obj (first (filter #(= (:id %) form-id)
-                                (get-in @app-state [:objects :forms])))
-        ;; Merge id and name back into form for lint validation
-        form-with-meta (merge {:id form-id :name (:name form-obj)} current)]
-    (when (and form-id current)
-      (clear-lint-errors!)
-      (go
-        (let [response (<! (http/post (str api-base "/api/lint/form")
-                                      {:json-params {:form form-with-meta}}))]
-          (if (:success response)
-            (let [result (:body response)]
-              (if (:valid result)
-                (do
-                  (do-save-form!)
-                  (println "Form saved successfully"))
-                (do
-                  (set-lint-errors! (:errors result))
-                  (println "Form has validation errors:" (:errors result)))))
-            (do
-              ;; Lint endpoint failed, save anyway
-              (println "Lint check failed, saving anyway")
-              (do-save-form!))))))))
-
 ;; ============================================================
-;; SESSION-STATE FUNCTION CALLING
+;; SHARED NORMALIZATION HELPERS (used by state_form & state_report)
 ;; ============================================================
 
-(defn- handle-session-navigate!
-  "Handle navigateTo from session function response."
-  [navigate-to]
-  (let [forms (get-in @app-state [:objects :forms])
-        target-form (first (filter #(= (str/lower-case (:name %))
-                                       (str/lower-case navigate-to))
-                                   forms))]
-    (if target-form
-      (do (open-object! :forms (:id target-form))
-          (load-form-for-editing! target-form))
-      (println "Navigate target form not found:" navigate-to))))
-
-(defn- refresh-form-data!
-  "Re-fetch records for the current form and update state. Returns channel."
-  []
-  (let [record-source (get-in @app-state [:form-editor :current :record-source])]
-    (when record-source
-      (go
-        (let [query-params (build-data-query-params
-                             (get-in @app-state [:form-editor :current :order-by])
-                             (get-in @app-state [:form-editor :current :filter]))
-              data-resp (<! (http/get (str api-base "/api/data/" record-source)
-                                      {:query-params query-params
-                                       :headers (db-headers)}))]
-          (when (:success data-resp)
-            (let [data (get-in data-resp [:body :data])
-                  total (get-in data-resp [:body :pagination :totalCount] (count data))
-                  pos (get-in @app-state [:form-editor :record-position :current] 1)
-                  safe-pos (min pos (count data))]
-              (swap! app-state assoc-in [:form-editor :records] (vec data))
-              (swap! app-state assoc-in [:form-editor :record-position] {:current safe-pos :total total})
-              (when (and (seq data) (> safe-pos 0))
-                (swap! app-state assoc-in [:form-editor :current-record] (nth data (dec safe-pos))))
-              (swap! app-state assoc-in [:form-editor :record-dirty?] false))))))))
-
-(defn- handle-session-response!
-  "Handle response from a session function call (message, navigate, confirm)."
-  [body session-id]
-  (go
-    (let [{:keys [userMessage navigateTo confirmRequired]} body]
-      (when userMessage (js/alert userMessage))
-      (when navigateTo (handle-session-navigate! navigateTo))
-      (when confirmRequired
-        (when (js/confirm "Confirm action?")
-          (<! (http/post (str api-base "/api/session/function/confirm_action")
-                         {:json-params {:sessionId session-id}}))))
-      (refresh-form-data!))))
-
-(defn call-session-function!
-  "Call a PostgreSQL function through the session-state pipeline."
-  [function-name & [{:keys [on-complete]}]]
-  (go
-    (println "Calling session function:" function-name)
-    (let [session-resp (<! (http/post (str api-base "/api/session")))]
-      (if-not (:success session-resp)
-        (do (println "Error creating session:" (:body session-resp))
-            (log-event! "error" "Failed to create session" "call-session-function" {:response (:body session-resp)}))
-        (let [session-id (get-in session-resp [:body :sessionId])
-              state-vars (build-session-state-vars
-                           (get-in @app-state [:form-editor :current-record] {}))]
-          (when (seq state-vars)
-            (<! (http/put (str api-base "/api/session/" session-id "/state")
-                          {:json-params state-vars})))
-          (let [func-resp (<! (http/post (str api-base "/api/session/function/" function-name)
-                                         {:json-params {:sessionId session-id}}))]
-            (if-not (:success func-resp)
-              (do (log-event! "error" (str "Failed to call function: " function-name) "call-session-function" {:response (:body func-resp)})
-                  (js/alert (str "Error calling " function-name ": "
-                                 (get-in func-resp [:body :details]
-                                         (get-in func-resp [:body :error] "Unknown error")))))
-              (do
-                (<! (handle-session-response! (:body func-resp) session-id))
-                (when on-complete (on-complete (:body func-resp))))))
-          (<! (http/delete (str api-base "/api/session/" session-id))))))))
-
-(defn fire-form-event!
-  "Check if the current form has a function mapped to the given event key,
-   and if so, call it via call-session-function!. Returns a channel."
-  [event-key & [{:keys [on-complete]}]]
-  (let [form-def (get-in @app-state [:form-editor :current])
-        function-name (get form-def event-key)]
-    (when (and function-name (string? function-name) (not (str/blank? function-name)))
-      (println "Firing form event" event-key "→" function-name)
-      (call-session-function! function-name {:on-complete on-complete}))))
-
-;; View mode
-(defn- init-data-entry-mode!
-  "Initialize form in data-entry mode with a blank new record."
-  []
-  (let [new-record {:__new__ true}]
-    (swap! app-state assoc-in [:form-editor :records] [new-record])
-    (swap! app-state assoc-in [:form-editor :current-record] new-record)
-    (swap! app-state assoc-in [:form-editor :record-position] {:current 1 :total 1})
-    (swap! app-state assoc-in [:form-editor :record-dirty?] true)
-    (fire-form-event! :on-load)))
-
-(defn- load-form-records!
-  "Fetch records from API for form view mode."
-  [record-source]
-  (go
-    (let [query-params (build-data-query-params
-                         (get-in @app-state [:form-editor :current :order-by])
-                         (get-in @app-state [:form-editor :current :filter]))
-          response (<! (http/get (str api-base "/api/data/" record-source)
-                                 {:query-params query-params
-                                  :headers (db-headers)}))]
-      (if (:success response)
-        (let [data (get-in response [:body :data])
-              total (get-in response [:body :pagination :totalCount] (count data))]
-          (println "Loaded" (count data) "records from" record-source)
-          (swap! app-state assoc-in [:form-editor :records] (vec data))
-          (swap! app-state assoc-in [:form-editor :record-position] {:current 1 :total total})
-          (swap! app-state assoc-in [:form-editor :record-dirty?] false)
-          (when (seq data)
-            (swap! app-state assoc-in [:form-editor :current-record] (first data)))
-          (fire-form-event! :on-load))
-        (do (println "Error loading data:" (:body response))
-            (log-error! "Failed to load form records" "load-form-records" {:response (:body response)}))))))
-
-(defn set-view-mode! [mode]
-  "Set form view mode - :design or :view"
-  (let [current-mode (get-in @app-state [:form-editor :view-mode] :design)]
-    (when (and (= current-mode :view) (not= mode :view))
-      (when (get-in @app-state [:form-editor :record-dirty?])
-        (save-current-record!)))
-    (swap! app-state assoc-in [:form-editor :view-mode] mode)
-    (when (= mode :view)
-      (let [record-source (get-in @app-state [:form-editor :current :record-source])
-            data-entry? (not= 0 (get-in @app-state [:form-editor :current :data-entry] 0))]
-        (when record-source
-          (if data-entry?
-            (init-data-entry-mode!)
-            (load-form-records! record-source)))))))
-(defn get-view-mode []
-  (get-in @app-state [:form-editor :view-mode] :design))
-
-;; Record navigation state
-(defn set-current-record! [record]
-  (swap! app-state assoc-in [:form-editor :current-record] record))
-
-(defn set-record-position! [pos total]
-  (swap! app-state assoc-in [:form-editor :record-position] {:current pos :total total}))
-
-(defn update-record-field! [field-name value]
-  (println "update-record-field!" field-name "=" value)
-  (swap! app-state assoc-in [:form-editor :current-record (keyword field-name)] value)
-  ;; Mark the record as dirty
-  (swap! app-state assoc-in [:form-editor :record-dirty?] true)
-  (println "Record marked dirty, current-record:" (get-in @app-state [:form-editor :current-record])))
-
-(defn navigate-to-record!
-  "Navigate to a specific record by position (1-indexed)"
-  [position]
-  ;; Auto-save dirty record before navigating
-  (when (get-in @app-state [:form-editor :record-dirty?])
-    (save-current-record!))
-  (let [records (get-in @app-state [:form-editor :records] [])
-        total (count records)
-        pos (max 1 (min total position))]
-    (when (and (> total 0) (<= pos total))
-      (swap! app-state assoc-in [:form-editor :record-position] {:current pos :total total})
-      (swap! app-state assoc-in [:form-editor :current-record] (nth records (dec pos)))
-      (swap! app-state assoc-in [:form-editor :record-dirty?] false)
-      ;; Fire on-current event after navigating to new record
-      (fire-form-event! :on-current))))
-
-(defn- run-before-update-hook!
-  "Run before-update function if mapped. Returns channel yielding true to abort."
-  [current-record]
-  (go
-    (let [before-update-fn (get-in @app-state [:form-editor :current :before-update])]
-      (if-not (and before-update-fn (string? before-update-fn)
-                   (not (str/blank? before-update-fn)))
-        false
-        (let [sess-resp (<! (http/post (str api-base "/api/session")))]
-          (if-not (:success sess-resp)
-            false
-            (let [session-id (get-in sess-resp [:body :sessionId])
-                  state-vars (build-session-state-vars current-record)
-                  _ (when (seq state-vars)
-                      (<! (http/put (str api-base "/api/session/" session-id "/state")
-                                    {:json-params state-vars})))
-                  func-resp (<! (http/post (str api-base "/api/session/function/" before-update-fn)
-                                           {:json-params {:sessionId session-id}}))
-                  user-msg (when (:success func-resp)
-                             (get-in func-resp [:body :userMessage]))]
-              (<! (http/delete (str api-base "/api/session/" session-id)))
-              (when user-msg (js/alert user-msg))
-              (boolean user-msg))))))))
-
-(defn- do-insert-record!
-  "Insert a new record via API and update state."
-  [record-source record-for-api pk-field-name pos]
-  (go
-    (let [insert-data (if (= pk-field-name "id")
-                        (dissoc record-for-api "id") record-for-api)
-          response (<! (http/post (str api-base "/api/data/" record-source)
-                                  {:json-params insert-data :headers (db-headers)}))]
-      (if (:success response)
-        (let [new-record (get-in response [:body :data])]
-          (println "Record inserted successfully")
-          (swap! app-state assoc-in [:form-editor :records (dec pos)] new-record)
-          (swap! app-state assoc-in [:form-editor :current-record] new-record)
-          (swap! app-state assoc-in [:form-editor :record-dirty?] false))
-        (do (println "Error inserting record:" (:body response))
-            (log-error! "Failed to insert record" "save-record" {:response (:body response)}))))))
-
-(defn- do-update-record!
-  "Update an existing record via API and update state."
-  [record-source record-for-api pk-field-name pk-value pos]
-  (go
-    (let [update-data (dissoc record-for-api pk-field-name)
-          response (<! (http/put (str api-base "/api/data/" record-source "/" pk-value)
-                                 {:json-params update-data :headers (db-headers)}))]
-      (if (:success response)
-        (let [updated-record (get-in response [:body :data])]
-          (println "Record updated successfully")
-          (swap! app-state assoc-in [:form-editor :records (dec pos)] updated-record)
-          (swap! app-state assoc-in [:form-editor :current-record] updated-record)
-          (swap! app-state assoc-in [:form-editor :record-dirty?] false))
-        (do (println "Error updating record:" (:body response))
-            (log-error! "Failed to update record" "save-record" {:response (:body response)}))))))
-
-(defn- check-no-pk?
-  "Return true if table has no detectable PK and record isn't explicitly new."
-  [pk-from-fields current-record]
-  (and (nil? pk-from-fields)
-       (not (contains? current-record :id))
-       (not (contains? current-record "id"))
-       (not (:__new__ current-record))))
-
-(defn save-current-record!
-  "Save the current record to the database"
-  []
-  (let [record-source (get-in @app-state [:form-editor :current :record-source])
-        current-record (get-in @app-state [:form-editor :current-record])
-        pos (get-in @app-state [:form-editor :record-position :current] 1)
-        record-dirty? (get-in @app-state [:form-editor :record-dirty?])]
-    (if-not (and record-source current-record record-dirty?)
-      (println "Save skipped - conditions not met")
-      (go
-        (let [abort? (<! (run-before-update-hook! current-record))]
-          (when-not abort?
-            (let [fields (get-record-source-fields record-source)
-                  pk-from-fields (some #(when (:pk %) (:name %)) fields)
-                  pk-field-name (or pk-from-fields "id")
-                  pk-value (pk-value-for-record current-record pk-field-name)
-                  is-new? (or (:__new__ current-record) (nil? pk-value) (= pk-value ""))
-                  record-for-api (record->api-map current-record)]
-              (if (check-no-pk? pk-from-fields current-record)
-                (js/alert (str "Cannot save: table \"" record-source "\" has no primary key. "
-                               "Add a primary key to this table before editing records."))
-                (if is-new?
-                  (<! (do-insert-record! record-source record-for-api pk-field-name pos))
-                  (<! (do-update-record! record-source record-for-api pk-field-name pk-value pos)))))))))))
-
-(defn new-record!
-  "Create a new empty record"
-  []
-  (let [total (get-in @app-state [:form-editor :record-position :total] 0)
-        ;; Mark as new so save knows to INSERT not UPDATE
-        new-record {:__new__ true}]
-    ;; Add empty record to records array (for continuous forms display)
-    (swap! app-state update-in [:form-editor :records] #(conj (vec %) new-record))
-    (swap! app-state assoc-in [:form-editor :current-record] new-record)
-    (swap! app-state assoc-in [:form-editor :record-position] {:current (inc total) :total (inc total)})
-    (swap! app-state assoc-in [:form-editor :record-dirty?] true)))
-
-(defn- update-state-after-delete!
-  "Update form state after a record is successfully deleted."
-  [new-records pos]
-  (let [new-total (count new-records)
-        new-pos (min pos new-total)]
-    (swap! app-state assoc-in [:form-editor :records] new-records)
-    (if (> new-total 0)
-      (do
-        (swap! app-state assoc-in [:form-editor :record-position] {:current new-pos :total new-total})
-        (swap! app-state assoc-in [:form-editor :current-record] (nth new-records (dec new-pos))))
-      (do
-        (swap! app-state assoc-in [:form-editor :record-position] {:current 0 :total 0})
-        (swap! app-state assoc-in [:form-editor :current-record] {})))
-    (swap! app-state assoc-in [:form-editor :record-dirty?] false)))
-
-(defn delete-current-record!
-  "Delete the current record from the database"
-  []
-  (let [record-source (get-in @app-state [:form-editor :current :record-source])
-        current-record (get-in @app-state [:form-editor :current-record])
-        records (get-in @app-state [:form-editor :records] [])
-        pos (get-in @app-state [:form-editor :record-position :current] 1)]
-    (when (and record-source current-record)
-      (let [pk-field-name (detect-pk-field (get-record-source-fields record-source))
-            pk-value (pk-value-for-record current-record pk-field-name)]
-        (when pk-value
-          (go
-            (let [response (<! (http/delete (str api-base "/api/data/" record-source "/" pk-value)
-                                            {:headers (db-headers)}))]
-              (if (:success response)
-                (do (update-state-after-delete!
-                      (vec (concat (subvec records 0 (dec pos)) (subvec records pos))) pos)
-                    (println "Record deleted successfully"))
-                (do (println "Error deleting record:" (:body response))
-                    (log-error! "Failed to delete record" "delete-record" {:response (:body response)}))))))))))
-(defn get-record-source-fields
-  "Get fields for a record source (table or query)"
-  [record-source]
-  (when record-source
-    (let [tables (get-in @app-state [:objects :tables])
-          queries (get-in @app-state [:objects :queries])
-          table (first (filter #(= (:name %) record-source) tables))
-          query (first (filter #(= (:name %) record-source) queries))]
-      (or (:fields table) (:fields query) []))))
-
-;; --- Row-source cache (combobox/listbox population) ---
-
-(defn clear-row-source-cache!
-  "Reset the row-source cache. Called when switching forms."
-  []
-  (swap! app-state assoc-in [:form-editor :row-source-cache] {}))
-
-(defn- cache-row-source! [row-source data]
-  (swap! app-state assoc-in [:form-editor :row-source-cache row-source] data))
-
-(defn- parse-value-list
-  "Parse semicolon-delimited value list into row-source cache format."
-  [trimmed]
-  (let [items (->> (str/split trimmed #";")
-                   (mapv str/trim)
-                   (filterv #(not (str/blank? %)))
-                   (mapv #(str/replace % #"^\"|\"$" "")))]
-    {:rows (mapv (fn [v] {"value" v}) items) :fields [{:name "value"}]}))
-
-(defn- fetch-sql-row-source!
-  "Fetch row-source via SQL query execution."
-  [row-source trimmed]
-  (go
-    (let [response (<! (http/post (str api-base "/api/queries/run")
-                                  {:json-params {:sql trimmed} :headers (db-headers)}))]
-      (cache-row-source! row-source
-        (if (:success response)
-          {:rows (or (get-in response [:body :data]) [])
-           :fields (or (get-in response [:body :fields]) [])}
-          {:rows [] :fields [] :error true})))))
-
-(defn- fetch-table-row-source!
-  "Fetch row-source from a table/query name."
-  [row-source trimmed]
-  (go
-    (let [response (<! (http/get (str api-base "/api/data/" trimmed)
-                                 {:query-params {:limit 1000} :headers (db-headers)}))]
-      (cache-row-source! row-source
-        (if (:success response)
-          (let [data (get-in response [:body :data] [])]
-            {:rows data
-             :fields (if (seq data)
-                       (mapv (fn [k] {:name (name k)}) (keys (first data)))
-                       [])})
-          {:rows [] :fields [] :error true})))))
-
-(defn fetch-row-source!
-  "Fetch and cache row-source data for a combobox/listbox."
-  [row-source]
-  (when (and row-source (not (str/blank? row-source)))
-    (when-not (get-in @app-state [:form-editor :row-source-cache row-source])
-      (cache-row-source! row-source :loading)
-      (let [trimmed (str/trim row-source)]
-        (cond
-          (and (not (re-find #"(?i)^select\s" trimmed))
-               (str/includes? trimmed ";"))
-          (cache-row-source! row-source (parse-value-list trimmed))
-
-          (re-find #"(?i)^select\s" trimmed)
-          (fetch-sql-row-source! row-source trimmed)
-
-          :else
-          (fetch-table-row-source! row-source trimmed))))))
-(defn get-row-source-options
-  "Returns cached row-source data. nil if not loaded, :loading if in-flight,
-   {:rows [...] :fields [...]} if ready."
-  [row-source]
-  (get-in @app-state [:form-editor :row-source-cache row-source]))
-
-;; --- Subform cache (child form definition + child records) ---
-
-(defn clear-subform-cache!
-  "Reset the subform cache. Called when switching forms."
-  []
-  (swap! app-state assoc-in [:form-editor :subform-cache] {}))
-
-(defn fetch-subform-definition!
-  "Fetch and cache a child form definition for a subform control."
-  [source-form-name]
-  (when (and source-form-name (not (str/blank? source-form-name)))
-    (let [cached (get-in @app-state [:form-editor :subform-cache source-form-name :definition])]
-      (when-not cached
-        (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :definition] :loading)
-        (go
-          (let [response (<! (http/get (str api-base "/api/forms/" source-form-name)
-                                        {:headers (db-headers)}))]
-            (if (:success response)
-              (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :definition]
-                     (:body response))
-              (do
-                (println "Error fetching subform definition:" source-form-name)
-                (log-event! "error" (str "Failed to fetch subform definition: " source-form-name) "fetch-subform-definition")
-                (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :definition]
-                       {:error true})))))))))
-
-(defn fetch-subform-records!
-  "Fetch and cache child records for a subform, filtered by parent link fields.
-   Only re-fetches when the filter key (master field values) changes."
-  [source-form-name record-source link-child-fields link-master-fields current-record]
-  (when (and source-form-name record-source (seq link-child-fields) (seq link-master-fields))
-    (let [;; Build filter from paired child/master fields
-          filter-map (reduce (fn [m [child-field master-field]]
-                               (let [master-val (or (get current-record (keyword master-field))
-                                                    (get current-record master-field))]
-                                 (if master-val
-                                   (assoc m child-field master-val)
-                                   m)))
-                             {}
-                             (map vector link-child-fields link-master-fields))
-          filter-key (pr-str filter-map)
-          cached-filter-key (get-in @app-state [:form-editor :subform-cache source-form-name :filter-key])]
-      (when (and (seq filter-map) (not= filter-key cached-filter-key))
-        (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :filter-key] filter-key)
-        (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :records] :loading)
-        (go
-          (let [response (<! (http/get (str api-base "/api/data/" record-source)
-                                        {:query-params {:limit 1000
-                                                        :filter (.stringify js/JSON (clj->js filter-map))}
-                                         :headers (db-headers)}))]
-            (if (:success response)
-              (let [data (get-in response [:body :data] [])]
-                (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :records]
-                       (vec data)))
-              (do
-                (println "Error fetching subform records:" source-form-name (:body response))
-                (log-event! "error" (str "Failed to fetch subform records: " source-form-name) "fetch-subform-records" {:response (:body response)})
-                (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :records]
-                       [])))))))))
-
-(defn save-subform-cell!
-  "Save an edited cell value in a subform record.
-   Optimistic local update, then PUT to API. On error, clear filter-key to force re-fetch."
-  [source-form-name row-idx col-name value]
-  (let [cache-path [:form-editor :subform-cache source-form-name]
-        definition (get-in @app-state (conj cache-path :definition))
-        child-record-source (when (map? definition)
-                              (or (:record-source definition) (:record_source definition)))
-        records (get-in @app-state (conj cache-path :records))]
-    (when (and child-record-source (vector? records) (< row-idx (count records)))
-      (let [record (nth records row-idx)
-            fields (get-record-source-fields child-record-source)
-            pk-field-name (or (some #(when (:pk %) (:name %)) fields) "id")
-            pk-value (or (get record (keyword pk-field-name))
-                         (get record pk-field-name))]
-        (when pk-value
-          ;; Optimistic local update
-          (swap! app-state assoc-in (conj cache-path :records row-idx (keyword col-name)) value)
-          (go
-            (let [response (<! (http/put (str api-base "/api/data/" child-record-source "/" pk-value)
-                                          {:json-params {col-name value}
-                                           :headers (db-headers)}))]
-              (when-not (:success response)
-                (println "Error saving subform cell:" (:body response))
-                (log-event! "error" "Failed to save subform cell" "save-subform-cell" {:response (:body response)})
-                ;; Clear filter-key to force re-fetch
-                (swap! app-state assoc-in (conj cache-path :filter-key) nil)))))))))
-
-(defn new-subform-record!
-  "Create a new child record in a subform, pre-populated with link field values."
-  [source-form-name link-child-fields link-master-fields current-record]
-  (let [cache-path [:form-editor :subform-cache source-form-name]
-        definition (get-in @app-state (conj cache-path :definition))
-        child-record-source (when (map? definition)
-                              (or (:record-source definition) (:record_source definition)))]
-    (when child-record-source
-      (let [;; Build new record with link values pre-populated
-            new-data (reduce (fn [m [child-field master-field]]
-                               (let [master-val (or (get current-record (keyword master-field))
-                                                    (get current-record master-field))]
-                                 (if master-val
-                                   (assoc m child-field master-val)
-                                   m)))
-                             {}
-                             (map vector link-child-fields link-master-fields))]
-        (go
-          (let [response (<! (http/post (str api-base "/api/data/" child-record-source)
-                                         {:json-params new-data
-                                          :headers (db-headers)}))]
-            (if (:success response)
-              (do
-                (println "Subform record created")
-                ;; Clear filter-key to force re-fetch
-                (swap! app-state assoc-in (conj cache-path :filter-key) nil))
-              (do (println "Error creating subform record:" (:body response))
-                  (log-event! "error" "Failed to create subform record" "new-subform-record" {:response (:body response)})))))))))
-
-(defn delete-subform-record!
-  "Delete a child record from a subform by row index."
-  [source-form-name row-idx]
-  (let [cache-path [:form-editor :subform-cache source-form-name]
-        definition (get-in @app-state (conj cache-path :definition))
-        child-record-source (when (map? definition)
-                              (or (:record-source definition) (:record_source definition)))
-        records (get-in @app-state (conj cache-path :records))]
-    (when (and child-record-source (vector? records) (< row-idx (count records)))
-      (let [record (nth records row-idx)
-            fields (get-record-source-fields child-record-source)
-            pk-field-name (or (some #(when (:pk %) (:name %)) fields) "id")
-            pk-value (or (get record (keyword pk-field-name))
-                         (get record pk-field-name))]
-        (when pk-value
-          (go
-            (let [response (<! (http/delete (str api-base "/api/data/" child-record-source "/" pk-value)
-                                             {:headers (db-headers)}))]
-              (if (:success response)
-                (do
-                  (println "Subform record deleted")
-                  ;; Clear filter-key to force re-fetch
-                  (swap! app-state assoc-in (conj cache-path :filter-key) nil))
-                (do (println "Error deleting subform record:" (:body response))
-                    (log-event! "error" "Failed to delete subform record" "delete-subform-record" {:response (:body response)}))))))))))
-
-(def ^:private yes-no-form-props
-  "Form properties that use yes/no (1/0) values."
-  [:popup :modal :allow-additions :allow-deletions :allow-edits
-   :navigation-buttons :record-selectors :dividing-lines :data-entry])
-
-(def ^:private yes-no-defaults
-  "Default values for yes/no form properties (matching Access defaults)."
-  {:popup 0 :modal 0 :allow-additions 1 :allow-deletions 1 :allow-edits 1
-   :navigation-buttons 1 :record-selectors 1 :dividing-lines 1 :data-entry 0})
-
-(def ^:private yes-no-control-props
+(def yes-no-control-props
   "Control properties that use yes/no (1/0) values."
   [:visible :enabled :locked :tab-stop])
 
-(def ^:private yes-no-control-defaults
+(def yes-no-control-defaults
   "Default values for yes/no control properties."
   {:visible 1 :enabled 1 :locked 0 :tab-stop 1})
 
-(def ^:private number-form-props
-  "Form properties that should be numbers."
-  [:width])
-
-(def ^:private number-control-props
+(def number-control-props
   "Control properties that should be numbers."
   [:width :height :x :y :font-size :tab-index])
 
-(defn- coerce-yes-no
+(defn coerce-yes-no
   "Coerce any truthy/falsy value to 1 or 0."
   [v]
   (cond
@@ -1057,7 +361,7 @@
     (string? v)          (if (#{"true" "yes" "1"} (.toLowerCase v)) 1 0)
     :else                1))
 
-(defn- coerce-to-number
+(defn coerce-to-number
   "Coerce a value to number. nil->nil, number->number, string->parseFloat, else->nil."
   [v]
   (cond
@@ -1067,7 +371,7 @@
                   (when-not (js/isNaN n) n))
     :else       nil))
 
-(defn- coerce-to-keyword
+(defn coerce-to-keyword
   "Coerce a value to keyword. nil->nil, keyword->keyword, string->keyword, else->passthrough."
   [v]
   (cond
@@ -1076,7 +380,7 @@
     (string? v)  (keyword (clojure.string/replace v #"^:" ""))
     :else        v))
 
-(defn- normalize-control
+(defn normalize-control
   "Normalize a single control: keywordize :type, coerce yes/no and number props."
   [ctrl]
   (-> (reduce (fn [c prop]
@@ -1092,73 +396,6 @@
                     c))
                 % number-control-props))))
 
-(defn- normalize-section
-  "Normalize all controls in a form section (header/detail/footer)."
-  [section]
-  (if (:controls section)
-    (update section :controls #(mapv normalize-control %))
-    section))
-
-(defn- normalize-form-definition [definition]
-  "Apply defaults and normalize types across the full form tree."
-  (-> (reduce (fn [def prop]
-                (let [v (get def prop)]
-                  (if (nil? v)
-                    (assoc def prop (get yes-no-defaults prop 0))
-                    (assoc def prop (coerce-yes-no v)))))
-              definition
-              yes-no-form-props)
-      (#(reduce (fn [d prop]
-                  (if (contains? d prop)
-                    (assoc d prop (coerce-to-number (get d prop)))
-                    d))
-                % number-form-props))
-      (update :header normalize-section)
-      (update :detail normalize-section)
-      (update :footer normalize-section)))
-
-(defn- setup-form-editor!
-  "Initialize the form editor state with a normalized definition."
-  [form-id definition]
-  (swap! app-state assoc :form-editor
-         {:form-id form-id
-          :dirty? false
-          :original definition
-          :current definition
-          :selected-control nil})
-  (set-view-mode! :view))
-
-(defn- auto-save-form-state!
-  "Auto-save dirty record and/or form definition before switching."
-  []
-  (when (get-in @app-state [:form-editor :record-dirty?])
-    (save-current-record!))
-  (when (get-in @app-state [:form-editor :dirty?])
-    (save-form!)))
-
-(defn load-form-for-editing! [form]
-  (auto-save-form-state!)
-  (clear-row-source-cache!)
-  (clear-subform-cache!)
-  (if (:definition form)
-    (setup-form-editor! (:id form) (normalize-form-definition (:definition form)))
-    (go
-      (let [response (<! (http/get (str api-base "/api/forms/" (:filename form))
-                                    {:headers (db-headers)}))]
-        (if (:success response)
-          (let [definition (normalize-form-definition (dissoc (:body response) :id :name))]
-            (swap! app-state update-in [:objects :forms]
-                   (fn [forms]
-                     (mapv #(if (= (:id %) (:id form))
-                              (assoc % :definition definition) %)
-                           forms)))
-            (setup-form-editor! (:id form) definition))
-          (do (println "Error loading form:" (:filename form))
-              (log-error! (str "Failed to load form: " (:filename form)) "load-form-for-editing" {:form (:filename form)})))))))
-
-(defn select-control! [idx]
-  (swap! app-state assoc-in [:form-editor :selected-control] idx))
-
 ;; Options dialog
 (defn open-options-dialog! []
   (swap! app-state assoc :options-dialog-open? true))
@@ -1173,262 +410,9 @@
 (defn set-grid-size! [size]
   (swap! app-state assoc-in [:config :form-designer :grid-size] size))
 
-(defn delete-control!
-  "Delete a control from a section"
-  [section idx]
-  (let [form-editor (:form-editor @app-state)
-        current (:current form-editor)
-        controls (or (get-in current [section :controls]) [])]
-    (when (< idx (count controls))
-      (let [new-controls (vec (concat (subvec controls 0 idx)
-                                      (subvec controls (inc idx))))]
-        (swap! app-state assoc-in [:form-editor :selected-control] nil)
-        (set-form-definition! (assoc-in current [section :controls] new-controls))))))
-
-(defn update-control!
-  "Update a property of a control in a section"
-  [section idx prop value]
-  (let [form-editor (:form-editor @app-state)
-        current (:current form-editor)
-        controls (or (get-in current [section :controls]) [])]
-    (when (< idx (count controls))
-      (set-form-definition!
-       (assoc-in current [section :controls]
-                 (update controls idx assoc prop value))))))
-
 ;; ============================================================
-;; REPORT EDITOR
+;; LOAD REPORTS (stays in core - called by load-databases!)
 ;; ============================================================
-
-(defn- normalize-report-control
-  "Normalize a single report control: keywordize :type, coerce yes/no and number props."
-  [ctrl]
-  (-> (reduce (fn [c prop]
-                (let [v (get c prop)]
-                  (if (nil? v)
-                    (assoc c prop (get yes-no-control-defaults prop 0))
-                    (assoc c prop (coerce-yes-no v)))))
-              (update ctrl :type coerce-to-keyword)
-              yes-no-control-props)
-      (#(reduce (fn [c prop]
-                  (if (contains? c prop)
-                    (assoc c prop (coerce-to-number (get c prop)))
-                    c))
-                % number-control-props))))
-
-(defn- normalize-report-section
-  "Normalize all controls in a report section."
-  [section]
-  (if (:controls section)
-    (update section :controls #(mapv normalize-report-control %))
-    section))
-
-(def ^:private report-section-keys
-  [:report-header :page-header :detail :page-footer :report-footer])
-
-(defn- normalize-report-definition
-  "Apply defaults and normalize types across the full report definition."
-  [definition]
-  (let [;; Normalize standard sections
-        def-with-sections
-        (reduce (fn [d section-key]
-                  (if (get d section-key)
-                    (update d section-key normalize-report-section)
-                    d))
-                definition
-                report-section-keys)
-        ;; Normalize group sections (group-header-0, group-footer-0, etc.)
-        all-keys (keys def-with-sections)
-        group-keys (filter (fn [k]
-                             (let [n (name k)]
-                               (or (str/starts-with? n "group-header-")
-                                   (str/starts-with? n "group-footer-"))))
-                           all-keys)]
-    (reduce (fn [d gk]
-              (if (get d gk)
-                (update d gk normalize-report-section)
-                d))
-            def-with-sections
-            group-keys)))
-
-(defn set-report-definition!
-  "Update report editor current definition and mark dirty."
-  [definition]
-  (swap! app-state assoc-in [:report-editor :current] definition)
-  (swap! app-state assoc-in [:report-editor :dirty?]
-         (not= definition (get-in @app-state [:report-editor :original]))))
-
-(defn set-report-view-mode!
-  "Set report view mode - :design or :preview"
-  [mode]
-  (swap! app-state assoc-in [:report-editor :view-mode] mode)
-  (when (= mode :preview)
-    (let [record-source (get-in @app-state [:report-editor :current :record-source])]
-      (when record-source
-        (go
-          (let [query-params (build-data-query-params
-                               (get-in @app-state [:report-editor :current :order-by])
-                               (get-in @app-state [:report-editor :current :filter]))
-                response (<! (http/get (str api-base "/api/data/" record-source)
-                                       {:query-params query-params
-                                        :headers (db-headers)}))]
-            (if (:success response)
-              (let [data (get-in response [:body :data])]
-                (println "Report preview: loaded" (count data) "records from" record-source)
-                (swap! app-state assoc-in [:report-editor :records] (vec data)))
-              (do (println "Error loading report data:" (:body response))
-                  (log-error! "Failed to load report preview data" "set-report-view-mode" {:response (:body response)})))))))))
-
-
-(defn get-report-view-mode []
-  (get-in @app-state [:report-editor :view-mode] :design))
-
-(defn select-report-control!
-  "Select a report control or section. Pass nil for report-level, {:section :page-header} for section, {:section :detail :idx 0} for control."
-  [selection]
-  (swap! app-state assoc-in [:report-editor :selected-control] selection))
-
-(defn update-report-control!
-  "Update a property of a control in a report section"
-  [section idx prop value]
-  (let [current (get-in @app-state [:report-editor :current])
-        controls (or (get-in current [section :controls]) [])]
-    (when (< idx (count controls))
-      (set-report-definition!
-       (assoc-in current [section :controls]
-                 (update controls idx assoc prop value))))))
-
-(defn delete-report-control!
-  "Delete a control from a report section"
-  [section idx]
-  (let [current (get-in @app-state [:report-editor :current])
-        controls (or (get-in current [section :controls]) [])]
-    (when (< idx (count controls))
-      (let [new-controls (vec (concat (subvec controls 0 idx)
-                                      (subvec controls (inc idx))))]
-        (swap! app-state assoc-in [:report-editor :selected-control] nil)
-        (set-report-definition! (assoc-in current [section :controls] new-controls))))))
-
-(defn- setup-report-editor!
-  "Initialize the report editor state with a definition."
-  [report-id definition]
-  (swap! app-state assoc :report-editor
-         {:report-id report-id
-          :dirty? false
-          :original definition
-          :current definition
-          :selected-control nil
-          :properties-tab :format
-          :view-mode :design
-          :records []}))
-
-(defn- parse-report-body
-  "Parse API response body into a normalized report definition."
-  [body report-name]
-  (if (= "edn" (:_format body))
-    {:_raw_edn (:_raw_edn body) :_format "edn" :name report-name}
-    (normalize-report-definition (dissoc body :id :name))))
-
-(defn load-report-for-editing!
-  "Load a report definition for editing"
-  [report]
-  (when (get-in @app-state [:report-editor :dirty?])
-    (save-report!))
-  (if (:definition report)
-    (do (setup-report-editor! (:id report) (normalize-report-definition (:definition report)))
-        (set-report-view-mode! :design))
-    (go
-      (let [response (<! (http/get (str api-base "/api/reports/" (:filename report))
-                                    {:headers (db-headers)}))]
-        (if (:success response)
-          (let [definition (parse-report-body (:body response) (:name report))]
-            (swap! app-state update-in [:objects :reports]
-                   (fn [reports]
-                     (mapv #(if (= (:id %) (:id report))
-                              (assoc % :definition definition) %)
-                           reports)))
-            (setup-report-editor! (:id report) definition))
-          (do (println "Error loading report:" (:filename report))
-              (log-error! (str "Failed to load report: " (:filename report)) "load-report-for-editing" {:report (:filename report)})))))))
-
-(defn do-save-report!
-  "Actually save the report"
-  []
-  (let [current (get-in @app-state [:report-editor :current])
-        report-id (get-in @app-state [:report-editor :report-id])]
-    (when (and report-id current)
-      ;; Update the report in objects list
-      (update-object! :reports report-id {:definition current})
-      ;; Update the tab name if report name changed
-      (swap! app-state update :open-objects
-             (fn [tabs]
-               (mapv (fn [tab]
-                       (if (and (= (:type tab) :reports)
-                                (= (:id tab) report-id))
-                         (assoc tab :name (or (:name current) (:name tab)))
-                         tab))
-                     tabs)))
-      ;; Mark as clean
-      (swap! app-state assoc-in [:report-editor :dirty?] false)
-      (swap! app-state assoc-in [:report-editor :original] current)
-      ;; Save to file
-      (let [report (first (filter #(= (:id %) report-id)
-                                  (get-in @app-state [:objects :reports])))]
-        (save-report-to-file! report)))))
-
-(defn save-report!
-  "Lint the report and save if valid"
-  []
-  (let [current (get-in @app-state [:report-editor :current])
-        report-id (get-in @app-state [:report-editor :report-id])
-        report-obj (first (filter #(= (:id %) report-id)
-                                  (get-in @app-state [:objects :reports])))
-        report-with-meta (merge {:id report-id :name (:name report-obj)} current)]
-    (when (and report-id current)
-      (clear-report-lint-errors!)
-      (go
-        (let [response (<! (http/post (str api-base "/api/lint/report")
-                                       {:json-params {:report report-with-meta}}))]
-          (if (:success response)
-            (let [result (:body response)]
-              (if (:valid result)
-                (do
-                  (do-save-report!)
-                  (println "Report saved successfully"))
-                (do
-                  (set-report-lint-errors! (:errors result))
-                  (println "Report has validation errors:" (:errors result)))))
-            (do
-              ;; Lint endpoint failed, save anyway
-              (println "Lint check failed, saving anyway")
-              (do-save-report!))))))))
-
-(defn save-report-to-file!
-  "Save a report to the database via backend API"
-  [report]
-  (let [filename (or (:filename report)
-                     (-> (:name report)
-                         (str/lower-case)
-                         (str/replace #"\s+" "_")))
-        report-data (merge {:id (:id report)
-                            :name (:name report)}
-                           (:definition report))]
-    (go
-      (let [response (<! (http/put (str api-base "/api/reports/" filename)
-                                   {:json-params report-data}))]
-        (if (:success response)
-          (do
-            (println "Saved report:" filename)
-            (swap! app-state update-in [:objects :reports]
-                   (fn [reports]
-                     (mapv (fn [r]
-                             (if (= (:id r) (:id report))
-                               (assoc r :filename filename)
-                               r))
-                           reports))))
-          (do
-            (println "Error saving report:" (:body response))
-            (log-error! (str "Failed to save report: " (get-in response [:body :error])) "save-report" {:response (:body response)})))))))
 
 (defn load-reports!
   "Load all reports for current database from API"
@@ -1577,34 +561,6 @@
           (println "Could not load forms from API")
           (object-load-complete!))))))
 
-(defn save-form-to-file!
-  "Save a form to the database via backend API"
-  [form]
-  (let [filename (or (:filename form)
-                     (-> (:name form)
-                         (str/lower-case)
-                         (str/replace #"\s+" "_")))
-        form-data (merge {:id (:id form)
-                          :name (:name form)}
-                         (:definition form))]
-    (go
-      (let [response (<! (http/put (str api-base "/api/forms/" filename)
-                                   {:json-params form-data}))]
-        (if (:success response)
-          (do
-            (println "Saved form:" filename)
-            ;; Update the form's filename in state
-            (swap! app-state update-in [:objects :forms]
-                   (fn [forms]
-                     (mapv (fn [f]
-                             (if (= (:id f) (:id form))
-                               (assoc f :filename filename)
-                               f))
-                           forms))))
-          (do
-            (println "Error saving form:" (:body response))
-            (log-error! (str "Failed to save form: " (get-in response [:body :error])) "save-form" {:response (:body response)})))))))
-
 (defn- transform-api-field
   "Transform a single API field into internal format."
   [field]
@@ -1721,12 +677,22 @@
 (defn set-chat-loading! [loading?]
   (swap! app-state assoc :chat-loading? loading?))
 
+(defn- get-record-source-fields-for-chat
+  "Inline field lookup for chat navigation (avoids circular dep with state_form)."
+  [record-source]
+  (when record-source
+    (let [tables (get-in @app-state [:objects :tables])
+          queries (get-in @app-state [:objects :queries])
+          table (first (filter #(= (:name %) record-source) tables))
+          query (first (filter #(= (:name %) record-source) queries))]
+      (or (:fields table) (:fields query) []))))
+
 (defn navigate-to-record-by-id!
-  "Navigate to a record by its primary key ID"
+  "Navigate to a record by its primary key ID (used by chat)"
   [record-id]
   (let [records (get-in @app-state [:form-editor :records] [])
         record-source (get-in @app-state [:form-editor :current :record-source])
-        fields (get-record-source-fields record-source)
+        fields (get-record-source-fields-for-chat record-source)
         pk-field-name (or (some #(when (:pk %) (:name %)) fields) "id")
         ;; Find the position of the record with this ID
         pos (first (keep-indexed
@@ -1737,7 +703,12 @@
                         (inc idx)))
                     records))]
     (when pos
-      (navigate-to-record! pos))))
+      ;; Inline navigate logic (avoids circular dep with state_form/navigate-to-record!)
+      (let [total (count records)]
+        (when (and (> total 0) (<= pos total))
+          (swap! app-state assoc-in [:form-editor :record-position] {:current pos :total total})
+          (swap! app-state assoc-in [:form-editor :current-record] (nth records (dec pos)))
+          (swap! app-state assoc-in [:form-editor :record-dirty?] false))))))
 
 (defn send-chat-message!
   "Send a message to the LLM and get a response"

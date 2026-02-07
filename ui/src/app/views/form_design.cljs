@@ -2,6 +2,7 @@
   "Form design surface - drag-drop editor for form controls"
   (:require [reagent.core :as r]
             [app.state :as state]
+            [app.state-form :as state-form]
             [app.views.form-utils :as form-utils]))
 
 (defn field-item
@@ -67,7 +68,7 @@
                        :width 150
                        :height 18}
         new-controls (vec (conj controls label-control new-control))]
-    (state/set-form-definition!
+    (state-form/set-form-definition!
      (assoc-in current [section :controls] new-controls))))
 
 (defn move-control!
@@ -82,7 +83,7 @@
         snapped-x (form-utils/snap-to-grid new-x ctrl-key?)
         snapped-y (form-utils/snap-to-grid new-y ctrl-key?)]
     (when (< control-idx (count controls))
-      (state/set-form-definition!
+      (state-form/set-form-definition!
        (assoc-in current [section :controls]
                  (update controls control-idx
                          (fn [ctrl]
@@ -102,7 +103,7 @@
          :draggable true
          :on-click (fn [e]
                      (.stopPropagation e)
-                     (state/select-control! {:section section :idx idx}))
+                     (state-form/select-control! {:section section :idx idx}))
          :on-drag-start (fn [e]
                           (let [rect (.getBoundingClientRect (.-target e))
                                 offset-x (- (.-clientX e) (.-left rect))
@@ -116,7 +117,7 @@
         [:button.control-delete
          {:on-click (fn [e]
                       (.stopPropagation e)
-                      (state/delete-control! section idx))
+                      (state-form/delete-control! section idx))
           :title "Delete"}
          "\u00D7"]])]))
 
@@ -136,7 +137,7 @@
           current-height (form-utils/get-section-height form-def section)
           new-height (max 20 (+ current-height delta))]
       (reset! resize-state {:section section :start-y current-y})
-      (state/set-form-definition!
+      (state-form/set-form-definition!
        (assoc-in form-def [section :height] new-height)))))
 
 (defn stop-resize! []
@@ -209,7 +210,7 @@
        :on-drag-over #(.preventDefault %)
        :on-click #(when (or (.. % -target -classList (contains "section-body"))
                             (.. % -target -classList (contains "controls-container")))
-                    (state/select-control! {:section section}))
+                    (state-form/select-control! {:section section}))
        :on-drop #(handle-section-drop! section %)}
       (if (empty? controls)
         [:div.section-empty (if (= section :detail) "Drag fields here" "")]
@@ -234,15 +235,15 @@
     (when (:visible? ctx-menu)
       [:div.context-menu
        {:style {:left (:x ctx-menu) :top (:y ctx-menu)}}
-       [ctx-menu-item "Save" #(if (= (state/get-view-mode) :view)
-                                (state/save-current-record!) (state/save-form!))]
-       [ctx-menu-item "Close" state/close-current-tab!]
-       [ctx-menu-item "Close All" state/close-all-tabs!]
+       [ctx-menu-item "Save" #(if (= (state-form/get-view-mode) :view)
+                                (state-form/save-current-record!) (state-form/save-form!))]
+       [ctx-menu-item "Close" state-form/close-current-tab!]
+       [ctx-menu-item "Close All" state-form/close-all-tabs!]
        [:div.context-menu-separator]
-       [ctx-menu-item "Form View" #(state/set-view-mode! :view)
-        (when (= (state/get-view-mode) :view) "active")]
-       [ctx-menu-item "Design View" #(state/set-view-mode! :design)
-        (when (= (state/get-view-mode) :design) "active")]])))
+       [ctx-menu-item "Form View" #(state-form/set-view-mode! :view)
+        (when (= (state-form/get-view-mode) :view) "active")]
+       [ctx-menu-item "Design View" #(state-form/set-view-mode! :design)
+        (when (= (state-form/get-view-mode) :design) "active")]])))
 
 (defn form-canvas
   "The design surface where controls are placed"
@@ -262,11 +263,11 @@
                      (state/hide-context-menu!)
                      (when (and selected (or (= (.-key e) "Delete") (= (.-key e) "Backspace")))
                        (.preventDefault e)
-                       (state/delete-control! (:section selected) (:idx selected))))}
+                       (state-form/delete-control! (:section selected) (:idx selected))))}
      [:div.canvas-header
       [:div.form-selector
        {:class (when (nil? selected) "selected")
-        :on-click #(do (.stopPropagation %) (state/select-control! nil))
+        :on-click #(do (.stopPropagation %) (state-form/select-control! nil))
         :on-context-menu #(do (.preventDefault %) (.stopPropagation %)
                               (state/show-context-menu! (.-clientX %) (.-clientY %)))
         :title "Select form to edit properties (right-click for menu)"}]

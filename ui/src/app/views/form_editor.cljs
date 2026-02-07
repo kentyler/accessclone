@@ -2,6 +2,7 @@
   "Form editor/designer - replaces Access design view"
   (:require [clojure.string]
             [app.state :as state]
+            [app.state-form :as state-form]
             [app.views.form-properties :as form-properties]
             [app.views.form-design :as form-design]
             [app.views.form-view :as form-view]
@@ -28,7 +29,7 @@
        [:div.lint-errors-header
         [:span.lint-errors-title "Form Validation Errors"]
         [:button.lint-errors-close
-         {:on-click state/clear-lint-errors!}
+         {:on-click state-form/clear-lint-errors!}
          "\u00D7"]]
        [:ul.lint-errors-list
         (for [[idx error] (map-indexed vector errors)]
@@ -41,35 +42,35 @@
          {:on-click #(ask-ai-to-fix-errors! errors)}
          "Ask AI to Help Fix"]
         [:button.secondary-btn
-         {:on-click state/clear-lint-errors!}
+         {:on-click state-form/clear-lint-errors!}
          "Dismiss"]]])))
 
 (defn form-toolbar
   "Toolbar with form actions"
   []
   (let [dirty? (get-in @state/app-state [:form-editor :dirty?])
-        view-mode (state/get-view-mode)]
+        view-mode (state-form/get-view-mode)]
     [:div.form-toolbar
      [:div.toolbar-left
       [:button.toolbar-btn
        {:class (when (= view-mode :design) "active")
         :title "Design View"
-        :on-click #(state/set-view-mode! :design)}
+        :on-click #(state-form/set-view-mode! :design)}
        "Design"]
       [:button.toolbar-btn
        {:class (when (= view-mode :view) "active")
         :title "Form View"
-        :on-click #(state/set-view-mode! :view)}
+        :on-click #(state-form/set-view-mode! :view)}
        "View"]]
      [:div.toolbar-right
       [:button.secondary-btn
        {:disabled (not dirty?)
         :on-click #(let [original (get-in @state/app-state [:form-editor :original])]
-                     (state/set-form-definition! original))}
+                     (state-form/set-form-definition! original))}
        "Undo"]
       [:button.primary-btn
        {:disabled (not dirty?)
-        :on-click state/save-form!}
+        :on-click state-form/save-form!}
        "Save"]]]))
 
 (defn popup-context-menu
@@ -83,36 +84,36 @@
         {:on-click (fn [e]
                      (.stopPropagation e)
                      (state/hide-context-menu!)
-                     (if (= (state/get-view-mode) :view)
-                       (state/save-current-record!)
-                       (state/save-form!)))}
+                     (if (= (state-form/get-view-mode) :view)
+                       (state-form/save-current-record!)
+                       (state-form/save-form!)))}
         "Save"]
        [:div.context-menu-item
         {:on-click (fn [e]
                      (.stopPropagation e)
                      (state/hide-context-menu!)
-                     (state/close-current-tab!))}
+                     (state-form/close-current-tab!))}
         "Close"]
        [:div.context-menu-item
         {:on-click (fn [e]
                      (.stopPropagation e)
                      (state/hide-context-menu!)
-                     (state/close-all-tabs!))}
+                     (state-form/close-all-tabs!))}
         "Close All"]
        [:div.context-menu-separator]
        [:div.context-menu-item
-        {:class (when (= (state/get-view-mode) :view) "active")
+        {:class (when (= (state-form/get-view-mode) :view) "active")
          :on-click (fn [e]
                      (.stopPropagation e)
                      (state/hide-context-menu!)
-                     (state/set-view-mode! :view))}
+                     (state-form/set-view-mode! :view))}
         "Form View"]
        [:div.context-menu-item
-        {:class (when (= (state/get-view-mode) :design) "active")
+        {:class (when (= (state-form/get-view-mode) :design) "active")
          :on-click (fn [e]
                      (.stopPropagation e)
                      (state/hide-context-menu!)
-                     (state/set-view-mode! :design))}
+                     (state-form/set-view-mode! :design))}
         "Design View"]])))
 
 (defn- popup-view [current-def modal?]
@@ -127,7 +128,7 @@
                           (.stopPropagation e)
                           (state/show-context-menu! (.-clientX e) (.-clientY e)))}
       [:span.popup-title (or (:caption current-def) (:name current-def) "Form")]
-      [:button.popup-close {:on-click #(state/close-current-tab!)} "\u2715"]]
+      [:button.popup-close {:on-click #(state-form/close-current-tab!)} "\u2715"]]
      [form-view/form-view]]
     [popup-context-menu]]])
 
@@ -150,12 +151,12 @@
   []
   (let [active-tab (:active-tab @state/app-state)
         editing-form-id (get-in @state/app-state [:form-editor :form-id])
-        view-mode (state/get-view-mode)]
+        view-mode (state-form/get-view-mode)]
     (when (and active-tab (= (:type active-tab) :forms))
       (let [form (first (filter #(= (:id %) (:id active-tab))
                                 (get-in @state/app-state [:objects :forms])))]
         (when (and form (not= (:id form) editing-form-id))
-          (state/load-form-for-editing! form)))
+          (state-form/load-form-for-editing! form)))
       [:div.form-editor
        [form-toolbar]
        [lint-errors-panel]

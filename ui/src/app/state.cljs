@@ -217,7 +217,6 @@
           (set-current-database! (or current-db (first databases)))
           ;; Clear the saved-database-id now that we've used it
           (swap! app-state dissoc :saved-database-id)
-          (println "Loaded" (count databases) "databases, current:" (:name current-db))
           ;; Now load objects for the current database
           (start-loading-objects!)
           (load-tables!)
@@ -225,9 +224,7 @@
           (load-functions!)
           (load-forms!)
           (load-reports!))
-        (do
-          (println "Error loading databases:" (:body response))
-          (log-error! "Failed to load databases" "load-databases" {:response (:body response)}))))))
+        (log-error! "Failed to load databases" "load-databases" {:response (:body response)})))))
 
 (defn switch-database!
   "Switch to a different database"
@@ -252,10 +249,8 @@
           (load-functions!)
           (load-forms!)
           (load-reports!)
-          (println "Switched to database:" (:name new-db)))
-        (do
-          (println "Error switching database:" (:body response))
-          (log-error! "Failed to switch database" "switch-database" {:response (:body response)}))))))
+)
+        (log-error! "Failed to switch database" "switch-database" {:response (:body response)})))))
 
 ;; Sidebar
 (defn toggle-sidebar! []
@@ -423,7 +418,6 @@
       (if (:success response)
         (let [reports-data (get-in response [:body :reports] [])
               details (get-in response [:body :details] [])]
-          (println "Loading reports:" reports-data)
           (swap! app-state assoc-in [:objects :reports]
                  (vec (map-indexed
                         (fn [idx report-name]
@@ -435,7 +429,7 @@
                         reports-data)))
           (object-load-complete!))
         (do
-          (println "Could not load reports from API")
+          (log-event! "warning" "Could not load reports from API" "load-reports")
           (object-load-complete!))))))
 
 ;; ============================================================
@@ -510,9 +504,8 @@
     (let [response (<! (http/get (str api-base "/api/config")))]
       (if (:success response)
         (let [config (:body response)]  ;; Already parsed by cljs-http
-          (swap! app-state assoc :config config)
-          (println "Config loaded:" config))
-        (println "Could not load config - using defaults")))))
+          (swap! app-state assoc :config config))
+        (log-event! "warning" "Could not load config - using defaults" "load-config")))))
 
 (defn save-config!
   "Save app configuration to settings/config.json"
@@ -521,11 +514,8 @@
     (let [config (:config @app-state)
           response (<! (http/put (str api-base "/api/config")
                                  {:json-params config}))]
-      (if (:success response)
-        (println "Config saved")
-        (do
-          (println "Error saving config:" (:body response))
-          (log-error! "Failed to save configuration" "save-config" {:response (:body response)}))))))
+      (when-not (:success response)
+        (log-error! "Failed to save configuration" "save-config" {:response (:body response)})))))
 
 ;; Form operations (load from database via API)
 
@@ -545,7 +535,6 @@
       (if (:success response)
         (let [forms-data (get-in response [:body :forms] [])
               details (get-in response [:body :details] [])]
-          (println "Loading forms:" forms-data)
           ;; Build forms list from API response
           (swap! app-state assoc-in [:objects :forms]
                  (vec (map-indexed
@@ -558,7 +547,7 @@
                         forms-data)))
           (object-load-complete!))
         (do
-          (println "Could not load forms from API")
+          (log-event! "warning" "Could not load forms from API" "load-forms")
           (object-load-complete!))))))
 
 (defn- transform-api-field
@@ -587,10 +576,8 @@
                                        :fields (mapv transform-api-field (:fields table))})
                                     tables))]
           (swap! app-state assoc-in [:objects :tables] tables-with-ids)
-          (println "Loaded" (count tables-with-ids) "tables from database")
           (object-load-complete!))
         (do
-          (println "Error loading tables:" (:body response))
           (log-error! "Failed to load tables from database" "load-tables" {:response (:body response)})
           (object-load-complete!))))))
 
@@ -616,10 +603,8 @@
                                                  (:fields query))})
                                 queries)]
           (swap! app-state assoc-in [:objects :queries] (vec queries-with-ids))
-          (println "Loaded" (count queries-with-ids) "queries from database")
           (object-load-complete!))
         (do
-          (println "Error loading queries:" (:body response))
           (log-error! "Failed to load queries from database" "load-queries" {:response (:body response)})
           (object-load-complete!))))))
 
@@ -643,10 +628,8 @@
                                      :description (:description func)})
                                   functions)]
           (swap! app-state assoc-in [:objects :modules] (vec functions-with-ids))
-          (println "Loaded" (count functions-with-ids) "functions from database")
           (object-load-complete!))
         (do
-          (println "Error loading functions:" (:body response))
           (log-error! "Failed to load functions from database" "load-functions" {:response (:body response)})
           (object-load-complete!))))))
 
@@ -658,11 +641,8 @@
     (let [response (<! (http/get (str api-base "/api/access-import/scan")))]
       (if (:success response)
         (let [databases (get-in response [:body :databases] [])]
-          (swap! app-state assoc-in [:objects :access_databases] databases)
-          (println "Found" (count databases) "Access databases"))
-        (do
-          (println "Error scanning for Access databases:" (:body response))
-          (log-error! "Failed to scan for Access databases" "load-access-databases"))))))
+          (swap! app-state assoc-in [:objects :access_databases] databases))
+        (log-error! "Failed to scan for Access databases" "load-access-databases")))))
 
 ;; Chat panel
 (defn toggle-chat-panel! []
@@ -743,8 +723,7 @@
   (when (and @pending-ui-state (not (:loading-objects? @app-state)))
     ;; All objects loaded, now restore UI state
     (restore-ui-state! @pending-ui-state)
-    (reset! pending-ui-state nil)
-    (println "UI state restored")))
+    (reset! pending-ui-state nil)))
 
 ;; Initialize - load objects from files and database
 (defn init! []
@@ -752,7 +731,6 @@
     ;; First, load saved UI state
     (let [saved-ui-state (<! (load-ui-state!))]
       (when saved-ui-state
-        (println "Found saved UI state:" saved-ui-state)
         ;; Store for later restoration
         (reset! pending-ui-state saved-ui-state)
         ;; Restore app mode (import/run)
@@ -769,4 +747,4 @@
     ;; Load app configuration
     (load-config!)
 
-    (println "Application state initialized - loading from database")))
+))

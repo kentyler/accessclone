@@ -100,10 +100,8 @@
                                         :headers (db-headers)}))]
             (if (:success response)
               (let [data (get-in response [:body :data])]
-                (println "Report preview: loaded" (count data) "records from" record-source)
                 (swap! app-state assoc-in [:report-editor :records] (vec data)))
-              (do (println "Error loading report data:" (:body response))
-                  (log-error! "Failed to load report preview data" "set-report-view-mode" {:response (:body response)})))))))))
+              (log-error! "Failed to load report preview data" "set-report-view-mode" {:response (:body response)}))))))))
 
 (defn get-report-view-mode []
   (get-in @app-state [:report-editor :view-mode] :design))
@@ -177,8 +175,7 @@
                               (assoc % :definition definition) %)
                            reports)))
             (setup-report-editor! (:id report) definition))
-          (do (println "Error loading report:" (:filename report))
-              (log-error! (str "Failed to load report: " (:filename report)) "load-report-for-editing" {:report (:filename report)})))))))
+          (log-error! (str "Failed to load report: " (:filename report)) "load-report-for-editing" {:report (:filename report)}))))))
 
 ;; ============================================================
 ;; REPORT SAVE
@@ -198,18 +195,14 @@
       (let [response (<! (http/put (str api-base "/api/reports/" filename)
                                    {:json-params report-data}))]
         (if (:success response)
-          (do
-            (println "Saved report:" filename)
-            (swap! app-state update-in [:objects :reports]
-                   (fn [reports]
-                     (mapv (fn [r]
-                             (if (= (:id r) (:id report))
-                               (assoc r :filename filename)
-                               r))
-                           reports))))
-          (do
-            (println "Error saving report:" (:body response))
-            (log-error! (str "Failed to save report: " (get-in response [:body :error])) "save-report" {:response (:body response)})))))))
+          (swap! app-state update-in [:objects :reports]
+                 (fn [reports]
+                   (mapv (fn [r]
+                           (if (= (:id r) (:id report))
+                             (assoc r :filename filename)
+                             r))
+                         reports)))
+          (log-error! (str "Failed to save report: " (get-in response [:body :error])) "save-report" {:response (:body response)}))))))
 
 (defn do-save-report!
   "Actually save the report"
@@ -252,13 +245,7 @@
           (if (:success response)
             (let [result (:body response)]
               (if (:valid result)
-                (do
-                  (do-save-report!)
-                  (println "Report saved successfully"))
-                (do
-                  (set-report-lint-errors! (:errors result))
-                  (println "Report has validation errors:" (:errors result)))))
-            (do
-              ;; Lint endpoint failed, save anyway
-              (println "Lint check failed, saving anyway")
-              (do-save-report!))))))))
+                (do-save-report!)
+                (set-report-lint-errors! (:errors result))))
+            ;; Lint endpoint failed, save anyway
+            (do-save-report!)))))))

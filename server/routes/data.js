@@ -7,6 +7,39 @@ const express = require('express');
 const router = express.Router();
 const { logError } = require('../lib/events');
 
+// Cache: "databaseId:tableName" → pkColumnName
+// Invalidated via clearPkCache() when table schema changes
+const pkCache = new Map();
+
+async function getPrimaryKey(pool, tableName, databaseId) {
+  const cacheKey = `${databaseId}:${tableName}`;
+  if (pkCache.has(cacheKey)) return pkCache.get(cacheKey);
+
+  const result = await pool.query(`
+    SELECT kcu.column_name
+    FROM information_schema.table_constraints tc
+    JOIN information_schema.key_column_usage kcu
+      ON tc.constraint_name = kcu.constraint_name
+    WHERE tc.table_name = $1
+      AND tc.constraint_type = 'PRIMARY KEY'
+    LIMIT 1
+  `, [tableName]);
+
+  const pkColumn = result.rows.length > 0 ? result.rows[0].column_name : null;
+  pkCache.set(cacheKey, pkColumn);
+  return pkColumn;
+}
+
+function clearPkCache(databaseId) {
+  if (databaseId) {
+    for (const key of pkCache.keys()) {
+      if (key.startsWith(`${databaseId}:`)) pkCache.delete(key);
+    }
+  } else {
+    pkCache.clear();
+  }
+}
+
 module.exports = function(pool) {
   /**
    * GET /api/data/:source
@@ -94,7 +127,7 @@ module.exports = function(pool) {
     } catch (err) {
       console.error('Error fetching data:', err);
       logError(pool, 'GET /api/data/:source', 'Failed to fetch data', err, { databaseId: req.databaseId });
-      res.status(500).json({ error: 'Failed to fetch data', details: err.message });
+      res.status(500).json({ error: 'Failed to fetch data' });
     }
   });
 
@@ -110,22 +143,12 @@ module.exports = function(pool) {
         return res.status(400).json({ error: 'Invalid source name' });
       }
 
-      // Find primary key column
-      const pkResult = await pool.query(`
-        SELECT kcu.column_name
-        FROM information_schema.table_constraints tc
-        JOIN information_schema.key_column_usage kcu
-          ON tc.constraint_name = kcu.constraint_name
-        WHERE tc.table_name = $1
-          AND tc.constraint_type = 'PRIMARY KEY'
-        LIMIT 1
-      `, [source]);
-
-      if (pkResult.rows.length === 0) {
+      // Find primary key column (cached)
+      const pkColumn = await getPrimaryKey(pool, source, req.databaseId);
+      if (!pkColumn) {
         return res.status(400).json({ error: 'Table has no primary key' });
       }
 
-      const pkColumn = pkResult.rows[0].column_name;
       const result = await pool.query(
         `SELECT * FROM "${source}" WHERE "${pkColumn}" = $1`,
         [id]
@@ -139,7 +162,7 @@ module.exports = function(pool) {
     } catch (err) {
       console.error('Error fetching record:', err);
       logError(pool, 'GET /api/data/:source/:id', 'Failed to fetch record', err, { databaseId: req.databaseId });
-      res.status(500).json({ error: 'Failed to fetch record', details: err.message });
+      res.status(500).json({ error: 'Failed to fetch record' });
     }
   });
 
@@ -171,7 +194,7 @@ module.exports = function(pool) {
     } catch (err) {
       console.error('Error inserting record:', err);
       logError(pool, 'POST /api/data/:table', 'Failed to insert record', err, { databaseId: req.databaseId });
-      res.status(500).json({ error: 'Failed to insert record', details: err.message });
+      res.status(500).json({ error: 'Failed to insert record' });
     }
   });
 
@@ -189,22 +212,12 @@ module.exports = function(pool) {
         return res.status(400).json({ error: 'Invalid table name' });
       }
 
-      // Find primary key column
-      const pkResult = await pool.query(`
-        SELECT kcu.column_name
-        FROM information_schema.table_constraints tc
-        JOIN information_schema.key_column_usage kcu
-          ON tc.constraint_name = kcu.constraint_name
-        WHERE tc.table_name = $1
-          AND tc.constraint_type = 'PRIMARY KEY'
-        LIMIT 1
-      `, [table]);
-
-      if (pkResult.rows.length === 0) {
+      // Find primary key column (cached)
+      const pkColumn = await getPrimaryKey(pool, table, req.databaseId);
+      if (!pkColumn) {
         return res.status(400).json({ error: 'Table has no primary key' });
       }
 
-      const pkColumn = pkResult.rows[0].column_name;
       const columns = Object.keys(data);
       const values = Object.values(data);
 
@@ -226,7 +239,7 @@ module.exports = function(pool) {
     } catch (err) {
       console.error('Error updating record:', err);
       logError(pool, 'PUT /api/data/:table/:id', 'Failed to update record', err, { databaseId: req.databaseId });
-      res.status(500).json({ error: 'Failed to update record', details: err.message });
+      res.status(500).json({ error: 'Failed to update record' });
     }
   });
 
@@ -242,22 +255,12 @@ module.exports = function(pool) {
         return res.status(400).json({ error: 'Invalid table name' });
       }
 
-      // Find primary key column
-      const pkResult = await pool.query(`
-        SELECT kcu.column_name
-        FROM information_schema.table_constraints tc
-        JOIN information_schema.key_column_usage kcu
-          ON tc.constraint_name = kcu.constraint_name
-        WHERE tc.table_name = $1
-          AND tc.constraint_type = 'PRIMARY KEY'
-        LIMIT 1
-      `, [table]);
-
-      if (pkResult.rows.length === 0) {
+      // Find primary key column (cached)
+      const pkColumn = await getPrimaryKey(pool, table, req.databaseId);
+      if (!pkColumn) {
         return res.status(400).json({ error: 'Table has no primary key' });
       }
 
-      const pkColumn = pkResult.rows[0].column_name;
       const result = await pool.query(
         `DELETE FROM "${table}" WHERE "${pkColumn}" = $1 RETURNING *`,
         [id]
@@ -271,9 +274,11 @@ module.exports = function(pool) {
     } catch (err) {
       console.error('Error deleting record:', err);
       logError(pool, 'DELETE /api/data/:table/:id', 'Failed to delete record', err, { databaseId: req.databaseId });
-      res.status(500).json({ error: 'Failed to delete record', details: err.message });
+      res.status(500).json({ error: 'Failed to delete record' });
     }
   });
 
   return router;
 };
+
+module.exports.clearPkCache = clearPkCache;

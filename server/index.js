@@ -125,7 +125,9 @@ app.use('/api', async (req, res, next) => {
 
     const schemaName = result.rows[0]?.schema_name || 'public';
 
-    // Set search_path for this request
+    // Set search_path for this request.
+    // schemaName comes from a parameterized lookup against shared.databases (line 122),
+    // not from user input, so string interpolation is safe here.
     await pool.query(`SET search_path = ${schemaName}, shared, public`);
 
     req.databaseId = dbId;

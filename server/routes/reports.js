@@ -143,6 +143,7 @@ function createRouter(pool) {
    * Save a report (creates new version, marks old as not current)
    */
   router.put('/:name', async (req, res) => {
+    const client = await pool.connect();
     try {
       const databaseId = req.databaseId;
       const reportName = req.params.name;
@@ -156,8 +157,10 @@ function createRouter(pool) {
 
       const recordSource = extractRecordSource(content);
 
+      await client.query('BEGIN');
+
       // Get current max version for this report
-      const versionResult = await pool.query(
+      const versionResult = await client.query(
         `SELECT COALESCE(MAX(version), 0) as max_version
          FROM shared.reports
          WHERE database_id = $1 AND name = $2`,
@@ -166,7 +169,7 @@ function createRouter(pool) {
       const newVersion = versionResult.rows[0].max_version + 1;
 
       // Mark all existing versions as not current
-      await pool.query(
+      await client.query(
         `UPDATE shared.reports
          SET is_current = false
          WHERE database_id = $1 AND name = $2 AND is_current = true`,
@@ -174,20 +177,21 @@ function createRouter(pool) {
       );
 
       // Insert new version as current
-      await pool.query(
+      await client.query(
         `INSERT INTO shared.reports (database_id, name, definition, record_source, version, is_current)
          VALUES ($1, $2, $3, $4, $5, true)`,
         [databaseId, reportName, content, recordSource, newVersion]
       );
 
-      // Populate graph from report
+      await client.query('COMMIT');
+
+      // Populate graph from report (outside transaction — non-critical side effect)
       try {
         const { populateFromReport } = require('../graph/populate');
         if (populateFromReport) {
           await populateFromReport(pool, reportName, content, databaseId);
         }
       } catch (graphErr) {
-        // populateFromReport may not exist yet - that's fine
         if (graphErr.code !== 'MODULE_NOT_FOUND' && !graphErr.message.includes('populateFromReport')) {
           console.error('Error populating graph from report:', graphErr.message);
           logEvent(pool, 'warning', 'PUT /api/reports/:name', 'Graph population failed after report save', { databaseId, details: { error: graphErr.message } });
@@ -197,9 +201,12 @@ function createRouter(pool) {
       console.log(`Saved report: ${reportName} v${newVersion} (database: ${databaseId})`);
       res.json({ success: true, name: reportName, version: newVersion, database_id: databaseId });
     } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
       console.error('Error saving report:', err);
       logError(pool, 'PUT /api/reports/:name', 'Failed to save report', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to save report' });
+    } finally {
+      client.release();
     }
   });
 
@@ -208,24 +215,28 @@ function createRouter(pool) {
    * Rollback to a specific version (makes that version current again)
    */
   router.post('/:name/rollback/:version', async (req, res) => {
+    const client = await pool.connect();
     try {
       const databaseId = req.databaseId;
       const reportName = req.params.name;
       const targetVersion = parseInt(req.params.version);
 
-      // Check target version exists
-      const checkResult = await pool.query(
+      // Check target version exists (safe to read outside transaction)
+      const checkResult = await client.query(
         `SELECT definition FROM shared.reports
          WHERE database_id = $1 AND name = $2 AND version = $3`,
         [databaseId, reportName, targetVersion]
       );
 
       if (checkResult.rows.length === 0) {
+        client.release();
         return res.status(404).json({ error: 'Version not found' });
       }
 
+      await client.query('BEGIN');
+
       // Get current max version
-      const versionResult = await pool.query(
+      const versionResult = await client.query(
         `SELECT MAX(version) as max_version FROM shared.reports
          WHERE database_id = $1 AND name = $2`,
         [databaseId, reportName]
@@ -233,7 +244,7 @@ function createRouter(pool) {
       const newVersion = versionResult.rows[0].max_version + 1;
 
       // Mark current version as not current
-      await pool.query(
+      await client.query(
         `UPDATE shared.reports
          SET is_current = false
          WHERE database_id = $1 AND name = $2 AND is_current = true`,
@@ -244,11 +255,13 @@ function createRouter(pool) {
       const targetDefinition = checkResult.rows[0].definition;
       const recordSource = extractRecordSource(targetDefinition);
 
-      await pool.query(
+      await client.query(
         `INSERT INTO shared.reports (database_id, name, definition, record_source, version, is_current)
          VALUES ($1, $2, $3, $4, $5, true)`,
         [databaseId, reportName, targetDefinition, recordSource, newVersion]
       );
+
+      await client.query('COMMIT');
 
       console.log(`Rolled back report: ${reportName} to v${targetVersion} (now v${newVersion})`);
       res.json({
@@ -258,9 +271,12 @@ function createRouter(pool) {
         new_version: newVersion
       });
     } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
       console.error('Error rolling back report:', err);
       logError(pool, 'POST /api/reports/:name/rollback/:version', 'Failed to rollback report', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to rollback report' });
+    } finally {
+      client.release();
     }
   });
 

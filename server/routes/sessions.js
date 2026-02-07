@@ -105,7 +105,7 @@ module.exports = function(pool) {
     } catch (err) {
       console.error('Error creating session:', err);
       logError(pool, 'POST /api/session', 'Failed to create session', err, { databaseId: req.databaseId });
-      res.status(500).json({ error: 'Failed to create session', details: err.message });
+      res.status(500).json({ error: 'Failed to create session' });
     }
   });
 
@@ -120,7 +120,7 @@ module.exports = function(pool) {
     } catch (err) {
       console.error('Error clearing session:', err);
       logError(pool, 'DELETE /api/session/:id', 'Failed to clear session', err, { databaseId: req.databaseId });
-      res.status(500).json({ error: 'Failed to clear session', details: err.message });
+      res.status(500).json({ error: 'Failed to clear session' });
     }
   });
 
@@ -142,7 +142,7 @@ module.exports = function(pool) {
     } catch (err) {
       console.error('Error fetching session state:', err);
       logError(pool, 'GET /api/session/:id/state', 'Failed to fetch session state', err, { databaseId: req.databaseId });
-      res.status(500).json({ error: 'Failed to fetch session state', details: err.message });
+      res.status(500).json({ error: 'Failed to fetch session state' });
     }
   });
 
@@ -167,7 +167,7 @@ module.exports = function(pool) {
     } catch (err) {
       console.error('Error setting session state:', err);
       logError(pool, 'PUT /api/session/:id/state', 'Failed to set session state', err, { databaseId: req.databaseId });
-      res.status(500).json({ error: 'Failed to set session state', details: err.message });
+      res.status(500).json({ error: 'Failed to set session state' });
     }
   });
 
@@ -213,7 +213,7 @@ module.exports = function(pool) {
     } catch (err) {
       console.error('Error calling function:', err);
       logError(pool, 'POST /api/session/function/:name', 'Failed to call function', err, { databaseId: req.databaseId });
-      res.status(500).json({ error: 'Failed to call function', details: err.message });
+      res.status(500).json({ error: 'Failed to call function' });
     }
   });
 

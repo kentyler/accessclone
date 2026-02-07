@@ -9,6 +9,5 @@
   (rdom/render [main/app] (.getElementById js/document "app")))
 
 (defn ^:export init []
-  (println "Application initializing...")
   (state/init!)
   (mount-root))

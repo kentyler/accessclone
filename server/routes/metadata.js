@@ -6,6 +6,7 @@
 const express = require('express');
 const router = express.Router();
 const { logError } = require('../lib/events');
+const { clearPkCache } = require('./data');
 
 const NAME_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
@@ -58,121 +59,143 @@ module.exports = function(pool) {
     try {
       const schemaName = req.schemaName || 'public';
 
-      // Get all tables from the current database schema
-      const tablesResult = await pool.query(`
-        SELECT table_name
-        FROM information_schema.tables
-        WHERE table_schema = $1
-          AND table_type = 'BASE TABLE'
-        ORDER BY table_name
+      // Bulk query: all columns for all tables in schema, with PK/FK info
+      const columnsResult = await pool.query(`
+        SELECT
+          c.table_name,
+          c.column_name,
+          c.data_type,
+          c.is_nullable,
+          c.column_default,
+          c.character_maximum_length,
+          c.numeric_precision,
+          c.numeric_scale,
+          c.ordinal_position,
+          c.is_identity,
+          CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END as is_primary_key,
+          CASE WHEN fk.column_name IS NOT NULL THEN true ELSE false END as is_foreign_key,
+          fk.foreign_table_name
+        FROM information_schema.columns c
+        JOIN information_schema.tables t
+          ON c.table_name = t.table_name AND c.table_schema = t.table_schema
+        LEFT JOIN (
+          SELECT kcu.table_name, kcu.column_name
+          FROM information_schema.table_constraints tc
+          JOIN information_schema.key_column_usage kcu
+            ON tc.constraint_name = kcu.constraint_name
+            AND tc.table_schema = kcu.table_schema
+          WHERE tc.table_schema = $1
+            AND tc.constraint_type = 'PRIMARY KEY'
+        ) pk ON c.table_name = pk.table_name AND c.column_name = pk.column_name
+        LEFT JOIN (
+          SELECT
+            kcu.table_name,
+            kcu.column_name,
+            ccu.table_name as foreign_table_name
+          FROM information_schema.table_constraints tc
+          JOIN information_schema.key_column_usage kcu
+            ON tc.constraint_name = kcu.constraint_name
+            AND tc.table_schema = kcu.table_schema
+          JOIN information_schema.constraint_column_usage ccu
+            ON tc.constraint_name = ccu.constraint_name
+          WHERE tc.table_schema = $1
+            AND tc.constraint_type = 'FOREIGN KEY'
+        ) fk ON c.table_name = fk.table_name AND c.column_name = fk.column_name
+        WHERE c.table_schema = $1
+          AND t.table_type = 'BASE TABLE'
+        ORDER BY c.table_name, c.ordinal_position
       `, [schemaName]);
 
+      // Bulk query: all column descriptions
+      const descResult = await pool.query(`
+        SELECT cls.relname as table_name, a.attnum as ordinal, d.description
+        FROM pg_description d
+        JOIN pg_class cls ON d.objoid = cls.oid
+        JOIN pg_namespace n ON cls.relnamespace = n.oid
+        JOIN pg_attribute a ON a.attrelid = cls.oid AND a.attnum = d.objsubid
+        WHERE n.nspname = $1 AND d.objsubid > 0
+      `, [schemaName]);
+
+      // Bulk query: all table descriptions
+      const tableDescResult = await pool.query(`
+        SELECT cls.relname as table_name, d.description
+        FROM pg_description d
+        JOIN pg_class cls ON d.objoid = cls.oid
+        JOIN pg_namespace n ON cls.relnamespace = n.oid
+        WHERE n.nspname = $1 AND d.objsubid = 0
+          AND cls.relkind = 'r'
+      `, [schemaName]);
+
+      // Bulk query: all check constraints
+      const checkResult = await pool.query(`
+        SELECT cls.relname as table_name, c.conname, pg_get_constraintdef(c.oid) as def
+        FROM pg_constraint c
+        JOIN pg_class cls ON c.conrelid = cls.oid
+        JOIN pg_namespace n ON cls.relnamespace = n.oid
+        WHERE n.nspname = $1 AND c.contype = 'c'
+      `, [schemaName]);
+
+      // Bulk query: all indexes
+      const indexResult = await pool.query(`
+        SELECT tablename, indexname, indexdef
+        FROM pg_indexes
+        WHERE schemaname = $1
+      `, [schemaName]);
+
+      // Build lookup maps keyed by table_name
+      // Column descriptions: table_name -> { ordinal -> description }
+      const descByTable = {};
+      descResult.rows.forEach(r => {
+        if (!descByTable[r.table_name]) descByTable[r.table_name] = {};
+        descByTable[r.table_name][r.ordinal] = r.description;
+      });
+
+      // Table descriptions: table_name -> description
+      const tableDescByName = {};
+      tableDescResult.rows.forEach(r => { tableDescByName[r.table_name] = r.description; });
+
+      // Check constraints: table_name -> { conname -> def }
+      const constraintsByTable = {};
+      checkResult.rows.forEach(r => {
+        if (!constraintsByTable[r.table_name]) constraintsByTable[r.table_name] = {};
+        constraintsByTable[r.table_name][r.conname] = r.def;
+      });
+
+      // Indexes: table_name -> { column_name -> "unique" | "yes" }
+      const indexesByTable = {};
+      indexResult.rows.forEach(r => {
+        if (!indexesByTable[r.tablename]) indexesByTable[r.tablename] = {};
+        const isUnique = r.indexdef.toUpperCase().includes('UNIQUE');
+        const colMatch = r.indexdef.match(/\(([^)]+)\)/);
+        if (colMatch) {
+          const cols = colMatch[1].split(',').map(c => c.trim().replace(/"/g, ''));
+          cols.forEach(col => {
+            if (!indexesByTable[r.tablename][col] || isUnique) {
+              indexesByTable[r.tablename][col] = isUnique ? 'unique' : 'yes';
+            }
+          });
+        }
+      });
+
+      // Group columns by table and build response
+      const tableMap = new Map();
+      columnsResult.rows.forEach(col => {
+        if (!tableMap.has(col.table_name)) {
+          tableMap.set(col.table_name, []);
+        }
+        tableMap.get(col.table_name).push(col);
+      });
+
       const tables = [];
-      for (const row of tablesResult.rows) {
-        // Get columns for each table
-        const columnsResult = await pool.query(`
-          SELECT
-            c.column_name,
-            c.data_type,
-            c.is_nullable,
-            c.column_default,
-            c.character_maximum_length,
-            c.numeric_precision,
-            c.numeric_scale,
-            c.ordinal_position,
-            c.is_identity,
-            CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END as is_primary_key,
-            CASE WHEN fk.column_name IS NOT NULL THEN true ELSE false END as is_foreign_key,
-            fk.foreign_table_name
-          FROM information_schema.columns c
-          LEFT JOIN (
-            SELECT kcu.column_name
-            FROM information_schema.table_constraints tc
-            JOIN information_schema.key_column_usage kcu
-              ON tc.constraint_name = kcu.constraint_name
-              AND tc.table_schema = kcu.table_schema
-            WHERE tc.table_name = $1
-              AND tc.table_schema = $2
-              AND tc.constraint_type = 'PRIMARY KEY'
-          ) pk ON c.column_name = pk.column_name
-          LEFT JOIN (
-            SELECT
-              kcu.column_name,
-              ccu.table_name as foreign_table_name
-            FROM information_schema.table_constraints tc
-            JOIN information_schema.key_column_usage kcu
-              ON tc.constraint_name = kcu.constraint_name
-              AND tc.table_schema = kcu.table_schema
-            JOIN information_schema.constraint_column_usage ccu
-              ON tc.constraint_name = ccu.constraint_name
-            WHERE tc.table_name = $1
-              AND tc.table_schema = $2
-              AND tc.constraint_type = 'FOREIGN KEY'
-          ) fk ON c.column_name = fk.column_name
-          WHERE c.table_name = $1
-            AND c.table_schema = $2
-          ORDER BY c.ordinal_position
-        `, [row.table_name, schemaName]);
-
-        // Get column descriptions from pg_description
-        const descResult = await pool.query(`
-          SELECT a.attnum as ordinal, d.description
-          FROM pg_description d
-          JOIN pg_class cls ON d.objoid = cls.oid
-          JOIN pg_namespace n ON cls.relnamespace = n.oid
-          JOIN pg_attribute a ON a.attrelid = cls.oid AND a.attnum = d.objsubid
-          WHERE cls.relname = $1 AND n.nspname = $2 AND d.objsubid > 0
-        `, [row.table_name, schemaName]);
-        const descMap = {};
-        descResult.rows.forEach(r => { descMap[r.ordinal] = r.description; });
-
-        // Get table description
-        const tableDescResult = await pool.query(`
-          SELECT d.description
-          FROM pg_description d
-          JOIN pg_class cls ON d.objoid = cls.oid
-          JOIN pg_namespace n ON cls.relnamespace = n.oid
-          WHERE cls.relname = $1 AND n.nspname = $2 AND d.objsubid = 0
-        `, [row.table_name, schemaName]);
-        const tableDescription = tableDescResult.rows.length > 0 ? tableDescResult.rows[0].description : null;
-
-        // Get check constraints
-        const checkResult = await pool.query(`
-          SELECT conname, pg_get_constraintdef(c.oid) as def
-          FROM pg_constraint c
-          JOIN pg_class cls ON c.conrelid = cls.oid
-          JOIN pg_namespace n ON cls.relnamespace = n.oid
-          WHERE cls.relname = $1 AND n.nspname = $2 AND c.contype = 'c'
-        `, [row.table_name, schemaName]);
-        const constraintMap = {};
-        checkResult.rows.forEach(r => { constraintMap[r.conname] = r.def; });
-
-        // Get indexes
-        const indexResult = await pool.query(`
-          SELECT indexname, indexdef
-          FROM pg_indexes
-          WHERE tablename = $1 AND schemaname = $2
-        `, [row.table_name, schemaName]);
-        // Build map: column_name -> "unique" | "yes"
-        const indexedMap = {};
-        indexResult.rows.forEach(r => {
-          const isUnique = r.indexdef.toUpperCase().includes('UNIQUE');
-          // Extract column names from indexdef (simple single-column detection)
-          const colMatch = r.indexdef.match(/\(([^)]+)\)/);
-          if (colMatch) {
-            const cols = colMatch[1].split(',').map(c => c.trim().replace(/"/g, ''));
-            cols.forEach(col => {
-              if (!indexedMap[col] || isUnique) {
-                indexedMap[col] = isUnique ? 'unique' : 'yes';
-              }
-            });
-          }
-        });
+      for (const [tableName, columns] of tableMap) {
+        const descMap = descByTable[tableName] || {};
+        const constraintMap = constraintsByTable[tableName] || {};
+        const indexedMap = indexesByTable[tableName] || {};
 
         tables.push({
-          name: row.table_name,
-          description: tableDescription,
-          fields: columnsResult.rows.map(col => ({
+          name: tableName,
+          description: tableDescByName[tableName] || null,
+          fields: columns.map(col => ({
             name: col.column_name,
             type: col.data_type,
             nullable: col.is_nullable === 'YES',
@@ -195,7 +218,7 @@ module.exports = function(pool) {
     } catch (err) {
       console.error('Error fetching tables:', err);
       logError(pool, 'GET /api/tables', 'Failed to fetch tables', err, { databaseId: req.databaseId });
-      res.status(500).json({ error: 'Failed to fetch tables', details: err.message });
+      res.status(500).json({ error: 'Failed to fetch tables' });
     }
   });
 
@@ -245,7 +268,7 @@ module.exports = function(pool) {
     } catch (err) {
       console.error('Error fetching queries:', err);
       logError(pool, 'GET /api/queries', 'Failed to fetch queries', err, { databaseId: req.databaseId });
-      res.status(500).json({ error: 'Failed to fetch queries', details: err.message });
+      res.status(500).json({ error: 'Failed to fetch queries' });
     }
   });
 
@@ -317,7 +340,7 @@ module.exports = function(pool) {
     } catch (err) {
       console.error('Error fetching functions:', err);
       logError(pool, 'GET /api/functions', 'Failed to fetch functions', err, { databaseId: req.databaseId });
-      res.status(500).json({ error: 'Failed to fetch functions', details: err.message });
+      res.status(500).json({ error: 'Failed to fetch functions' });
     }
   });
 
@@ -394,6 +417,7 @@ module.exports = function(pool) {
       }
 
       await client.query('COMMIT');
+      clearPkCache(req.databaseId);
       res.json({ success: true, table: name });
     } catch (err) {
       await client.query('ROLLBACK');
@@ -615,6 +639,7 @@ module.exports = function(pool) {
       }
 
       await client.query('COMMIT');
+      clearPkCache(req.databaseId);
       res.json({ success: true });
     } catch (err) {
       await client.query('ROLLBACK');

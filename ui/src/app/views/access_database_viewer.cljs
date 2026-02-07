@@ -319,7 +319,7 @@
           (when loaded_path
             (state/load-access-databases!)
             (load-access-database-contents! loaded_path))
-          (println "Import state restored:" loaded_path))))))
+)))))
 
 (defn- fetch-existing-names!
   "Fetch object names from an API endpoint and store in target-existing."
@@ -404,20 +404,17 @@
         ;; Step 2: Convert JSON to PolyAccess form definition
         (let [form-data (get-in response [:body :formData])
               form-def (convert-access-form form-data)
-              _ (println "Converted form:" form-name
-                         "- controls:" (+ (count (get-in form-def [:header :controls]))
-                                          (count (get-in form-def [:detail :controls]))
-                                          (count (get-in form-def [:footer :controls]))))
               ;; Step 3: Save to target database via forms API
               save-response (<! (http/put (str api-base "/api/forms/" form-name)
                                          {:json-params form-def
                                           :headers {"X-Database-ID" target-database-id}}))]
           (if (:success save-response)
-            (do (println "Saved form:" form-name "to" target-database-id)
-                true)
-            (do (println "Failed to save form:" form-name (get-in save-response [:body :error]))
+            true
+            (do (state/log-event! "error" (str "Failed to save form: " form-name) "import-form"
+                                  {:error (get-in save-response [:body :error])})
                 false)))
-        (do (println "Failed to export form:" form-name (get-in response [:body :error]))
+        (do (state/log-event! "error" (str "Failed to export form: " form-name) "import-form"
+                              {:error (get-in response [:body :error])})
             false)))))
 
 (defn import-report!
@@ -433,19 +430,17 @@
         ;; Step 2: Convert JSON to PolyAccess report definition
         (let [report-data (get-in response [:body :reportData])
               report-def (convert-access-report report-data)
-              _ (println "Converted report:" report-name
-                         "- sections:" (count (:sections report-data))
-                         "- grouping:" (count (:grouping report-def)))
               ;; Step 3: Save to target database via reports API
               save-response (<! (http/put (str api-base "/api/reports/" report-name)
                                          {:json-params report-def
                                           :headers {"X-Database-ID" target-database-id}}))]
           (if (:success save-response)
-            (do (println "Saved report:" report-name "to" target-database-id)
-                true)
-            (do (println "Failed to save report:" report-name (get-in save-response [:body :error]))
+            true
+            (do (state/log-event! "error" (str "Failed to save report: " report-name) "import-report"
+                                  {:error (get-in save-response [:body :error])})
                 false)))
-        (do (println "Failed to export report:" report-name (get-in response [:body :error]))
+        (do (state/log-event! "error" (str "Failed to export report: " report-name) "import-report"
+                              {:error (get-in response [:body :error])})
             false)))))
 
 (defn import-selected!

@@ -131,9 +131,45 @@ On load, definitions pass through `normalize-form-definition` (in `state_form.cl
 
 ## Key Design Decisions
 
+### Why Not re-frame?
+
+About 90% of medium-to-large ClojureScript SPAs use re-frame. This project deliberately does not.
+
+**The problem re-frame solves** is managing state in event-driven UIs where components are loosely coupled. You dispatch a keyword event, a registered handler updates the db, subscriptions react. This works well for apps with independent pages or widgets.
+
+**The problem with re-frame here** is that PolyAccess is an IDE, not a page-based app. The form editor, report editor, table editor, property sheet, and tab bar all need coordinated access to the same state. A single operation like "user clicks a control in the design surface" must simultaneously update the selection state, populate the property sheet, and highlight the control — across three different view modules reading from the same paths.
+
+With re-frame, this becomes a chain: `(rf/dispatch [:form/select-control id])` → find the event handler → it returns an effects map → effects trigger more dispatches → subscriptions in other components react. Understanding one user action requires tracing through 3-4 files connected only by keyword. With direct mutation, `select-control!` is a single function that does the `swap!` and every component re-renders from the atom. The control flow is linear and readable top to bottom.
+
+**The tradeoff.** Direct mutation means ~170 functions across 5 state files all reach into the same atom with no formal schema. Renaming a state path (say `:form-editor` to `:form-state`) requires finding every `get-in`, `assoc-in`, and `update-in` that touches it. Miss one and you get silent `nil` reads — no compiler error, no runtime exception.
+
+**Why this is manageable in practice:**
+
+- **Domain-scoped files.** Each state file owns its own subtree of the atom. `state_form.cljs` owns `:form-editor`, `state_report.cljs` owns `:report-editor`, etc. Cross-cutting paths are few and well-known.
+- **Naming convention.** All mutating functions end with `!` and are named for what they do (`save-current-record!`, `select-control!`, `navigate-to-record!`). `grep` finds every reference to a given path instantly.
+- **AI-assisted development.** This codebase is primarily developed with AI assistance, where exhaustive search across all files is trivial. The spec/schema contract problem — "which functions touch this path?" — is a grep query that returns in milliseconds. The re-frame indirection problem — "what chain of events does this dispatch trigger?" — requires semantic understanding of the event graph, which is harder to automate.
+
+The direct-mutation approach favors readability and grep-ability over formal contracts. For an IDE-style app developed with AI tooling, this is a deliberate and practical choice.
+
+### Parallel Arrays for Subform Link Fields
+
+Subform controls store their parent-child field bindings as two parallel arrays rather than a map or vector of tuples:
+
+```
+{:type :sub-form
+ :source-object "OrderDetails"
+ :link-child-fields  ["order_id"]    ;; fields in child form
+ :link-master-fields ["id"]}         ;; corresponding fields in parent form
+```
+
+A more Clojure-idiomatic representation would be `{:link-fields {"order_id" "id"}}` or `{:link-fields [["order_id" "id"]]}`, which would eliminate positional coupling and make mismatched lengths impossible. The code zips them together at usage time with `(map vector link-child-fields link-master-fields)` in two places in `state_form.cljs`.
+
+This mirrors how Microsoft Access stores the same data — as two separate semicolon-delimited strings (`LinkChildFields` and `LinkMasterFields`). Keeping the same model means round-tripping to/from Access is trivial (no conversion on import or export), and anyone familiar with Access recognizes the structure immediately.
+
+### Other Decisions
+
 | Decision | Rationale |
 |----------|-----------|
-| Single atom vs re-frame | IDE-style app needs unified state across editors, tabs, and property sheets |
 | Schema-per-database | Strong isolation between converted databases; simple `search_path` routing |
 | Append-only versioning | Free audit trail and rollback without separate history tables |
 | PowerShell for Access export | COM automation requires Windows; scripts output JSON for cross-platform consumption |

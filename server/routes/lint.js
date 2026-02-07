@@ -663,7 +663,7 @@ function createRouter(pool, secrets) {
     } catch (err) {
       console.error('Database-wide validation failed:', err);
       logError(pool, 'POST /api/lint/validate', 'Database-wide validation failed', err, { databaseId: req.databaseId });
-      res.status(500).json({ error: 'Validation failed', details: err.message });
+      res.status(500).json({ error: 'Validation failed' });
     }
   });
 

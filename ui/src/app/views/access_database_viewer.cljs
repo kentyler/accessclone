@@ -562,30 +562,79 @@
            (when (:error_message entry)
              [:div.log-error (:error_message entry)])]))]]))
 
+(defn- suggest-name-from-path
+  "Derive a suggested database name from the Access file path.
+   e.g. 'C:\\...\\Diversity_Dev.accdb' → 'Diversity Dev'"
+  []
+  (when-let [path (:loaded-path @viewer-state)]
+    (-> path
+        (.split "\\")
+        last
+        (.replace #"\.accdb$" "")
+        (.replace #"_" " "))))
+
 (defn target-database-selector
   "Dropdown to choose which PolyAccess database to import into"
   []
-  (let [available-dbs (filter #(not= (:database_id %) "_access_import")
-                              (:available-databases @state/app-state))
-        target-id (:target-database-id @viewer-state)
-        ;; Default to current database if not set
-        effective-id (or target-id
-                         (:database_id (:current-database @state/app-state)))]
-    ;; Sync effective-id into viewer-state if not set, and load existing objects
-    (when (and (nil? target-id) effective-id)
-      (swap! viewer-state assoc :target-database-id effective-id)
-      (load-target-existing! effective-id))
-    [:div.target-db-selector
-     [:label "Import into:"]
-     [:select
-      {:value (or effective-id "")
-       :on-change #(let [new-id (.. % -target -value)]
-                     (swap! viewer-state assoc :target-database-id new-id)
-                     (load-target-existing! new-id)
-                     (save-import-state!))}
-      (for [db available-dbs]
-        ^{:key (:database_id db)}
-        [:option {:value (:database_id db)} (:name db)])]]))
+  (let [creating? (r/atom false)
+        new-name (r/atom "")
+        create-error (r/atom nil)]
+    (fn []
+      (let [available-dbs (filter #(not= (:database_id %) "_access_import")
+                                  (:available-databases @state/app-state))
+            target-id (:target-database-id @viewer-state)
+            effective-id (or target-id
+                             (:database_id (:current-database @state/app-state)))]
+        ;; Sync effective-id into viewer-state if not set, and load existing objects
+        (when (and (nil? target-id) effective-id)
+          (swap! viewer-state assoc :target-database-id effective-id)
+          (load-target-existing! effective-id))
+        [:div.target-db-selector
+         [:label "Import into:"]
+         [:select
+          {:value (or effective-id "")
+           :on-change #(let [v (.. % -target -value)]
+                         (if (= v "__create_new__")
+                           (do (reset! creating? true)
+                               (reset! new-name (or (suggest-name-from-path) ""))
+                               (reset! create-error nil))
+                           (do (swap! viewer-state assoc :target-database-id v)
+                               (load-target-existing! v)
+                               (save-import-state!))))}
+          (for [db available-dbs]
+            ^{:key (:database_id db)}
+            [:option {:value (:database_id db)} (:name db)])
+          [:option {:value "__create_new__"} "Create New Database..."]]
+         (when @creating?
+           [:div.create-db-inline {:style {:margin-top "6px"}}
+            [:input {:type "text"
+                     :placeholder "Database name"
+                     :value @new-name
+                     :auto-focus true
+                     :on-change #(do (reset! new-name (.. % -target -value))
+                                     (reset! create-error nil))
+                     :on-key-down #(when (= (.-key %) "Escape")
+                                     (reset! creating? false))}]
+            [:button.btn-primary
+             {:style {:margin-left "4px"}
+              :disabled (str/blank? @new-name)
+              :on-click #(state/create-database!
+                           (str/trim @new-name) nil
+                           (fn [new-db]
+                             (swap! viewer-state assoc :target-database-id (:database_id new-db))
+                             (load-target-existing! (:database_id new-db))
+                             (save-import-state!)
+                             (reset! creating? false))
+                           (fn [err-msg]
+                             (reset! create-error err-msg)))}
+             "Create"]
+            [:button.btn-link
+             {:style {:margin-left "4px"}
+              :on-click #(reset! creating? false)}
+             "Cancel"]
+            (when @create-error
+              [:div.create-db-error {:style {:color "red" :font-size "12px" :margin-top "2px"}}
+               @create-error])])]))))
 
 (defn toolbar [access-db-path]
   (let [{:keys [selected object-type target-database-id]} @viewer-state]

@@ -62,6 +62,58 @@ module.exports = function(pool) {
   });
 
   /**
+   * POST /api/databases
+   * Create a new database (schema + shared.databases row)
+   */
+  router.post('/', async (req, res) => {
+    const { name, description } = req.body;
+
+    try {
+      if (!name || !name.trim()) {
+        return res.status(400).json({ error: 'Name is required' });
+      }
+
+      // Generate database_id: lowercase, replace non-alphanumeric with _, collapse multiples, trim edges
+      const database_id = name.trim().toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_|_$/g, '');
+
+      if (!database_id) {
+        return res.status(400).json({ error: 'Name must contain at least one alphanumeric character' });
+      }
+
+      const schema_name = 'db_' + database_id;
+
+      // Check if database_id already exists
+      const existing = await pool.query(
+        'SELECT database_id FROM shared.databases WHERE database_id = $1',
+        [database_id]
+      );
+      if (existing.rows.length > 0) {
+        return res.status(409).json({ error: `Database "${database_id}" already exists` });
+      }
+
+      // Create schema (schema_name is generated, not user input)
+      await pool.query(`CREATE SCHEMA IF NOT EXISTS ${schema_name}`);
+
+      // Insert into shared.databases
+      await pool.query(
+        'INSERT INTO shared.databases (database_id, name, schema_name, description) VALUES ($1, $2, $3, $4)',
+        [database_id, name.trim(), schema_name, description || null]
+      );
+
+      res.json({
+        success: true,
+        database: { database_id, name: name.trim(), schema_name, description: description || null }
+      });
+    } catch (err) {
+      console.error('Error creating database:', err);
+      logError(pool, 'POST /api/databases', 'Failed to create database', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
    * POST /api/databases/switch
    * Switch to a different database
    */

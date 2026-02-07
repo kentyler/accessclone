@@ -633,6 +633,22 @@
           (log-error! "Failed to load functions from database" "load-functions" {:response (:body response)})
           (object-load-complete!))))))
 
+;; Create a new database (schema + shared.databases row)
+(defn create-database!
+  "Create a new database via POST /api/databases, add to available-databases on success.
+   Calls on-success with the new database map, or on-error with error string."
+  [name description on-success on-error]
+  (go
+    (let [response (<! (http/post (str api-base "/api/databases")
+                                  {:json-params {:name name :description description}}))]
+      (if (:success response)
+        (let [new-db (get-in response [:body :database])]
+          (swap! app-state update :available-databases conj new-db)
+          (when on-success (on-success new-db)))
+        (let [err-msg (or (get-in response [:body :error]) "Failed to create database")]
+          (log-error! err-msg "create-database!")
+          (when on-error (on-error err-msg)))))))
+
 ;; Load Access databases (scan for .accdb files)
 (defn load-access-databases!
   "Scan for Access database files on disk"

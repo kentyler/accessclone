@@ -349,10 +349,16 @@ async function getSchemaInfo(pool, schemaName) {
 }
 
 /**
- * Get all field bindings from a control (checks both field and control-source)
+ * Get all field bindings from a control (checks both field and control-source).
+ * Returns null for expression control-sources (starting with '=') since
+ * those are computed values, not direct field references.
  */
 function getControlField(control) {
-  return control['control-source'] || control.control_source || control.field || null;
+  const cs = control['control-source'] || control.control_source;
+  if (cs && typeof cs === 'string' && cs.startsWith('=')) {
+    return null; // Expression — skip field validation
+  }
+  return cs || control.field || null;
 }
 
 /**

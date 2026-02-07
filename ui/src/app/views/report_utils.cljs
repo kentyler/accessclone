@@ -1,7 +1,8 @@
 (ns app.views.report-utils
   "Shared utility functions for the report editor"
   (:require [clojure.string :as str]
-            [app.state :as state]))
+            [app.state :as state]
+            [app.views.expressions :as expr]))
 
 ;; Standard report sections in display order
 (def standard-sections
@@ -111,18 +112,29 @@
    :height (:height ctrl)})
 
 (defn resolve-control-field
-  "Get the bound field name from a control, normalized to lowercase."
+  "Get the bound field name from a control, normalized to lowercase.
+   Returns the raw string (with =) for expressions."
   [ctrl]
   (when-let [raw-field (or (:control-source ctrl) (:field ctrl))]
-    (str/lower-case raw-field)))
+    (if (expr/expression? raw-field)
+      raw-field
+      (str/lower-case raw-field))))
 
 (defn resolve-field-value
-  "Look up a field's value from a record."
-  [field record]
-  (when field
-    (or (get record (keyword field))
-        (get record field)
-        "")))
+  "Look up a field's value from a record.
+   If field starts with '=', evaluates it as an Access expression.
+   Optional expr-context provides :group-records and :all-records for aggregates."
+  ([field record]
+   (resolve-field-value field record nil))
+  ([field record expr-context]
+   (when field
+     (if (expr/expression? field)
+       (expr/evaluate-expression
+         (subs field 1)
+         (merge {:record record} expr-context))
+       (or (get record (keyword field))
+           (get record field)
+           "")))))
 
 (defn display-text
   "Get display text from a control"

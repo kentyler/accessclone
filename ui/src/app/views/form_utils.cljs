@@ -1,7 +1,8 @@
 (ns app.views.form-utils
   "Shared utility functions for the form editor"
   (:require [clojure.string]
-            [app.state :as state]))
+            [app.state :as state]
+            [app.views.expressions :as expr]))
 
 (defn snap-to-grid
   "Snap a coordinate to the nearest grid point.
@@ -58,19 +59,25 @@
 
 (defn resolve-control-field
   "Get the bound field name from a control, normalized to lowercase.
-   Checks :control-source (Property Sheet) then :field (drag-drop)."
+   Checks :control-source (Property Sheet) then :field (drag-drop).
+   Returns the raw string (with =) for expressions."
   [ctrl]
   (when-let [raw-field (or (:control-source ctrl) (:field ctrl))]
-    (clojure.string/lower-case raw-field)))
+    (if (expr/expression? raw-field)
+      raw-field
+      (clojure.string/lower-case raw-field))))
 
 (defn resolve-field-value
   "Look up a field's value from the current record.
+   If field starts with '=', evaluates it as an Access expression.
    Handles both keyword and string keys."
   [field current-record]
   (when field
-    (or (get current-record (keyword field))
-        (get current-record field)
-        "")))
+    (if (expr/expression? field)
+      (expr/evaluate-expression (subs field 1) {:record current-record})
+      (or (get current-record (keyword field))
+          (get current-record field)
+          ""))))
 
 (defn display-text
   "Get display text from a control, checking common text keys"

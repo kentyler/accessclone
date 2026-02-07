@@ -3326,3 +3326,10 @@ body {
 .design-prop-select {
   cursor: pointer;
 }
+
+/* Expression error display */
+.expression-error {
+  color: #cc0000;
+  font-style: italic;
+  font-size: 0.8em;
+}

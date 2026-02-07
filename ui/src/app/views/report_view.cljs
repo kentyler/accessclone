@@ -5,10 +5,11 @@
             [app.views.report-utils :as ru]))
 
 (defn render-report-control
-  "Render a single control read-only, resolving field values from record"
-  [ctrl record]
+  "Render a single control read-only, resolving field values from record.
+   expr-context provides :group-records and :all-records for aggregate expressions."
+  [ctrl record expr-context]
   (let [field (ru/resolve-control-field ctrl)
-        value (ru/resolve-field-value field record)
+        value (ru/resolve-field-value field record expr-context)
         text (or (when (and field (some? value) (not= value ""))
                    (str value))
                  (ru/display-text ctrl))
@@ -38,21 +39,24 @@
        [:span text])]))
 
 (defn render-section
-  "Render all controls in a section with proper height and background"
-  [section-key report-def record]
-  (let [section-data (get report-def section-key)
-        height (or (:height section-data) 40)
-        controls (or (:controls section-data) [])
-        back-color (:back-color section-data)
-        visible? (not= 0 (get section-data :visible 1))]
-    (when visible?
-      [:div.report-preview-section
-       {:class (name section-key)
-        :style (cond-> {:min-height height :position "relative"}
-                 back-color (assoc :background-color back-color))}
-       (for [[idx ctrl] (map-indexed vector controls)]
-         ^{:key idx}
-         [render-report-control ctrl record])])))
+  "Render all controls in a section with proper height and background.
+   expr-context provides :group-records and :all-records for aggregate expressions."
+  ([section-key report-def record]
+   (render-section section-key report-def record nil))
+  ([section-key report-def record expr-context]
+   (let [section-data (get report-def section-key)
+         height (or (:height section-data) 40)
+         controls (or (:controls section-data) [])
+         back-color (:back-color section-data)
+         visible? (not= 0 (get section-data :visible 1))]
+     (when visible?
+       [:div.report-preview-section
+        {:class (name section-key)
+         :style (cond-> {:min-height height :position "relative"}
+                  back-color (assoc :background-color back-color))}
+        (for [[idx ctrl] (map-indexed vector controls)]
+          ^{:key idx}
+          [render-report-control ctrl record expr-context])]))))
 
 (defn detect-group-breaks
   "Given grouping definitions and two consecutive records, return which groups broke.
@@ -81,28 +85,35 @@
         records (or (:records report-editor) [])
         record-source (:record-source current)
         grouping (or (:grouping current) [])
-        report-width (or (:report-width current) 600)]
+        report-width (or (:report-width current) 600)
+        all-ctx {:all-records records}]
     [:div.report-preview
      {:style {:max-width (+ report-width 40)}}
      ;; Report Header (once)
-     [render-section :report-header current {}]
+     [render-section :report-header current {} all-ctx]
      ;; Page Header
-     [render-section :page-header current {}]
+     [render-section :page-header current {} all-ctx]
      ;; Data section: iterate records with group break detection
      (if (seq records)
        [:div.report-data-sections
         (let [elements (atom [])
-              prev-record (atom nil)]
+              prev-record (atom nil)
+              ;; Track records in the current group (per group level)
+              group-records (atom (vec (repeat (max 1 (count grouping)) [])))]
           (doseq [[idx record] (map-indexed vector records)]
             (let [breaks (detect-group-breaks grouping @prev-record record)]
               ;; Group footers for previous group (on break, in reverse order)
               (when (and (pos? idx) (seq breaks))
                 (doseq [gi (reverse breaks)]
-                  (let [footer-key (keyword (str "group-footer-" gi))]
+                  (let [footer-key (keyword (str "group-footer-" gi))
+                        grp-recs (nth @group-records gi [])]
                     (when (get current footer-key)
                       (swap! elements conj
                              ^{:key (str "gf-" gi "-" idx)}
-                             [render-section footer-key current @prev-record])))))
+                             [render-section footer-key current @prev-record
+                              {:all-records records :group-records grp-recs}]))
+                    ;; Reset this group level's accumulated records
+                    (swap! group-records assoc gi []))))
               ;; Group headers on break (or first record)
               (when (or (zero? idx) (seq breaks))
                 (doseq [gi (if (zero? idx)
@@ -112,26 +123,31 @@
                     (when (get current header-key)
                       (swap! elements conj
                              ^{:key (str "gh-" gi "-" idx)}
-                             [render-section header-key current record])))))
+                             [render-section header-key current record all-ctx])))))
+              ;; Accumulate record into all active group levels
+              (dotimes [gi (count grouping)]
+                (swap! group-records update gi conj record))
               ;; Detail
               (swap! elements conj
                      ^{:key (str "detail-" idx)}
-                     [render-section :detail current record])
+                     [render-section :detail current record all-ctx])
               (reset! prev-record record)))
           ;; Final group footers
           (when (seq grouping)
             (doseq [gi (reverse (range (count grouping)))]
-              (let [footer-key (keyword (str "group-footer-" gi))]
+              (let [footer-key (keyword (str "group-footer-" gi))
+                    grp-recs (nth @group-records gi [])]
                 (when (get current footer-key)
                   (swap! elements conj
                          ^{:key (str "gf-final-" gi)}
-                         [render-section footer-key current @prev-record])))))
+                         [render-section footer-key current @prev-record
+                          {:all-records records :group-records grp-recs}])))))
           @elements)]
        [:div.report-no-data
         (if record-source
           "No records found"
           "No record source selected")])
      ;; Page Footer
-     [render-section :page-footer current {}]
+     [render-section :page-footer current {} all-ctx]
      ;; Report Footer (once)
-     [render-section :report-footer current {}]]))
+     [render-section :report-footer current {} all-ctx]]))

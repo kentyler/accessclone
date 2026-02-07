@@ -21,7 +21,8 @@
             {:key :text-align :label "Text Align" :type :select
              :options ["Left" "Center" "Right"]}
             {:key :border-style :label "Border Style" :type :select
-             :options ["None" "Solid"]}]
+             :options ["None" "Solid"]}
+            {:key :conditional-formatting :label "Conditional Format" :type :text}]
    :data [{:key :control-source :label "Control Source" :type :field-select}
           {:key :input-mask :label "Input Mask" :type :text}
           {:key :default-value :label "Default Value" :type :text}

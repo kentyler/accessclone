@@ -21,7 +21,13 @@
              :options ["All Pages" "Not With Rpt Hdr" "Not With Rpt Ftr" "Not With Rpt Hdr/Ftr"]}
             {:key :grp-keep-together :label "Grp Keep Together" :type :select
              :options ["Per Page" "Per Column"]}
-            {:key :fit-to-page :label "Fit To Page" :type :yes-no}]
+            {:key :fit-to-page :label "Fit To Page" :type :yes-no}
+            {:key :page-height :label "Page Height" :type :number :default 792}
+            {:key :page-width :label "Page Width" :type :number :default 612}
+            {:key :margin-top :label "Margin Top" :type :number :default 72}
+            {:key :margin-bottom :label "Margin Bottom" :type :number :default 72}
+            {:key :margin-left :label "Margin Left" :type :number :default 72}
+            {:key :margin-right :label "Margin Right" :type :number :default 72}]
    :data [{:key :record-source :label "Record Source" :type :table-select}
           {:key :filter :label "Filter" :type :text}
           {:key :filter-on :label "Filter On" :type :yes-no}
@@ -100,7 +106,8 @@
             {:key :border-color :label "Border Color" :type :text}
             {:key :can-grow :label "Can Grow" :type :yes-no}
             {:key :can-shrink :label "Can Shrink" :type :yes-no}
-            {:key :format :label "Format" :type :text}]
+            {:key :format :label "Format" :type :text}
+            {:key :conditional-formatting :label "Conditional Format" :type :text}]
    :data [{:key :control-source :label "Control Source" :type :field-select}
           {:key :input-mask :label "Input Mask" :type :text}
           {:key :default-value :label "Default Value" :type :text}

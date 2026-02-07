@@ -522,15 +522,20 @@
       :date    (:value ast)
 
       :field-ref
-      (let [name-lower (str/lower-case (:name ast))
-            record (:record ctx)]
-        (when record
-          ;; Try keyword lookup, then string lookup (case-insensitive)
-          (or (get record (keyword name-lower))
-              (get record name-lower)
-              (some (fn [[k v]]
-                      (when (= (str/lower-case (name k)) name-lower) v))
-                    record))))
+      (let [name-lower (str/lower-case (:name ast))]
+        (cond
+          ;; Special page references
+          (= name-lower "page")  (:page ctx)
+          (= name-lower "pages") (:pages ctx)
+          ;; Normal field lookup from record
+          :else
+          (let [record (:record ctx)]
+            (when record
+              (or (get record (keyword name-lower))
+                  (get record name-lower)
+                  (some (fn [[k v]]
+                          (when (= (str/lower-case (name k)) name-lower) v))
+                        record))))))
 
       :binary-op
       (let [op (:op ast)]
@@ -596,3 +601,51 @@
   "Returns true if the string starts with '=' (is an expression)."
   [s]
   (and (string? s) (str/starts-with? s "=")))
+
+(defn- parse-cf-rules
+  "Parse conditional formatting rules from a control property.
+   Accepts a vector of maps or a JSON string. Returns a seq of maps or nil."
+  [rules]
+  (cond
+    (sequential? rules) rules
+    (string? rules) (try
+                      (let [parsed (.parse js/JSON rules)]
+                        (if (array? parsed)
+                          (js->clj parsed :keywordize-keys true)
+                          nil))
+                      (catch :default _ nil))
+    :else nil))
+
+(defn- rule-matches?
+  "Evaluate a conditional formatting rule's expression. Returns true if it matches."
+  [expr-str ctx]
+  (try
+    (let [result (evaluate-expression expr-str ctx)]
+      (and (some? result) (not= result 0) (not= result false)))
+    (catch :default _ false)))
+
+(defn- rule->style
+  "Convert a matching rule to a CSS style map."
+  [rule]
+  (cond-> {}
+    (:fore-color rule)         (assoc :color (:fore-color rule))
+    (:back-color rule)         (assoc :background-color (:back-color rule))
+    (= 1 (:font-bold rule))   (assoc :font-weight "bold")
+    (= 1 (:font-italic rule)) (assoc :font-style "italic")))
+
+(defn apply-conditional-formatting
+  "Evaluate conditional formatting rules on a control.
+   Rules come from :conditional-formatting (vector of rule maps or JSON string).
+   Each rule has :expression, plus optional :fore-color, :back-color, :font-bold, :font-italic.
+   Returns a style override map from the first matching rule, or nil."
+  [ctrl record expr-context]
+  (when-let [rules (parse-cf-rules (:conditional-formatting ctrl))]
+    (let [ctx (merge {:record record} expr-context)]
+      (loop [rs (seq rules)]
+        (when rs
+          (let [rule (first rs)
+                expr-str (or (:expression rule) (:Expression rule))]
+            (if (and (string? expr-str) (not (str/blank? expr-str))
+                     (rule-matches? expr-str ctx))
+              (rule->style rule)
+              (recur (next rs)))))))))

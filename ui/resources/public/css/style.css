@@ -3086,12 +3086,23 @@ body {
    ============================================================ */
 
 .report-preview {
-  background: white;
-  margin: 1rem auto;
-  padding: 1.5rem;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  background: var(--gray-200);
+  margin: 0 auto;
+  padding: 0.5rem;
   min-height: 400px;
   overflow: auto;
+}
+
+.report-page {
+  background: white;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  margin: 1rem auto;
+  position: relative;
+  overflow: hidden;
+}
+
+.report-page + .report-page {
+  margin-top: 1.5rem;
 }
 
 .report-preview-section {
@@ -3166,10 +3177,21 @@ body {
   }
 
   .report-preview {
+    background: white;
     box-shadow: none;
     margin: 0;
     padding: 0;
     max-width: 100% !important;
+  }
+
+  .report-page {
+    box-shadow: none;
+    margin: 0;
+    page-break-after: always;
+  }
+
+  .report-page:last-child {
+    page-break-after: auto;
   }
 
   .editor-body {

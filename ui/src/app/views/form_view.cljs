@@ -3,6 +3,7 @@
   (:require [reagent.core :as r]
             [app.state :as state]
             [app.views.form-utils :as fu]
+            [app.views.expressions :as expr]
             [clojure.string :as str]))
 
 (declare show-record-menu form-view-control)
@@ -484,9 +485,12 @@
         field (fu/resolve-control-field ctrl)
         value (fu/resolve-field-value field current-record)
         is-new? (:__new__ current-record)
-        renderer (get control-renderers ctrl-type render-default)]
+        renderer (get control-renderers ctrl-type render-default)
+        base-style (fu/control-style ctrl)
+        cf-style (expr/apply-conditional-formatting ctrl current-record nil)
+        style (if cf-style (merge base-style cf-style) base-style)]
     [:div.view-control
-     {:style (fu/control-style ctrl)
+     {:style style
       :on-context-menu show-record-menu}
      [renderer ctrl field value on-change
       {:auto-focus? auto-focus? :is-new? is-new? :allow-edits? allow-edits?

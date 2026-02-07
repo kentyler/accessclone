@@ -8,7 +8,7 @@
 
 (def api-base state/api-base)
 
-(declare get-item-name load-access-database-contents! load-target-existing!)
+(declare get-item-name load-access-database-contents! load-target-existing! load-import-history!)
 
 ;; ============================================================
 ;; Access JSON → PolyAccess Form Definition Converter
@@ -291,7 +291,9 @@
            :target-database-id nil ;; Target database to import into
            :target-existing {}   ;; {:forms #{"Form1"} :tables #{"tbl1"} ...}
            :import-log []       ;; Recent import history
-           :importing? false})) ;; True while import is in progress
+           :importing? false    ;; True while import is in progress
+           :access-db-cache {}  ;; {path {:forms [] :reports [] :tables [] :queries [] :modules []}}
+           }))
 
 (defn save-import-state!
   "Persist import viewer state to server"
@@ -304,22 +306,29 @@
                                    :target_database_id target-database-id}})))))
 
 (defn restore-import-state!
-  "Load saved import state from server and restore viewer position"
+  "Load saved import state from server and restore viewer position.
+   Skips reload if data is already present in viewer-state."
   []
-  (go
-    (let [response (<! (http/get (str api-base "/api/session/import-state")))]
-      (when (and (:success response) (seq (:body response)))
-        (let [{:keys [loaded_path object_type target_database_id]} (:body response)]
-          (when object_type
-            (swap! viewer-state assoc :object-type (keyword object_type)))
-          (when target_database_id
-            (swap! viewer-state assoc :target-database-id target_database_id)
-            (load-target-existing! target_database_id))
-          ;; Load the Access DB contents last (triggers the main view)
-          (when loaded_path
-            (state/load-access-databases!)
-            (load-access-database-contents! loaded_path))
-)))))
+  ;; If viewer already has loaded data, just restore the sidebar list
+  (if (:loaded-path @viewer-state)
+    (do
+      (state/load-access-databases!)
+      (when-let [target (:target-database-id @viewer-state)]
+        (load-target-existing! target))
+      (load-import-history! (:loaded-path @viewer-state)))
+    ;; Otherwise fetch saved state from server
+    (go
+      (let [response (<! (http/get (str api-base "/api/session/import-state")))]
+        (when (and (:success response) (seq (:body response)))
+          (let [{:keys [loaded_path object_type target_database_id]} (:body response)]
+            (when object_type
+              (swap! viewer-state assoc :object-type (keyword object_type)))
+            (when target_database_id
+              (swap! viewer-state assoc :target-database-id target_database_id)
+              (load-target-existing! target_database_id))
+            (when loaded_path
+              (state/load-access-databases!)
+              (load-access-database-contents! loaded_path))))))))
 
 (defn- fetch-existing-names!
   "Fetch object names from an API endpoint and store in target-existing."
@@ -350,30 +359,59 @@
       (when (:success response)
         (swap! viewer-state assoc :import-log (get-in response [:body :history] []))))))
 
-(defn load-access-database-contents!
-  "Load forms, reports, tables, queries, and modules from the selected Access database"
+(defn- apply-cached-contents!
+  "Apply cached Access database contents to viewer-state"
+  [db-path cached]
+  (swap! viewer-state assoc
+         :loading? false :error nil :loaded-path db-path
+         :forms (:forms cached)
+         :reports (:reports cached)
+         :tables (:tables cached)
+         :queries (:queries cached)
+         :modules (:modules cached)
+         :selected #{}))
+
+(defn- fetch-and-cache-contents!
+  "Fetch Access database contents from API and store in cache"
   [db-path]
-  (swap! viewer-state assoc :loading? true :error nil :loaded-path db-path)
-  ;; Persist import state
-  (save-import-state!)
-  ;; Load history in parallel
-  (load-import-history! db-path)
   (go
     (let [response (<! (http/get (str api-base "/api/access-import/database")
                                  {:query-params {:path db-path}}))]
       (if (:success response)
-        (let [body (:body response)]
+        (let [body (:body response)
+              contents {:forms (or (:forms body) [])
+                        :reports (or (:reports body) [])
+                        :tables (or (:tables body) [])
+                        :queries (or (:queries body) [])
+                        :modules (or (:modules body) [])}]
+          (swap! viewer-state assoc-in [:access-db-cache db-path] contents)
           (swap! viewer-state assoc
                  :loading? false
-                 :forms (or (:forms body) [])
-                 :reports (or (:reports body) [])
-                 :tables (or (:tables body) [])
-                 :queries (or (:queries body) [])
-                 :modules (or (:modules body) [])
+                 :forms (:forms contents)
+                 :reports (:reports contents)
+                 :tables (:tables contents)
+                 :queries (:queries contents)
+                 :modules (:modules contents)
                  :selected #{}))
         (swap! viewer-state assoc
                :loading? false
                :error (or (get-in response [:body :error]) "Failed to load database"))))))
+
+(defn load-access-database-contents!
+  "Load Access database contents, using cache if available.
+   Skips if already loading to prevent concurrent COM requests."
+  ([db-path] (load-access-database-contents! db-path false))
+  ([db-path force-refresh?]
+   (when-not (:loading? @viewer-state)
+     (swap! viewer-state assoc :loaded-path db-path :error nil)
+     (save-import-state!)
+     (load-import-history! db-path)
+     (let [cached (get-in @viewer-state [:access-db-cache db-path])]
+       (if (and cached (not force-refresh?))
+         (apply-cached-contents! db-path cached)
+         (do
+           (swap! viewer-state assoc :loading? true)
+           (fetch-and-cache-contents! db-path)))))))
 
 (defn toggle-selection! [item-name]
   (swap! viewer-state update :selected
@@ -662,12 +700,16 @@
                @create-error])])]))))
 
 (defn toolbar [access-db-path]
-  (let [{:keys [selected object-type target-database-id]} @viewer-state]
+  (let [{:keys [selected object-type target-database-id loading?]} @viewer-state
+        cached? (some? (get-in @viewer-state [:access-db-cache access-db-path]))]
     [:div.access-toolbar
      [:div.selection-actions
       [:button.btn-link {:on-click select-all!} "Select All"]
       [:button.btn-link {:on-click select-none!} "Select None"]
-      [:span.selection-count (str (count selected) " selected")]]
+      [:span.selection-count (str (count selected) " selected")]
+      [:button.btn-link {:on-click #(load-access-database-contents! access-db-path true)
+                         :disabled loading?}
+       (if cached? "Refresh" "Load")]]
      [:div.import-actions
       (when (seq selected)
         [:button.btn-primary

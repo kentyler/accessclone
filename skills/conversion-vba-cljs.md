@@ -1,6 +1,6 @@
 # VBA to ClojureScript Translation Guide
 
-Translating Access VBA modules to ClojureScript for the PolyAccess web application. The VBA source is stored in `shared.modules` and the ClojureScript translation lives alongside it.
+Translating Access VBA modules to ClojureScript for the PolyAccess application. PolyAccess runs locally as an Electron app with a local Express backend — file system access and local paths are valid, but must route through backend API endpoints. The VBA source is stored in `shared.modules` and the ClojureScript translation lives alongside it.
 
 ## PolyAccess Architecture (for translation context)
 
@@ -183,12 +183,46 @@ Every translated module should follow this pattern:
 
 7. **DoCmd.OpenForm with WhereCondition**: The filter needs to be set on the target form's state after opening it. This requires a two-step approach — open the tab, then set the filter.
 
+## File System & Path Operations
+
+PolyAccess runs locally (Electron + Express), so file system operations are valid — but they must go through the backend API rather than running directly in the browser:
+
+```clojure
+;; VBA: Open "C:\path\file.txt" For Input As #1
+;;      Line Input #1, strLine
+;;      Close #1
+;; → Backend API call:
+(go
+  (let [response (<! (http/post (str state/api-base "/api/files/read")
+                                {:json-params {:path file-path}
+                                 :headers (state/db-headers)}))]
+    (when (:success response)
+      (:body response))))
+
+;; VBA: FileCopy source, dest
+(go
+  (<! (http/post (str state/api-base "/api/files/copy")
+                 {:json-params {:source source-path :dest dest-path}
+                  :headers (state/db-headers)})))
+
+;; VBA: Dir("C:\path\*.*")  (check file existence)
+(go
+  (let [response (<! (http/post (str state/api-base "/api/files/exists")
+                                {:json-params {:path file-path}
+                                 :headers (state/db-headers)}))]
+    (get-in response [:body :exists])))
+```
+
+**Path handling**: Keep Windows-style paths as configuration values or derive them from backend settings. Don't hardcode paths — make them configurable or relative to a base directory.
+
+**Revision/backup logic**: VBA modules that copy files for version control or backups should translate to backend API calls that perform the same operations server-side.
+
 ## What NOT to Translate
 
-Some VBA patterns have no web equivalent and should be noted as comments:
+Some VBA patterns are truly inapplicable and should be noted as comments:
 
-- `DoCmd.TransferSpreadsheet` — File import/export (needs separate implementation)
-- `CreateObject("Outlook.Application")` — COM automation (not possible in browser)
-- `SendKeys` — Keyboard simulation (not applicable)
-- `DoCmd.OutputTo` — Report export (future feature)
-- Direct file system operations (`Open`, `Print #`, `Close #`) — Use API endpoints instead
+- `CreateObject("Outlook.Application")` — External COM automation (use backend email API instead)
+- `SendKeys` — Keyboard simulation (not applicable in web UI)
+- `DoCmd.TransferSpreadsheet` — Translate to backend API file import/export endpoint
+- `DoCmd.OutputTo` — Report export (future feature, backend API)
+- `Shell` — Running external processes (translate to backend API endpoint if needed)

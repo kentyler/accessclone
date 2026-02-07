@@ -349,6 +349,66 @@ module.exports = function(pool) {
   });
 
   /**
+   * POST /api/access-import/export-module
+   * Export a VBA module from Access (raw source code)
+   * The frontend saves the source via /api/modules
+   */
+  router.post('/export-module', async (req, res) => {
+    const { databasePath, moduleName, targetDatabaseId } = req.body;
+
+    // Helper to log import attempt
+    async function logImport(status, errorMessage = null, details = null) {
+      try {
+        await pool.query(`
+          INSERT INTO shared.import_log
+            (source_path, source_object_name, source_object_type, target_database_id, status, error_message, details)
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `, [databasePath, moduleName, 'module', targetDatabaseId || '_none', status, errorMessage, details ? JSON.stringify(details) : null]);
+      } catch (logErr) {
+        console.error('Error writing to import_log:', logErr);
+      }
+    }
+
+    try {
+      if (!databasePath || !moduleName) {
+        await logImport('error', 'databasePath and moduleName required');
+        return res.status(400).json({ error: 'databasePath and moduleName required' });
+      }
+
+      const scriptsDir = path.join(__dirname, '..', '..', 'scripts', 'access');
+      const exportScript = path.join(scriptsDir, 'export_module.ps1');
+
+      // Run PowerShell - it outputs JSON to stdout
+      const jsonOutput = await runPowerShell(exportScript, [
+        '-DatabasePath', databasePath,
+        '-ModuleName', moduleName
+      ]);
+
+      // Remove BOM if present, then extract JSON object from output
+      const cleanOutput = jsonOutput.replace(/^\uFEFF/, '').trim();
+      const jsonStart = cleanOutput.indexOf('{');
+      if (jsonStart === -1) {
+        throw new Error('No JSON object found in PowerShell output');
+      }
+      const moduleData = JSON.parse(cleanOutput.substring(jsonStart));
+
+      // Log success
+      await logImport('success', null, { lineCount: moduleData.lineCount || 0 });
+
+      // Return raw JSON to frontend
+      res.json({
+        success: true,
+        moduleData: moduleData
+      });
+    } catch (err) {
+      console.error('Error exporting module:', err);
+      logError(pool, 'POST /api/access-import/export-module', 'Failed to export module', err, { details: { databasePath, moduleName, targetDatabaseId } });
+      await logImport('error', err.message);
+      res.status(500).json({ error: err.message || 'Failed to export module' });
+    }
+  });
+
+  /**
    * GET /api/access-import/history
    * Get import history, optionally filtered by source path
    */

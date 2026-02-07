@@ -349,12 +349,14 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-height: 0;
 }
 
 .editor-container {
   flex: 1;
   overflow: auto;
   background: var(--gray-100);
+  min-height: 0;
 }
 
 /* ============================================
@@ -2574,7 +2576,6 @@ body {
 .module-viewer {
   display: flex;
   flex-direction: column;
-  height: 100%;
   background: white;
 }
 
@@ -2595,6 +2596,32 @@ body {
 .module-toolbar .toolbar-hint {
   font-size: 0.75rem;
   color: var(--gray-500);
+}
+
+.module-toolbar .toolbar-right {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.module-toolbar .btn-secondary {
+  padding: 0.25rem 0.75rem;
+  font-size: 0.8125rem;
+  background: white;
+  border: 1px solid var(--gray-300);
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--gray-700);
+}
+
+.module-toolbar .btn-secondary:hover:not(:disabled) {
+  background: var(--gray-50);
+  border-color: var(--gray-400);
+}
+
+.module-toolbar .btn-secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .module-info-panel {
@@ -2648,6 +2675,82 @@ body {
 
 .code-display code {
   font-family: inherit;
+}
+
+/* Module split view */
+.module-split-view {
+  display: flex;
+  flex-direction: column;
+}
+
+.module-vba-panel,
+.module-cljs-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.module-vba-panel {
+  border-bottom: 2px solid var(--gray-300);
+  max-height: 50vh;
+  overflow: auto;
+}
+
+.module-vba-panel .panel-header,
+.module-cljs-panel .panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.375rem 1rem;
+  font-weight: 500;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--gray-500);
+  background: var(--gray-100);
+  border-bottom: 1px solid var(--gray-200);
+  flex-shrink: 0;
+}
+
+.module-cljs-panel .panel-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.module-cljs-panel .btn-sm {
+  padding: 0.125rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+.cljs-editor {
+  width: 100%;
+  min-height: 30vh;
+  padding: 1rem;
+  font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  background: var(--gray-900);
+  color: #a5d6a7;
+  border: none;
+  resize: vertical;
+  outline: none;
+}
+
+.cljs-editor:focus {
+  box-shadow: inset 0 0 0 2px var(--primary-400);
+}
+
+.cljs-empty {
+  padding: 2rem;
+  text-align: center;
+  color: var(--gray-400);
+  font-style: italic;
+}
+
+.translating-indicator {
+  padding: 2rem;
+  text-align: center;
+  color: var(--primary-500);
+  font-style: italic;
 }
 
 /* Popup Forms */

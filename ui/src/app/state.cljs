@@ -437,11 +437,71 @@
 ;; ============================================================
 
 (defn load-module-for-viewing!
-  "Load a module/function for viewing"
+  "Load a VBA module for viewing - fetches full source from API"
   [module]
   (swap! app-state assoc :module-viewer
          {:module-id (:id module)
-          :module-info module}))
+          :module-info module
+          :loading? true})
+  (go
+    (let [response (<! (http/get (str api-base "/api/modules/" (js/encodeURIComponent (:name module)))
+                                 {:headers (db-headers)}))]
+      (if (:success response)
+        (let [data (:body response)]
+          (swap! app-state assoc :module-viewer
+                 {:module-id (:id module)
+                  :module-info (merge module
+                                      {:vba-source (:vba_source data)
+                                       :cljs-source (:cljs_source data)
+                                       :description (:description data)
+                                       :version (:version data)
+                                       :created-at (:created_at data)})
+                  :loading? false}))
+        (swap! app-state assoc-in [:module-viewer :loading?] false)))))
+
+(defn translate-module!
+  "Send VBA source to LLM for translation to ClojureScript"
+  []
+  (let [module-info (get-in @app-state [:module-viewer :module-info])
+        vba-source (:vba-source module-info)]
+    (when vba-source
+      (swap! app-state assoc-in [:module-viewer :translating?] true)
+      (go
+        (let [response (<! (http/post (str api-base "/api/chat/translate")
+                                      {:json-params {:vba_source vba-source
+                                                     :module_name (:name module-info)}
+                                       :headers (db-headers)}))]
+          (swap! app-state assoc-in [:module-viewer :translating?] false)
+          (if (:success response)
+            (let [cljs-source (get-in response [:body :cljs_source])]
+              (swap! app-state assoc-in [:module-viewer :module-info :cljs-source] cljs-source)
+              (swap! app-state assoc-in [:module-viewer :cljs-dirty?] true))
+            (log-error! (str "Translation failed: " (get-in response [:body :error] "Unknown error"))
+                        "translate-module")))))))
+
+(defn save-module-cljs!
+  "Save the ClojureScript translation to the database"
+  []
+  (let [module-info (get-in @app-state [:module-viewer :module-info])
+        cljs-source (:cljs-source module-info)]
+    (when (and (:name module-info) cljs-source)
+      (go
+        (let [response (<! (http/put (str api-base "/api/modules/" (js/encodeURIComponent (:name module-info)))
+                                     {:json-params {:vba_source (:vba-source module-info)
+                                                    :cljs_source cljs-source}
+                                      :headers (db-headers)}))]
+          (if (:success response)
+            (do
+              (swap! app-state assoc-in [:module-viewer :cljs-dirty?] false)
+              (swap! app-state assoc-in [:module-viewer :module-info :version]
+                     (get-in response [:body :version])))
+            (log-error! "Failed to save module translation" "save-module-cljs")))))))
+
+(defn update-module-cljs-source!
+  "Update the ClojureScript source in the editor (marks dirty)"
+  [new-source]
+  (swap! app-state assoc-in [:module-viewer :module-info :cljs-source] new-source)
+  (swap! app-state assoc-in [:module-viewer :cljs-dirty?] true))
 
 ;; ============================================================
 ;; UI STATE PERSISTENCE
@@ -608,29 +668,29 @@
           (log-error! "Failed to load queries from database" "load-queries" {:response (:body response)})
           (object-load-complete!))))))
 
-;; Load functions from database API
+;; Load modules (VBA) from shared.modules table
 (defn load-functions!
-  "Load functions from PostgreSQL via backend API"
+  "Load VBA modules from shared.modules via backend API"
   []
   (go
-    (let [response (<! (http/get (str api-base "/api/functions")
+    (let [response (<! (http/get (str api-base "/api/modules")
                                  {:headers (db-headers)}))]
       (if (:success response)
-        (let [functions (get-in response [:body :functions])
-              ;; Add an id to each function
-              functions-with-ids (map-indexed
-                                  (fn [idx func]
-                                    {:id (inc idx)
-                                     :name (:name func)
-                                     :arguments (:arguments func)
-                                     :return-type (:returnType func)
-                                     :source (:source func)
-                                     :description (:description func)})
-                                  functions)]
-          (swap! app-state assoc-in [:objects :modules] (vec functions-with-ids))
+        (let [module-names (get-in response [:body :modules] [])
+              details (get-in response [:body :details] [])
+              modules-with-ids (vec (map-indexed
+                                      (fn [idx mod-name]
+                                        (let [detail (nth details idx nil)]
+                                          {:id (inc idx)
+                                           :name mod-name
+                                           :has-vba-source (:has_vba_source detail)
+                                           :has-cljs-source (:has_cljs_source detail)
+                                           :description (:description detail)}))
+                                      module-names))]
+          (swap! app-state assoc-in [:objects :modules] modules-with-ids)
           (object-load-complete!))
         (do
-          (log-error! "Failed to load functions from database" "load-functions" {:response (:body response)})
+          (log-event! "warning" "Could not load modules from API" "load-functions")
           (object-load-complete!))))))
 
 ;; Create a new database (schema + shared.databases row)
@@ -718,8 +778,11 @@
         (let [record-source (get-in @app-state [:form-editor :current :record-source])
               form-context (when record-source
                              {:record_source record-source})
+              ;; Send full conversation history for context
+              history (vec (:chat-messages @app-state))
               response (<! (http/post (str api-base "/api/chat")
                                       {:json-params {:message input
+                                                     :history history
                                                      :database_id (:database_id (:current-database @app-state))
                                                      :form_context form-context}
                                        :headers (db-headers)}))]

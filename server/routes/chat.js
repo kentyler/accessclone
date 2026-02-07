@@ -5,6 +5,7 @@
 
 const express = require('express');
 const router = express.Router();
+const path = require('path');
 const { logEvent, logError } = require('../lib/events');
 
 // Import graph modules for dependency/intent tools
@@ -171,7 +172,7 @@ module.exports = function(pool, secrets) {
    * Send a message to the LLM and get a response
    */
   router.post('/', async (req, res) => {
-    const { message, database_id, form_context } = req.body;
+    const { message, history, database_id, form_context } = req.body;
 
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
@@ -235,7 +236,11 @@ Use these when users ask about dependencies, impact of changes, or what structur
           system: `You are a helpful assistant for a database application called PolyAccess. You help users understand their data, create forms, write queries, and work with their databases. ${dbContext}${formContext}${graphContext}
 
 Keep responses concise and helpful. When discussing code or SQL, use markdown code blocks.`,
-          messages: [{ role: 'user', content: message }]
+          messages: [
+            // Include conversation history if provided
+            ...(history || []).map(m => ({ role: m.role, content: m.content })),
+            { role: 'user', content: message }
+          ]
         })
       });
 
@@ -455,6 +460,73 @@ Keep responses concise and helpful. When discussing code or SQL, use markdown co
     } catch (err) {
       console.error('Error in chat:', err);
       logError(pool, 'POST /api/chat', 'Chat request failed', err, { databaseId: req.databaseId });
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Load VBA-to-ClojureScript translation guide for the translate endpoint
+  let translationGuide = '';
+  try {
+    const guidePath = path.join(__dirname, '..', '..', 'skills', 'conversion-vba-cljs.md');
+    translationGuide = require('fs').readFileSync(guidePath, 'utf8');
+  } catch (err) {
+    console.log('Could not load conversion-vba-cljs.md skill file');
+  }
+
+  /**
+   * POST /api/chat/translate
+   * Translate VBA source code to ClojureScript
+   */
+  router.post('/translate', async (req, res) => {
+    const { vba_source, module_name } = req.body;
+
+    if (!vba_source) {
+      return res.status(400).json({ error: 'vba_source is required' });
+    }
+
+    const apiKey = secrets.anthropic?.api_key || process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: 'Anthropic API key not configured in secrets.json' });
+    }
+
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 4096,
+          system: `You are an expert at translating Microsoft Access VBA code to ClojureScript for the PolyAccess web application framework.
+
+Follow this translation guide precisely:
+
+${translationGuide}
+
+Return ONLY the ClojureScript code, no markdown code fences, no explanations. Include a namespace declaration and require statements. Add brief comments for non-obvious translations.`,
+          messages: [{
+            role: 'user',
+            content: `Translate this VBA module "${module_name || 'unknown'}" to ClojureScript:\n\n${vba_source}`
+          }]
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('Anthropic API error:', errorData);
+        return res.status(500).json({ error: errorData.error?.message || 'Translation API request failed' });
+      }
+
+      const data = await response.json();
+      const cljs_source = data.content?.find(c => c.type === 'text')?.text || '';
+
+      res.json({ success: true, cljs_source });
+    } catch (err) {
+      console.error('Error translating module:', err);
+      logError(pool, 'POST /api/chat/translate', 'Module translation failed', err);
       res.status(500).json({ error: err.message });
     }
   });

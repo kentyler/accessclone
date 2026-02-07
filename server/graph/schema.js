@@ -96,6 +96,26 @@ CREATE INDEX IF NOT EXISTS idx_reports_database ON shared.reports(database_id);
 CREATE INDEX IF NOT EXISTS idx_reports_current ON shared.reports(database_id, name) WHERE is_current = true;
 
 -- ============================================================
+-- Modules - VBA source storage with optional ClojureScript translation
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.modules (
+    id SERIAL PRIMARY KEY,
+    database_id VARCHAR(100) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    vba_source TEXT,
+    cljs_source TEXT,
+    description TEXT,
+    version INT NOT NULL DEFAULT 1,
+    is_current BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+
+    UNIQUE(database_id, name, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_modules_database ON shared.modules(database_id);
+CREATE INDEX IF NOT EXISTS idx_modules_current ON shared.modules(database_id, name) WHERE is_current = true;
+
+-- ============================================================
 -- Events - application event log
 -- ============================================================
 CREATE TABLE IF NOT EXISTS shared.events (

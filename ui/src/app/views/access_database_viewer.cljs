@@ -338,7 +338,7 @@
       (fetch-existing-names! headers "/api/forms" :forms :forms identity)
       (fetch-existing-names! headers "/api/tables" :tables :tables #(map :name %))
       (fetch-existing-names! headers "/api/queries" :queries :queries #(map :name %))
-      (fetch-existing-names! headers "/api/functions" :functions :modules #(map :name %))
+      (fetch-existing-names! headers "/api/modules" :modules :modules identity)
       (fetch-existing-names! headers "/api/reports" :reports :reports identity))))
 
 (defn load-import-history!
@@ -443,8 +443,32 @@
                               {:error (get-in response [:body :error])})
             false)))))
 
+(defn import-module!
+  "Import a single module: get VBA source from Access, save to target database"
+  [access-db-path module-name target-database-id]
+  (go
+    ;; Step 1: Get VBA source from Access via PowerShell
+    (let [response (<! (http/post (str api-base "/api/access-import/export-module")
+                                  {:json-params {:databasePath access-db-path
+                                                 :moduleName module-name
+                                                 :targetDatabaseId target-database-id}}))]
+      (if (and (:success response) (get-in response [:body :moduleData]))
+        ;; Step 2: Save VBA source to target database via modules API
+        (let [module-data (get-in response [:body :moduleData])
+              save-response (<! (http/put (str api-base "/api/modules/" module-name)
+                                         {:json-params {:vba_source (:code module-data)}
+                                          :headers {"X-Database-ID" target-database-id}}))]
+          (if (:success save-response)
+            true
+            (do (state/log-event! "error" (str "Failed to save module: " module-name) "import-module"
+                                  {:error (get-in save-response [:body :error])})
+                false)))
+        (do (state/log-event! "error" (str "Failed to export module: " module-name) "import-module"
+                              {:error (get-in response [:body :error])})
+            false)))))
+
 (defn import-selected!
-  "Import selected forms/reports to the current PolyAccess database"
+  "Import selected forms/reports/modules to the current PolyAccess database"
   [access-db-path target-database-id]
   (let [obj-type (:object-type @viewer-state)
         selected (:selected @viewer-state)]
@@ -454,15 +478,16 @@
         (case obj-type
           :forms   (<! (import-form! access-db-path item-name target-database-id))
           :reports (<! (import-report! access-db-path item-name target-database-id))
-          ;; Default: no-op for other types
+          :modules (<! (import-module! access-db-path item-name target-database-id))
           nil)
         ;; Refresh history after each import
         (<! (load-import-history! access-db-path)))
       (swap! viewer-state assoc :importing? false :selected #{})
-      ;; Refresh badges and the forms/reports list in the target database
+      ;; Refresh badges and the object lists in the target database
       (load-target-existing! target-database-id)
       (state/load-forms!)
-      (state/load-reports!))))
+      (state/load-reports!)
+      (state/load-functions!))))
 
 (defn object-type-dropdown []
   (let [obj-type (:object-type @viewer-state)]

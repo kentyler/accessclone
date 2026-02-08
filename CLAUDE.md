@@ -135,6 +135,15 @@ After schema changes (new tables/columns), call `POST /api/graph/populate` to sy
 
 LLM tools in chat: `query_dependencies`, `query_intent`, `propose_intent`
 
+### LLM Chat Context (server/routes/chat.js)
+The chat system prompt includes context based on the active tab:
+- **Forms**: `form_context` with `record_source` + full definition → `summarizeDefinition()` renders compact text (sections, controls with type/field/position)
+- **Reports**: `report_context` with `report_name`, `record_source` + full definition → same `summarizeDefinition()` helper
+- **Modules**: `module_context` with VBA source, CLJS translation, app object inventory
+- **Graph tools**: Always available for dependency/intent queries
+
+Auto-analyze: When a report or form is opened with no existing chat transcript, `maybe-auto-analyze!` in state.cljs automatically sends a prompt asking the LLM to describe the object's structure/purpose and flag potential issues. Uses a pending-flag pattern to handle the race between transcript loading and definition loading — whichever async operation completes second triggers the analysis. The generated analysis is saved as the transcript so it won't re-fire on subsequent opens.
+
 ## Skills Files
 
 See `/skills/` directory for conversion and design guidance:

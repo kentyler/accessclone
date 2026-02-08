@@ -11,7 +11,8 @@
                                          filename->display-name
                                          coerce-yes-no coerce-to-number coerce-to-keyword
                                          yes-no-control-props yes-no-control-defaults number-control-props
-                                         normalize-control]]))
+                                         normalize-control
+                                         maybe-auto-analyze!]]))
 
 ;; Forward declarations for functions used before definition
 (declare save-current-record! save-form! save-form-to-file!
@@ -768,6 +769,7 @@
           :original definition
           :current definition
           :selected-control nil})
+  (maybe-auto-analyze!)
   (set-view-mode! :view))
 
 (defn- auto-save-form-state!

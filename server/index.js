@@ -26,6 +26,7 @@ const configRoutes = require('./routes/config');
 const lintRoutes = require('./routes/lint');
 const graphRoutes = require('./routes/graph');
 const accessImportRoutes = require('./routes/access-import');
+const transcriptsRoutes = require('./routes/transcripts');
 
 // Load graph modules
 const { initializeGraph } = require('./graph/schema');
@@ -159,6 +160,7 @@ app.use('/api/config', configRoutes(SETTINGS_DIR, pool));
 app.use('/api/lint', lintRoutes(pool, secrets));
 app.use('/api/graph', graphRoutes(pool));
 app.use('/api/access-import', accessImportRoutes(pool));
+app.use('/api/transcripts', transcriptsRoutes(pool));
 
 // ============================================================
 // START SERVER

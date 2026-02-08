@@ -9,7 +9,9 @@
 
 ;; Forward declarations for functions used before definition
 (declare load-tables! load-queries! load-functions! load-access-databases!
-         save-ui-state! load-forms! load-reports! filename->display-name)
+         save-ui-state! load-forms! load-reports! filename->display-name
+         save-chat-transcript! add-chat-message! set-chat-input! send-chat-message!
+         maybe-auto-analyze!)
 
 ;; Application state atom
 (defonce app-state
@@ -86,7 +88,8 @@
            :chat-messages []  ; [{:role "user" :content "..."} {:role "assistant" :content "..."}]
            :chat-input ""
            :chat-loading? false
-           :chat-panel-open? true}))
+           :chat-panel-open? true
+           :chat-tab nil}))  ; {:type :forms :id 1 :name "MyForm"} - tab owning current transcript
 
 ;; Loading/Error
 (defn set-loading! [loading?]
@@ -237,9 +240,12 @@
       (if (:success response)
         (let [new-db (first (filter #(= (:database_id %) database-id)
                                     (:available-databases @app-state)))]
+          ;; Save current transcript before switching databases
+          (save-chat-transcript!)
           (set-current-database! new-db)
-          ;; Clear open tabs when switching databases
-          (swap! app-state assoc :open-objects [] :active-tab nil)
+          ;; Clear open tabs and chat when switching databases
+          (swap! app-state assoc :open-objects [] :active-tab nil
+                 :chat-messages [] :chat-tab nil)
           ;; Save cleared UI state
           (save-ui-state!)
           ;; Reload objects for new database
@@ -280,6 +286,70 @@
                      obj))
                  objects))))
 
+;; ============================================================
+;; CHAT TRANSCRIPT PERSISTENCE
+;; ============================================================
+
+(defn- object-type->transcript-type
+  "Map object type keyword to transcript API type string."
+  [obj-type]
+  (case obj-type
+    :tables "tables"
+    :queries "queries"
+    :forms "forms"
+    :reports "reports"
+    :modules "modules"
+    (name obj-type)))
+
+(defn- tab->object-name
+  "Get the object name for a tab (looks up from open-objects)."
+  [tab]
+  (let [open-objects (:open-objects @app-state)
+        obj (first (filter #(and (= (:type %) (:type tab))
+                                  (= (:id %) (:id tab)))
+                           open-objects))]
+    (:name obj)))
+
+(defn save-chat-transcript!
+  "Save current chat messages to the server for the current chat-tab."
+  []
+  (when-let [chat-tab (:chat-tab @app-state)]
+    (let [messages (:chat-messages @app-state)]
+      (when (seq messages)
+        (let [obj-name (or (:name chat-tab) (tab->object-name chat-tab))
+              obj-type (object-type->transcript-type (:type chat-tab))]
+          (when obj-name
+            (go
+              (<! (http/put (str api-base "/api/transcripts/"
+                                 (js/encodeURIComponent obj-type) "/"
+                                 (js/encodeURIComponent obj-name))
+                            {:json-params {:transcript (vec messages)}
+                             :headers (db-headers)})))))))))
+
+(defn load-chat-transcript!
+  "Load chat transcript from server for the given tab, set as current chat."
+  [tab]
+  (let [obj-name (or (:name tab) (tab->object-name tab))
+        obj-type (object-type->transcript-type (:type tab))]
+    (when obj-name
+      (swap! app-state assoc :chat-tab (assoc tab :name obj-name))
+      (go
+        (let [response (<! (http/get (str api-base "/api/transcripts/"
+                                          (js/encodeURIComponent obj-type) "/"
+                                          (js/encodeURIComponent obj-name))
+                                     {:headers (db-headers)}))]
+          (if (and (:success response)
+                   (seq (get-in response [:body :transcript])))
+            (swap! app-state assoc :chat-messages
+                   (vec (map #(select-keys % [:role :content])
+                             (get-in response [:body :transcript]))))
+            (do
+              (swap! app-state assoc :chat-messages [])
+              ;; Auto-analyze reports/forms with no transcript
+              (when (#{:reports :forms} (:type tab))
+                (swap! app-state assoc :auto-analyze-pending true)
+                (maybe-auto-analyze!)))))))))
+
 ;; Tabs
 (defn open-object!
   "Open an object in a new tab (or switch to existing tab)"
@@ -289,12 +359,16 @@
         already-open? (some #(and (= (:type %) object-type)
                                   (= (:id %) object-id))
                             current-open)]
+    ;; Save current transcript before switching
+    (save-chat-transcript!)
     (when-not already-open?
       (let [obj (first (filter #(= (:id %) object-id)
                                (get-in @app-state [:objects object-type])))]
         (swap! app-state update :open-objects conj
                (assoc tab :name (:name obj)))))
     (swap! app-state assoc :active-tab tab)
+    ;; Load transcript for the new tab
+    (load-chat-transcript! tab)
     ;; Save UI state
     (save-ui-state!)))
 
@@ -306,20 +380,33 @@
         new-open (vec (remove #(and (= (:type %) object-type)
                                     (= (:id %) object-id))
                               current-open))
-        active (:active-tab @app-state)]
+        active (:active-tab @app-state)
+        closing-active? (and (= (:type active) object-type)
+                              (= (:id active) object-id))]
+    ;; Save transcript before closing if this is the active tab
+    (when closing-active?
+      (save-chat-transcript!))
     (swap! app-state assoc :open-objects new-open)
     ;; If we closed the active tab, switch to another
-    (when (and (= (:type active) object-type)
-               (= (:id active) object-id))
-      (swap! app-state assoc :active-tab
-             (when (seq new-open)
-               {:type (:type (last new-open))
-                :id (:id (last new-open))})))
+    (when closing-active?
+      (let [new-tab (when (seq new-open)
+                      {:type (:type (last new-open))
+                       :id (:id (last new-open))})]
+        (swap! app-state assoc :active-tab new-tab)
+        (if new-tab
+          (load-chat-transcript! new-tab)
+          ;; No tabs left - clear chat
+          (swap! app-state assoc :chat-messages [] :chat-tab nil))))
     ;; Save UI state
     (save-ui-state!)))
 
 (defn set-active-tab! [object-type object-id]
-  (swap! app-state assoc :active-tab {:type object-type :id object-id})
+  ;; Save current transcript before switching
+  (save-chat-transcript!)
+  (let [tab {:type object-type :id object-id}]
+    (swap! app-state assoc :active-tab tab)
+    ;; Load transcript for the new tab
+    (load-chat-transcript! tab))
   ;; Save UI state
   (save-ui-state!))
 
@@ -454,28 +541,51 @@
                                       {:vba-source (:vba_source data)
                                        :cljs-source (:cljs_source data)
                                        :description (:description data)
+                                       :status (or (:status data) "pending")
+                                       :review-notes (:review_notes data)
                                        :version (:version data)
                                        :created-at (:created_at data)})
                   :loading? false}))
         (swap! app-state assoc-in [:module-viewer :loading?] false)))))
 
+(defn- get-app-objects
+  "Build a compact inventory of all database objects (names only) for LLM context."
+  []
+  (let [objects (:objects @app-state)]
+    {:tables  (mapv :name (:tables objects))
+     :queries (mapv :name (:queries objects))
+     :forms   (mapv :name (:forms objects))
+     :reports (mapv :name (:reports objects))
+     :modules (mapv :name (:modules objects))}))
+
 (defn translate-module!
-  "Send VBA source to LLM for translation to ClojureScript"
+  "Send VBA source to LLM for translation to ClojureScript.
+   Translation appears in the chat panel, not in a separate editor."
   []
   (let [module-info (get-in @app-state [:module-viewer :module-info])
         vba-source (:vba-source module-info)]
     (when vba-source
       (swap! app-state assoc-in [:module-viewer :translating?] true)
+      ;; Open chat panel if closed
+      (when-not (:chat-panel-open? @app-state)
+        (swap! app-state assoc :chat-panel-open? true))
       (go
         (let [response (<! (http/post (str api-base "/api/chat/translate")
                                       {:json-params {:vba_source vba-source
-                                                     :module_name (:name module-info)}
+                                                     :module_name (:name module-info)
+                                                     :app_objects (get-app-objects)}
                                        :headers (db-headers)}))]
           (swap! app-state assoc-in [:module-viewer :translating?] false)
           (if (:success response)
             (let [cljs-source (get-in response [:body :cljs_source])]
+              ;; Store the translation
               (swap! app-state assoc-in [:module-viewer :module-info :cljs-source] cljs-source)
-              (swap! app-state assoc-in [:module-viewer :cljs-dirty?] true))
+              (swap! app-state assoc-in [:module-viewer :cljs-dirty?] true)
+              ;; Show translation in chat and auto-submit for review
+              (when cljs-source
+                (add-chat-message! "assistant" (str "Here is the ClojureScript translation:\n\n" cljs-source))
+                (set-chat-input! "Please review this translation for issues.")
+                (send-chat-message!)))
             (log-error! (str "Translation failed: " (get-in response [:body :error] "Unknown error"))
                         "translate-module")))))))
 
@@ -488,7 +598,9 @@
       (go
         (let [response (<! (http/put (str api-base "/api/modules/" (js/encodeURIComponent (:name module-info)))
                                      {:json-params {:vba_source (:vba-source module-info)
-                                                    :cljs_source cljs-source}
+                                                    :cljs_source cljs-source
+                                                    :status (:status module-info)
+                                                    :review_notes (:review-notes module-info)}
                                       :headers (db-headers)}))]
           (if (:success response)
             (do
@@ -501,6 +613,14 @@
   "Update the ClojureScript source in the editor (marks dirty)"
   [new-source]
   (swap! app-state assoc-in [:module-viewer :module-info :cljs-source] new-source)
+  (swap! app-state assoc-in [:module-viewer :cljs-dirty?] true))
+
+(defn set-module-status!
+  "Set the translation status and optional review notes for the current module"
+  [status & [review-notes]]
+  (swap! app-state assoc-in [:module-viewer :module-info :status] status)
+  (when review-notes
+    (swap! app-state assoc-in [:module-viewer :module-info :review-notes] review-notes))
   (swap! app-state assoc-in [:module-viewer :cljs-dirty?] true))
 
 ;; ============================================================
@@ -542,11 +662,12 @@
                                 :name (:name obj)})))
                          open-objects))]
           (swap! app-state assoc :open-objects restored-tabs)))
-      ;; Restore active tab
+      ;; Restore active tab and load its transcript
       (when active-tab
-        (swap! app-state assoc :active-tab
-               {:type (keyword (:type active-tab))
-                :id (:id active-tab)})))))
+        (let [tab {:type (keyword (:type active-tab))
+                   :id (:id active-tab)}]
+          (swap! app-state assoc :active-tab tab)
+          (load-chat-transcript! tab))))))
 
 (defn load-ui-state!
   "Load saved UI state from server"
@@ -571,11 +692,25 @@
   "Save app configuration to settings/config.json"
   []
   (go
-    (let [config (:config @app-state)
+    (let [config (dissoc (:config @app-state) :capabilities) ;; Don't persist server-computed capabilities
           response (<! (http/put (str api-base "/api/config")
                                  {:json-params config}))]
       (when-not (:success response)
         (log-error! "Failed to save configuration" "save-config" {:response (:body response)})))))
+
+(defn has-capability?
+  "Check if a server capability is available (e.g. :file-system, :powershell, :access-import)"
+  [cap]
+  (get-in @app-state [:config :capabilities cap]))
+
+(defn require-local!
+  "Check if a local capability is available. If not, show a message directing
+   the user to accessclone.com for web conversion help. Returns true if available."
+  [cap]
+  (if (has-capability? cap)
+    true
+    (do (js/alert "This feature requires a local installation and can't run from the web. Visit accessclone.com for help converting your application to run on the web.")
+        false)))
 
 ;; Form operations (load from database via API)
 
@@ -775,26 +910,79 @@
       (set-chat-input! "")
       (set-chat-loading! true)
       (go
-        (let [record-source (get-in @app-state [:form-editor :current :record-source])
-              form-context (when record-source
-                             {:record_source record-source})
+        (let [active-tab (:active-tab @app-state)
+              ;; Form context: record source + full definition when viewing a form
+              form-def (get-in @app-state [:form-editor :current])
+              form-context (when (= (:type active-tab) :forms)
+                             (cond-> {}
+                               (:record-source form-def) (assoc :record_source (:record-source form-def))
+                               form-def (assoc :definition (clj->js form-def))))
+              ;; Report context when viewing a report
+              report-context (when (= (:type active-tab) :reports)
+                               (let [rpt (get-in @app-state [:report-editor :current])]
+                                 (when rpt
+                                   {:report_name (:name rpt)
+                                    :record_source (:record-source rpt)
+                                    :definition (clj->js rpt)})))
+              ;; Module context when viewing a module
+              module-info (get-in @app-state [:module-viewer :module-info])
+              module-context (when (and (= (:type active-tab) :modules)
+                                       (:name module-info))
+                               {:module_name (:name module-info)
+                                :cljs_source (:cljs-source module-info)
+                                :vba_source (:vba-source module-info)
+                                :app_objects (get-app-objects)})
               ;; Send full conversation history for context
               history (vec (:chat-messages @app-state))
               response (<! (http/post (str api-base "/api/chat")
                                       {:json-params {:message input
                                                      :history history
                                                      :database_id (:database_id (:current-database @app-state))
-                                                     :form_context form-context}
+                                                     :form_context form-context
+                                                     :report_context report-context
+                                                     :module_context module-context}
                                        :headers (db-headers)}))]
           (set-chat-loading! false)
           (if (:success response)
             (do
               (add-chat-message! "assistant" (get-in response [:body :message]))
+              ;; Handle updated code from LLM edits
+              (when-let [updated-code (get-in response [:body :updated_code])]
+                (swap! app-state assoc-in [:module-viewer :module-info :cljs-source] updated-code)
+                (swap! app-state assoc-in [:module-viewer :cljs-dirty?] true))
               ;; Handle navigation command if present
               (when-let [nav (get-in response [:body :navigation])]
                 (when (= (:action nav) "navigate")
-                  (navigate-to-record-by-id! (:record_id nav)))))
-            (add-chat-message! "assistant" (str "Error: " (get-in response [:body :error] "Failed to get response")))))))))
+                  (navigate-to-record-by-id! (:record_id nav))))
+              ;; Auto-save transcript after assistant reply
+              (save-chat-transcript!))
+            (do
+              (add-chat-message! "assistant" (str "Error: " (get-in response [:body :error] "Failed to get response")))
+              ;; Save even error responses to preserve context
+              (save-chat-transcript!))))))))
+
+(defn maybe-auto-analyze!
+  "If auto-analyze is pending and the object definition is loaded, send an
+   initial analysis to the chat. Called from load-chat-transcript! (when
+   transcript is empty) and from setup-form-editor!/setup-report-editor!
+   (when definition finishes loading) — whichever completes second triggers."
+  []
+  (when (:auto-analyze-pending @app-state)
+    (let [active-tab (:active-tab @app-state)
+          tab-type (:type active-tab)
+          has-def? (case tab-type
+                     :reports (some? (get-in @app-state [:report-editor :current]))
+                     :forms   (some? (get-in @app-state [:form-editor :current]))
+                     false)]
+      (when has-def?
+        (swap! app-state dissoc :auto-analyze-pending)
+        (let [prompt (case tab-type
+                       :reports "Briefly describe this report's structure and purpose. Note any potential issues such as missing field bindings, empty bands, layout problems, or other concerns."
+                       :forms   "Briefly describe this form's structure and purpose. Note any potential issues such as missing field bindings, empty sections, layout problems, or other concerns."
+                       nil)]
+          (when prompt
+            (set-chat-input! prompt)
+            (send-chat-message!)))))))
 
 (defn check-restore-ui-state!
   "Check if we should restore UI state (called after each object type loads)"

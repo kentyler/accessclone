@@ -105,6 +105,8 @@ CREATE TABLE IF NOT EXISTS shared.modules (
     vba_source TEXT,
     cljs_source TEXT,
     description TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',  -- pending, translated, needs-review, complete
+    review_notes TEXT,                               -- why this needs revisiting
     version INT NOT NULL DEFAULT 1,
     is_current BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -114,6 +116,10 @@ CREATE TABLE IF NOT EXISTS shared.modules (
 
 CREATE INDEX IF NOT EXISTS idx_modules_database ON shared.modules(database_id);
 CREATE INDEX IF NOT EXISTS idx_modules_current ON shared.modules(database_id, name) WHERE is_current = true;
+
+-- Add status/review_notes columns if missing (for existing installs)
+ALTER TABLE shared.modules ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'pending';
+ALTER TABLE shared.modules ADD COLUMN IF NOT EXISTS review_notes TEXT;
 
 -- ============================================================
 -- Events - application event log
@@ -146,6 +152,19 @@ CREATE TABLE IF NOT EXISTS shared.import_log (
     status TEXT,
     error_message TEXT,
     details JSONB
+);
+
+-- ============================================================
+-- Chat Transcripts - persistent chat history per object
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.chat_transcripts (
+    id SERIAL PRIMARY KEY,
+    database_id VARCHAR(100) NOT NULL,
+    object_type VARCHAR(50) NOT NULL,
+    object_name VARCHAR(255) NOT NULL,
+    transcript JSONB DEFAULT '[]',
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(database_id, object_type, object_name)
 );
 `;
 

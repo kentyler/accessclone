@@ -44,23 +44,30 @@ These become API calls since the data lives in PostgreSQL:
 
 ```clojure
 ;; VBA: DLookup("name", "carriers", "carrier_id = " & id)
+;; → Use data API with filter (parameterized, safe):
 (go
   (let [response (<! (http/get (str state/api-base "/api/data/carriers")
                                {:query-params {:filter (js/JSON.stringify
-                                                        (clj->js {"carrier_id" id}))
+                                                        (clj->js {:carrier_id id}))
                                                :limit 1}
                                 :headers (state/db-headers)}))]
     (when (:success response)
-      (get-in response [:body :records 0 :name]))))
+      (get-in response [:body :data 0 :name]))))
 
 ;; VBA: DCount("*", "carriers", "active = True")
+;; → Use queries/run for aggregates (SELECT only):
 (go
   (let [response (<! (http/post (str state/api-base "/api/queries/run")
                                 {:json-params {:sql "SELECT COUNT(*) as cnt FROM carriers WHERE active = true"}
                                  :headers (state/db-headers)}))]
     (when (:success response)
-      (get-in response [:body :records 0 :cnt]))))
+      (get-in response [:body :data 0 :cnt]))))
 ```
+
+**Response shapes:**
+- `GET /api/data/:table` returns `{:data [...records...] :pagination {...}}`
+- `POST /api/queries/run` returns `{:data [...records...] :fields [...] :rowCount N}`
+- Both use `:data` for the records array (not `:records`)
 
 ### MsgBox
 
@@ -117,24 +124,81 @@ These become API calls since the data lives in PostgreSQL:
 
 ### Database Operations (via API)
 
+**CRITICAL: Never build SQL by string concatenation.** VBA commonly builds SQL strings with user values spliced in. In PolyAccess, use the data API which handles parameterization automatically.
+
+#### Writes — Use `/api/data/:table` (parameterized, safe)
+
 ```clojure
-;; VBA: CurrentDb.Execute "INSERT INTO tbl (col) VALUES ('val')"
+;; VBA: CurrentDb.Execute "INSERT INTO tbl (col1, col2) VALUES ('val', 42)"
 (go
   (<! (http/post (str state/api-base "/api/data/tbl")
-                 {:json-params {"col" "val"}
+                 {:json-params {:col1 "val" :col2 42}
                   :headers (state/db-headers)})))
 
 ;; VBA: CurrentDb.Execute "UPDATE tbl SET col = 'val' WHERE id = " & id
 (go
   (<! (http/put (str state/api-base "/api/data/tbl/" id)
-                {:json-params {"col" "val"}
+                {:json-params {:col "val"}
                  :headers (state/db-headers)})))
 
 ;; VBA: CurrentDb.Execute "DELETE FROM tbl WHERE id = " & id
 (go
   (<! (http/delete (str state/api-base "/api/data/tbl/" id)
                    {:headers (state/db-headers)})))
+
+;; VBA: DELETE + INSERT pattern (common in VBA for "upsert"):
+;;   CurrentDb.Execute "DELETE FROM tbl WHERE fk = " & id & " AND name = '" & name & "'"
+;;   CurrentDb.Execute "INSERT INTO tbl (fk, name, value) VALUES (...)"
+;; → First fetch matching record to get its PK, then delete by PK, then insert:
+(go
+  (let [response (<! (http/get (str state/api-base "/api/data/tbl")
+                               {:query-params {:filter (js/JSON.stringify
+                                                        (clj->js {:fk id :name name}))
+                                               :limit 1}
+                                :headers (state/db-headers)}))]
+    ;; Delete existing if found
+    (when-let [existing (first (get-in response [:body :data]))]
+      (<! (http/delete (str state/api-base "/api/data/tbl/" (:pk-column existing))
+                       {:headers (state/db-headers)})))
+    ;; Insert new
+    (<! (http/post (str state/api-base "/api/data/tbl")
+                   {:json-params {:fk id :name name :value value}
+                    :headers (state/db-headers)}))))
 ```
+
+#### Reads — Use `/api/data/:table` with filter, or `/api/queries/run` for complex joins
+
+```clojure
+;; Simple lookup — use the data API filter:
+;; VBA: DLookup("name", "carriers", "carrier_id = " & id)
+(go
+  (let [response (<! (http/get (str state/api-base "/api/data/carriers")
+                               {:query-params {:filter (js/JSON.stringify
+                                                        (clj->js {:carrier_id id}))
+                                               :limit 1}
+                                :headers (state/db-headers)}))]
+    (get-in response [:body :data 0 :name])))
+
+;; Complex joins/searches — use /api/queries/run (SELECT only, no writes!)
+;; NOTE: /api/queries/run only accepts SELECT statements. It will reject
+;; INSERT, UPDATE, DELETE, DROP, etc. with "Only SELECT queries are allowed".
+;; NOTE: This endpoint does NOT support parameterized queries — values in the
+;; SQL string are passed directly to PostgreSQL. Sanitize or validate inputs.
+(go
+  (let [response (<! (http/post (str state/api-base "/api/queries/run")
+                                {:json-params {:sql "SELECT t.id, t.name FROM tbl t JOIN other o ON t.id = o.fk WHERE t.active = true ORDER BY t.name"}
+                                 :headers (state/db-headers)}))]
+    (get-in response [:body :data])))
+```
+
+**When to use which:**
+| Operation | Endpoint | Parameterized? |
+|-----------|----------|----------------|
+| INSERT | `POST /api/data/:table` | Yes (pass JSON body) |
+| UPDATE | `PUT /api/data/:table/:id` | Yes (pass JSON body) |
+| DELETE | `DELETE /api/data/:table/:id` | Yes (PK in URL) |
+| Simple SELECT with equality filters | `GET /api/data/:table?filter=...` | Yes (JSON filter) |
+| Complex SELECT (joins, LIKE, aggregates) | `POST /api/queries/run` | No — SELECT only, validate inputs |
 
 ### TempVars (Global State)
 
@@ -183,39 +247,86 @@ Every translated module should follow this pattern:
 
 7. **DoCmd.OpenForm with WhereCondition**: The filter needs to be set on the target form's state after opening it. This requires a two-step approach — open the tab, then set the filter.
 
+8. **SQL string building vs parameterized queries**: VBA commonly builds SQL by string concatenation with manual escaping (`"WHERE name = '" & EscQuote(name) & "'"`). This is **the most common translation mistake**. Rules:
+   - **INSERT/UPDATE/DELETE** → Always use `/api/data/:table` endpoints (parameterized automatically). **Never** use `/api/queries/run` for writes — it rejects non-SELECT statements.
+   - **Simple SELECT with equality filters** → Use `GET /api/data/:table?filter={"col":"val"}` (parameterized).
+   - **Complex SELECT (joins, LIKE, aggregates)** → Use `/api/queries/run` but build the SQL with only safe, validated values. Never splice raw user input into SQL strings.
+   - **SQL escaping helpers** (e.g. functions that double single quotes) → Mark `needs-review`. Callers should use the data API instead of building escaped SQL.
+   - **VBA "delete then insert" upsert pattern** → Translate to: fetch by filter to get PK, delete by PK, then insert via data API.
+
+9. **Forward references**: ClojureScript requires functions to be defined before use. If function A calls function B which is defined later in the file, add a `(declare B)` at the top of the namespace. The VBA had no such requirement.
+
+## Runtime Capabilities
+
+PolyAccess can run locally (Electron + Express) or as a web app. The server exposes capabilities via `/api/config`. Two helpers are available:
+
+- `(state/has-capability? :file-system)` — silent check, returns true/false
+- `(state/require-local! :file-system)` — checks and **alerts the user** if unavailable: *"This feature requires a local installation and can't run from the web. Visit accessclone.com for help converting your application to run on the web."* Returns true if available.
+
+Available capabilities:
+- `:file-system` — Local file read/write/copy via backend API
+- `:powershell` — PowerShell available (Windows/WSL)
+- `:access-import` — Access database import via COM
+
+**Use `require-local!` to guard local-only operations.** This ensures web users get a clear message with a path to get help.
+
 ## File System & Path Operations
 
-PolyAccess runs locally (Electron + Express), so file system operations are valid — but they must go through the backend API rather than running directly in the browser:
+Guard all file system operations with `require-local!`. When running on the web, the user sees the accessclone.com message and the operation is skipped:
 
 ```clojure
 ;; VBA: Open "C:\path\file.txt" For Input As #1
 ;;      Line Input #1, strLine
 ;;      Close #1
-;; → Backend API call:
-(go
-  (let [response (<! (http/post (str state/api-base "/api/files/read")
-                                {:json-params {:path file-path}
-                                 :headers (state/db-headers)}))]
-    (when (:success response)
-      (:body response))))
+(when (state/require-local! :file-system)
+  (go
+    (let [response (<! (http/post (str state/api-base "/api/files/read")
+                                  {:json-params {:path file-path}
+                                   :headers (state/db-headers)}))]
+      (when (:success response)
+        (:body response)))))
 
 ;; VBA: FileCopy source, dest
-(go
-  (<! (http/post (str state/api-base "/api/files/copy")
-                 {:json-params {:source source-path :dest dest-path}
-                  :headers (state/db-headers)})))
+(when (state/require-local! :file-system)
+  (go
+    (<! (http/post (str state/api-base "/api/files/copy")
+                   {:json-params {:source source-path :dest dest-path}
+                    :headers (state/db-headers)}))))
 
 ;; VBA: Dir("C:\path\*.*")  (check file existence)
-(go
-  (let [response (<! (http/post (str state/api-base "/api/files/exists")
-                                {:json-params {:path file-path}
-                                 :headers (state/db-headers)}))]
-    (get-in response [:body :exists])))
+(when (state/require-local! :file-system)
+  (go
+    (let [response (<! (http/post (str state/api-base "/api/files/exists")
+                                  {:json-params {:path file-path}
+                                   :headers (state/db-headers)}))]
+      (get-in response [:body :exists]))))
 ```
 
 **Path handling**: Keep Windows-style paths as configuration values or derive them from backend settings. Don't hardcode paths — make them configurable or relative to a base directory.
 
 **Revision/backup logic**: VBA modules that copy files for version control or backups should translate to backend API calls that perform the same operations server-side.
+
+## Translation Status & Review Notes
+
+Each module has a `status` field tracking translation progress:
+
+- **pending** — VBA imported, no translation yet
+- **translated** — First-pass translation done, may have issues
+- **needs-review** — Translation exists but depends on other modules or has known issues
+- **complete** — Translation verified and ready for use
+
+**When to mark "needs-review"**: If the translated code includes functions or patterns that may become unnecessary once *other* modules are translated, set status to `needs-review` and explain why in `review_notes`. Common examples:
+
+- **SQL string escaping** (e.g. `escape-single-quotes`): VBA builds SQL by concatenation, but PolyAccess uses parameterized queries via the API. These helper functions may be unnecessary once callers are translated to use API calls instead of string-built SQL. Mark as `needs-review` with a note like: "escape-single-quotes may be unnecessary — callers should use parameterized API queries instead of string concatenation."
+- **Cross-module dependencies**: If module A calls functions from module B that hasn't been translated yet, mark A as `needs-review` with a note listing the dependencies.
+- **Hardcoded paths or constants**: If the VBA has hardcoded file paths or configuration that should come from app config, mark for review.
+
+When generating a translation, **end your response with a recommended status** and review notes if applicable:
+
+```
+;; STATUS: needs-review
+;; REVIEW: escape-single-quotes may be unnecessary if callers use parameterized API queries
+```
 
 ## What NOT to Translate
 

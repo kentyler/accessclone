@@ -1992,7 +1992,7 @@ body {
    ============================================ */
 
 .chat-panel {
-  width: 320px;
+  width: 640px;
   background: white;
   border-left: 1px solid var(--gray-200);
   display: flex;
@@ -2115,7 +2115,7 @@ body {
   font-size: 0.875rem;
   resize: none;
   min-height: 40px;
-  max-height: 120px;
+  max-height: 200px;
   font-family: inherit;
 }
 
@@ -2647,6 +2647,27 @@ body {
   font-size: 0.875rem;
 }
 
+.module-info-panel .status-select {
+  padding: 2px 6px;
+  font-size: 0.85rem;
+  border: 1px solid var(--gray-300);
+  border-radius: 4px;
+}
+
+.module-info-panel .review-notes-row {
+  align-items: flex-start;
+  margin-top: 0.25rem;
+}
+
+.module-info-panel .review-notes-input {
+  flex: 1;
+  font-size: 0.85rem;
+  padding: 4px 6px;
+  border: 1px solid var(--gray-300);
+  border-radius: 4px;
+  resize: vertical;
+}
+
 .module-code-view {
   flex: 1;
   display: flex;
@@ -2693,6 +2714,16 @@ body {
   border-bottom: 2px solid var(--gray-300);
   max-height: 50vh;
   overflow: auto;
+}
+
+.module-cljs-panel {
+  flex: 1;
+  overflow: auto;
+}
+
+.cljs-display {
+  background: var(--gray-900);
+  color: #a5d6a7;
 }
 
 .module-vba-panel .panel-header,

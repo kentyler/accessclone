@@ -7,7 +7,8 @@
                                          log-error! log-event! build-data-query-params
                                          update-object! filename->display-name
                                          coerce-yes-no coerce-to-number coerce-to-keyword
-                                         yes-no-control-props yes-no-control-defaults number-control-props]]))
+                                         yes-no-control-props yes-no-control-defaults number-control-props
+                                         maybe-auto-analyze!]]))
 
 ;; Forward declarations
 (declare save-report! save-report-to-file!)
@@ -147,7 +148,8 @@
           :selected-control nil
           :properties-tab :format
           :view-mode :design
-          :records []}))
+          :records []})
+  (maybe-auto-analyze!))
 
 (defn- parse-report-body
   "Parse API response body into a normalized report definition."

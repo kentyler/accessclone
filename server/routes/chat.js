@@ -8,6 +8,112 @@ const router = express.Router();
 const path = require('path');
 const { logEvent, logError } = require('../lib/events');
 
+/**
+ * Summarize a form or report definition into compact text for the LLM.
+ * @param {Object} definition - The form/report definition object
+ * @param {string} objectType - 'form' or 'report'
+ * @returns {string} Compact text summary
+ */
+function summarizeDefinition(definition, objectType) {
+  if (!definition) return '';
+
+  const name = definition.name || definition.caption || '(unnamed)';
+  const recordSource = definition['record-source'] || definition.recordSource || '';
+  const lines = [];
+
+  lines.push(`${objectType === 'report' ? 'Report' : 'Form'} "${name}"${recordSource ? ` (record-source: ${recordSource})` : ''}`);
+
+  // Form-level / report-level properties of interest
+  if (objectType === 'form') {
+    const dv = definition['default-view'] || definition.defaultView;
+    if (dv) lines.push(`  Default view: ${dv}`);
+    if (definition.filter) lines.push(`  Filter: ${definition.filter}`);
+    if (definition['order-by']) lines.push(`  Order by: ${definition['order-by']}`);
+    if (Number(definition.popup) === 1) lines.push(`  Popup: yes`);
+    if (Number(definition.modal) === 1) lines.push(`  Modal: yes`);
+  } else {
+    // Report-level
+    if (definition.filter) lines.push(`  Filter: ${definition.filter}`);
+    if (definition['order-by']) lines.push(`  Order by: ${definition['order-by']}`);
+    // Grouping summary
+    const grouping = definition.grouping;
+    if (Array.isArray(grouping) && grouping.length > 0) {
+      lines.push(`  Grouping:`);
+      grouping.forEach((g, i) => {
+        const parts = [`field="${g.field || '?'}"`];
+        if (g['sort-order'] || g.sortOrder) parts.push(`sort=${g['sort-order'] || g.sortOrder}`);
+        if (g['group-on'] && g['group-on'] !== 'Each Value') parts.push(`group-on=${g['group-on']}`);
+        lines.push(`    Level ${i}: ${parts.join(', ')}`);
+      });
+    }
+  }
+
+  // Determine which sections/bands to iterate
+  const sectionKeys = objectType === 'form'
+    ? ['header', 'detail', 'footer']
+    : Object.keys(definition).filter(k =>
+        ['report-header', 'page-header', 'detail', 'page-footer', 'report-footer'].includes(k) ||
+        k.startsWith('group-header-') || k.startsWith('group-footer-')
+      ).sort((a, b) => {
+        // Sort bands in logical render order
+        const order = { 'report-header': 0, 'page-header': 1, 'detail': 50, 'page-footer': 90, 'report-footer': 99 };
+        const rank = (k) => {
+          if (order[k] !== undefined) return order[k];
+          if (k.startsWith('group-header-')) return 10 + parseInt(k.split('-')[2]) || 0;
+          if (k.startsWith('group-footer-')) return 60 + parseInt(k.split('-')[2]) || 0;
+          return 50;
+        };
+        return rank(a) - rank(b);
+      });
+
+  const sectionLabel = objectType === 'form' ? 'Sections' : 'Bands';
+  lines.push(`${sectionLabel}:`);
+
+  for (const key of sectionKeys) {
+    const section = definition[key];
+    if (!section || typeof section !== 'object') continue;
+
+    const height = section.height;
+    const controls = section.controls || [];
+    const vis = section.visible === 0 ? ' [hidden]' : '';
+    lines.push(`  ${key} (height: ${height || '?'})${vis}:`);
+
+    if (controls.length === 0) {
+      lines.push(`    (no controls)`);
+    } else {
+      for (const ctrl of controls) {
+        const type = ctrl.type || '?';
+        const parts = [];
+        // Field binding
+        const binding = ctrl['control-source'] || ctrl.controlSource || ctrl.field;
+        if (binding) parts.push(`field="${binding}"`);
+        // Caption for labels/buttons
+        if ((type === 'label' || type === 'button') && ctrl.caption) {
+          parts.push(`"${ctrl.caption}"`);
+        }
+        // Name if present and different from binding
+        if (ctrl.name && ctrl.name !== binding) parts.push(`name="${ctrl.name}"`);
+        // Position
+        if (ctrl.x != null && ctrl.y != null) parts.push(`at (${ctrl.x}, ${ctrl.y})`);
+        // Size
+        if (ctrl.width != null && ctrl.height != null) parts.push(`size ${ctrl.width}x${ctrl.height}`);
+        // Subform
+        if (type === 'subform' && ctrl['source-form-name']) {
+          parts.push(`source="${ctrl['source-form-name']}"`);
+        }
+        // Combo/list row-source
+        if ((type === 'combo-box' || type === 'list-box') && ctrl['row-source']) {
+          const rs = ctrl['row-source'];
+          parts.push(`row-source="${rs.length > 60 ? rs.substring(0, 57) + '...' : rs}"`);
+        }
+        lines.push(`    - ${type} ${parts.join(' ')}`);
+      }
+    }
+  }
+
+  return lines.join('\n');
+}
+
 // Import graph modules for dependency/intent tools
 const { findNode, findNodeById, traverseDependencies } = require('../graph/query');
 const { proposeIntent } = require('../graph/populate');
@@ -166,13 +272,35 @@ const graphTools = [
   }
 ];
 
+// Module translation tools - available when viewing a module
+const moduleTools = [
+  {
+    name: 'update_translation',
+    description: 'Update the ClojureScript translation with revised code. Use this when the user asks you to fix issues, apply suggestions, or make changes to the translation. Always return the COMPLETE updated source, not just the changed parts.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        cljs_source: {
+          type: 'string',
+          description: 'The complete updated ClojureScript source code'
+        },
+        summary: {
+          type: 'string',
+          description: 'Brief summary of what was changed'
+        }
+      },
+      required: ['cljs_source', 'summary']
+    }
+  }
+];
+
 module.exports = function(pool, secrets) {
   /**
    * POST /api/chat
    * Send a message to the LLM and get a response
    */
   router.post('/', async (req, res) => {
-    const { message, history, database_id, form_context } = req.body;
+    const { message, history, database_id, form_context, report_context, module_context } = req.body;
 
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
@@ -198,13 +326,27 @@ module.exports = function(pool, secrets) {
 
       // Build form context for the system prompt
       let formContext = '';
-      if (form_context?.record_source) {
-        formContext = `\n\nThe user is currently viewing a form with record source: "${form_context.record_source}". You have tools available:
+      if (form_context) {
+        // Include form definition summary if available
+        if (form_context.definition) {
+          const summary = summarizeDefinition(form_context.definition, 'form');
+          formContext = `\n\nThe user is currently viewing a form in Design view. Here is the form structure:\n${summary}`;
+        }
+        if (form_context.record_source) {
+          formContext += `\n\nThe form's record source is "${form_context.record_source}". You have tools available:
 - search_records: Find specific records by name/value and navigate to them
 - analyze_data: Answer questions about totals, counts, averages, comparisons, and data insights
 - navigate_to_record: Go to a specific record by ID
 
 Use search_records when users want to FIND specific items. Use analyze_data when users want INSIGHTS about the data (how many, total, average, which is biggest, etc).`;
+        }
+      }
+
+      // Build report context for the system prompt
+      let reportContext = '';
+      if (report_context?.definition) {
+        const summary = summarizeDefinition(report_context.definition, 'report');
+        reportContext = `\n\nThe user is currently viewing a report in Design view. Here is the report structure:\n${summary}`;
       }
 
       // Graph tools context
@@ -215,9 +357,50 @@ Use search_records when users want to FIND specific items. Use analyze_data when
 
 Use these when users ask about dependencies, impact of changes, or what structures are for.`;
 
+      // Module context (when viewing a VBA module translation)
+      let moduleContext = '';
+      if (module_context?.module_name) {
+        // Build compact app inventory from client-provided object names
+        let appInventory = '';
+        if (module_context.app_objects) {
+          const ao = module_context.app_objects;
+          const parts = [];
+          if (ao.tables?.length)  parts.push(`Tables: ${ao.tables.join(', ')}`);
+          if (ao.queries?.length) parts.push(`Queries: ${ao.queries.join(', ')}`);
+          if (ao.forms?.length)   parts.push(`Forms: ${ao.forms.join(', ')}`);
+          if (ao.reports?.length) parts.push(`Reports: ${ao.reports.join(', ')}`);
+          if (ao.modules?.length) parts.push(`Modules: ${ao.modules.join(', ')}`);
+          if (parts.length > 0) {
+            appInventory = `\n\nDatabase objects available in this application:\n${parts.join('\n')}`;
+          }
+        }
+
+        moduleContext = `\n\nThe user is viewing VBA module "${module_context.module_name}". You are helping with the VBA-to-ClojureScript translation.${appInventory}`;
+        if (module_context.cljs_source) {
+          moduleContext += `\n\nCurrent ClojureScript translation:\n${module_context.cljs_source}`;
+        }
+        if (module_context.vba_source) {
+          moduleContext += `\n\nOriginal VBA source:\n${module_context.vba_source}`;
+        }
+        moduleContext += `\n\nYou have a tool available:
+- update_translation: Use this to provide revised ClojureScript code when the user asks for changes. Always include the COMPLETE updated source.
+
+IMPORTANT — PolyAccess architecture context for reviews:
+- Forms carry their own configuration: popup, modal, dimensions, record-source, default-view, etc. are properties in the form definition JSON. The framework renders them accordingly.
+- state/open-object! handles opening any object type — it reads the form definition and renders popups, modals, continuous forms, etc. automatically based on the form's properties.
+- Do NOT suggest adding modal handling, z-index management, positioning, focus trapping, or other rendering concerns — the framework already does this.
+- Do NOT suggest adding error handling, input validation, or extra functions that weren't in the original VBA. A correct translation that delegates to the framework is complete.
+- A simple translation that correctly maps VBA operations to existing framework functions IS the right answer. Fewer lines is better.
+- Focus reviews on: incorrect API usage, SQL injection, wrong state paths, missing forward declarations, async issues, wrong response shape access. These are real bugs.
+- Do NOT flag: missing features the VBA didn't have, missing error handling the VBA didn't have, "assumed state functions" (they exist), or suggest expanding simple correct translations.
+
+When the user asks you to make changes, use the update_translation tool to apply them.`;
+      }
+
       // Combine all available tools
       const availableTools = [
         ...(form_context?.record_source ? tools : []),
+        ...(module_context?.module_name ? moduleTools : []),
         ...graphTools
       ];
 
@@ -231,9 +414,9 @@ Use these when users ask about dependencies, impact of changes, or what structur
         },
         body: JSON.stringify({
           model: 'claude-sonnet-4-20250514',
-          max_tokens: 1024,
+          max_tokens: module_context?.module_name ? 4096 : 1024,
           tools: availableTools,
-          system: `You are a helpful assistant for a database application called PolyAccess. You help users understand their data, create forms, write queries, and work with their databases. ${dbContext}${formContext}${graphContext}
+          system: `You are a helpful assistant for a database application called PolyAccess. You help users understand their data, create forms, write queries, and work with their databases. ${dbContext}${formContext}${reportContext}${moduleContext}${graphContext}
 
 Keep responses concise and helpful. When discussing code or SQL, use markdown code blocks.`,
           messages: [
@@ -408,6 +591,36 @@ Keep responses concise and helpful. When discussing code or SQL, use markdown co
           const { record_id } = toolUse.input;
           navigationCommand = { action: 'navigate', record_id };
           toolResult = { success: true, navigating_to: record_id };
+        } else if (toolUse.name === 'update_translation' && module_context?.module_name) {
+          const { cljs_source, summary } = toolUse.input;
+          // Return the updated code to the frontend — it will apply it to the editor
+          toolResult = { success: true, summary };
+          // Send tool result back for final response, then include updated_code in response
+          const followupResponse2 = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': apiKey,
+              'anthropic-version': '2023-06-01'
+            },
+            body: JSON.stringify({
+              model: 'claude-sonnet-4-20250514',
+              max_tokens: 1024,
+              system: `You are a helpful assistant. The user asked for changes to a code translation and you've applied them. Briefly confirm what you changed.`,
+              messages: [
+                ...(history || []).map(m => ({ role: m.role, content: m.content })),
+                { role: 'user', content: message },
+                { role: 'assistant', content: data.content },
+                { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUse.id, content: JSON.stringify(toolResult) }] }
+              ]
+            })
+          });
+          const followupData2 = await followupResponse2.json();
+          const assistantMsg = followupData2.content?.find(c => c.type === 'text')?.text || `Updated: ${summary}`;
+          return res.json({
+            message: assistantMsg,
+            updated_code: cljs_source
+          });
         }
 
         // If no tool was matched, return without followup
@@ -478,7 +691,7 @@ Keep responses concise and helpful. When discussing code or SQL, use markdown co
    * Translate VBA source code to ClojureScript
    */
   router.post('/translate', async (req, res) => {
-    const { vba_source, module_name } = req.body;
+    const { vba_source, module_name, app_objects } = req.body;
 
     if (!vba_source) {
       return res.status(400).json({ error: 'vba_source is required' });
@@ -490,6 +703,20 @@ Keep responses concise and helpful. When discussing code or SQL, use markdown co
     }
 
     try {
+      // Build compact app inventory from client-provided object names
+      let appInventory = '';
+      if (app_objects) {
+        const parts = [];
+        if (app_objects.tables?.length)  parts.push(`Tables: ${app_objects.tables.join(', ')}`);
+        if (app_objects.queries?.length) parts.push(`Queries: ${app_objects.queries.join(', ')}`);
+        if (app_objects.forms?.length)   parts.push(`Forms: ${app_objects.forms.join(', ')}`);
+        if (app_objects.reports?.length) parts.push(`Reports: ${app_objects.reports.join(', ')}`);
+        if (app_objects.modules?.length) parts.push(`Modules: ${app_objects.modules.join(', ')}`);
+        if (parts.length > 0) {
+          appInventory = '\n\nDatabase objects available in this application:\n' + parts.join('\n');
+        }
+      }
+
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -505,6 +732,7 @@ Keep responses concise and helpful. When discussing code or SQL, use markdown co
 Follow this translation guide precisely:
 
 ${translationGuide}
+${appInventory}
 
 Return ONLY the ClojureScript code, no markdown code fences, no explanations. Include a namespace declaration and require statements. Add brief comments for non-obvious translations.`,
           messages: [{

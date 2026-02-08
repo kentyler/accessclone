@@ -9,20 +9,30 @@ const path = require('path');
 const router = express.Router();
 const { logError } = require('../lib/events');
 
+// Server capabilities — what features are available in this deployment
+const capabilities = {
+  "file-system": true,   // Local file read/write/copy via backend API
+  "powershell": process.platform === 'win32' ||
+    (process.platform === 'linux' && require('fs').existsSync('/proc/version') &&
+     require('fs').readFileSync('/proc/version', 'utf8').toLowerCase().includes('microsoft')),
+  "access-import": true  // Access database import via COM automation
+};
+
 module.exports = function(settingsDir, pool) {
   /**
    * GET /api/config
-   * Read app configuration from settings/config.json
+   * Read app configuration from settings/config.json, merged with server capabilities
    */
   router.get('/', async (req, res) => {
     try {
       const filepath = path.join(settingsDir, 'config.json');
       const content = await fs.readFile(filepath, 'utf8');
-      res.json(JSON.parse(content));
+      const config = JSON.parse(content);
+      res.json({ ...config, capabilities });
     } catch (err) {
       if (err.code === 'ENOENT') {
         // Return default config if file doesn't exist
-        res.json({ "form-designer": { "grid-size": 8 } });
+        res.json({ "form-designer": { "grid-size": 8 }, capabilities });
       } else {
         console.error('Error reading config:', err);
         logError(pool, 'GET /api/config', 'Failed to read config', err);

@@ -753,5 +753,5 @@
            (if-not loaded-path
              [:div.welcome-panel
               [:h2 "Access Database Import"]
-              [:p "Select a database from the sidebar, or click Scan to find .accdb files."]]
+              [:p "Enter the folder path where your Access databases are in the sidebar, or use \"scan all locations\" to search your Desktop and Documents."]]
              [viewer-loaded-content loaded-path error loading?])]))})))

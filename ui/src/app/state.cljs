@@ -846,14 +846,18 @@
 
 ;; Load Access databases (scan for .accdb files)
 (defn load-access-databases!
-  "Scan for Access database files on disk"
-  []
-  (go
-    (let [response (<! (http/get (str api-base "/api/access-import/scan")))]
-      (if (:success response)
-        (let [databases (get-in response [:body :databases] [])]
-          (swap! app-state assoc-in [:objects :access_databases] databases))
-        (log-error! "Failed to scan for Access databases" "load-access-databases")))))
+  "Scan for Access database files on disk. When locations is provided, pass it
+   as a query param to limit the scan to that path (folder or file)."
+  ([] (load-access-databases! nil))
+  ([locations]
+   (go
+     (let [url (cond-> (str api-base "/api/access-import/scan")
+                 locations (str "?locations=" (js/encodeURIComponent locations)))
+           response (<! (http/get url))]
+       (if (:success response)
+         (let [databases (get-in response [:body :databases] [])]
+           (swap! app-state assoc-in [:objects :access_databases] databases))
+         (log-error! "Failed to scan for Access databases" "load-access-databases"))))))
 
 ;; Chat panel
 (defn toggle-chat-panel! []

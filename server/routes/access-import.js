@@ -113,9 +113,27 @@ module.exports = function(pool) {
       const allFiles = [];
 
       for (const location of locations) {
-        console.log(`Scanning ${location} for Access databases...`);
-        const files = await scanDirectory(location);
-        allFiles.push(...files);
+        const trimmed = location.trim();
+        const lower = trimmed.toLowerCase();
+        if (lower.endsWith('.accdb') || lower.endsWith('.mdb')) {
+          // Direct file path — stat it instead of recursing
+          console.log(`Checking Access file: ${trimmed}`);
+          try {
+            const stats = await fs.stat(trimmed);
+            allFiles.push({
+              path: trimmed,
+              name: path.basename(trimmed),
+              size: stats.size,
+              modified: stats.mtime
+            });
+          } catch (err) {
+            // File doesn't exist or can't be accessed — skip
+          }
+        } else {
+          console.log(`Scanning ${trimmed} for Access databases...`);
+          const files = await scanDirectory(trimmed);
+          allFiles.push(...files);
+        }
       }
 
       // Sort by modified date, newest first

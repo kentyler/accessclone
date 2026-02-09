@@ -2891,24 +2891,56 @@ body {
 /* ============================================================
    Access Database Import UI
    ============================================================ */
-.scan-button-row {
+.browse-row {
+  display: flex;
+  gap: 0.25rem;
   padding: 0.5rem;
 }
 
+.browse-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--gray-300);
+  border-radius: 4px;
+  font-size: 0.75rem;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.browse-input::placeholder {
+  color: var(--gray-400);
+}
+
 .scan-btn {
-  width: 100%;
-  padding: 0.375rem 0.75rem;
+  padding: 0.25rem 0.625rem;
   background: var(--primary);
   color: white;
   border: none;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .scan-btn:hover {
   background: var(--primary-hover);
+}
+
+.scan-all-link {
+  padding: 0 0.5rem 0.25rem;
+  font-size: 0.6875rem;
+}
+
+.scan-all-link a {
+  color: var(--gray-500);
+  text-decoration: none;
+}
+
+.scan-all-link a:hover {
+  color: var(--primary);
+  text-decoration: underline;
 }
 
 .access-db-detail {

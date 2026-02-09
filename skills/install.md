@@ -400,6 +400,7 @@ If user asks about:
 
 Once installed, offer to help with:
 1. Converting an Access database - load `conversion.md` skill
+   - To import, switch to Import mode (top bar) and paste the folder path where your .accdb files are into the sidebar. If you're not sure where they are, use the "scan all locations" link to search Desktop and Documents.
 2. Creating a new form - load `form-design.md` skill
 3. Understanding the project structure
 4. Setting up version control (git)

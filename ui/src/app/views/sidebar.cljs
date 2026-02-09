@@ -78,26 +78,44 @@
     :else (str (.toFixed (/ bytes (* 1024 1024)) 1) " MB")))
 
 (defn access-database-list
-  "List of Access database files found by scanning"
+  "Browse input + list of Access database files found by scanning"
   []
-  (let [databases (sort-by #(clojure.string/lower-case (or (:name %) ""))
-                          (get-in @state/app-state [:objects :access_databases] []))
-        selected-path (:loaded-path @access-db-viewer/viewer-state)]
-    [:div
-     [:div.scan-button-row
-      [:button.scan-btn
-       {:on-click #(state/load-access-databases!)}
-       "Scan"]]
-     [:ul.object-list
-      (if (empty? databases)
-        [:li.empty-list "No databases found. Click Scan."]
-        (for [db databases]
-          ^{:key (:path db)}
-          [:li.object-item
-           {:class (when (= (:path db) selected-path) "active")
-            :on-click #(access-db-viewer/load-access-database-contents! (:path db))}
-           [:span.object-name (:name db)]
-           [:span.access-db-detail (format-file-size (:size db))]]))]]))
+  (let [browse-path (r/atom "")
+        submit-browse! (fn []
+                         (let [path (clojure.string/trim @browse-path)]
+                           (when (seq path)
+                             (state/load-access-databases! path))))]
+    (fn []
+      (let [databases (sort-by #(clojure.string/lower-case (or (:name %) ""))
+                               (get-in @state/app-state [:objects :access_databases] []))
+            selected-path (:loaded-path @access-db-viewer/viewer-state)]
+        [:div
+         [:div.browse-row
+          [:input.browse-input
+           {:type "text"
+            :placeholder "Paste folder or file path"
+            :value @browse-path
+            :on-change #(reset! browse-path (.. % -target -value))
+            :on-key-down #(when (= (.-key %) "Enter") (submit-browse!))}]
+          [:button.scan-btn
+           {:on-click submit-browse!}
+           "Browse"]]
+         [:div.scan-all-link
+          [:a {:href "#"
+               :on-click (fn [e]
+                           (.preventDefault e)
+                           (state/load-access-databases!))}
+           "Or scan all locations"]]
+         [:ul.object-list
+          (if (empty? databases)
+            [:li.empty-list "Paste a path above to find databases."]
+            (for [db databases]
+              ^{:key (:path db)}
+              [:li.object-item
+               {:class (when (= (:path db) selected-path) "active")
+                :on-click #(access-db-viewer/load-access-database-contents! (:path db))}
+               [:span.object-name (:name db)]
+               [:span.access-db-detail (format-file-size (:size db))]]))]]))))
 
 (defn collapse-toggle
   "Button to collapse/expand the sidebar"

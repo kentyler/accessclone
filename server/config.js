@@ -18,7 +18,7 @@ module.exports = {
   // Override with DATABASE_URL or individual PG* environment variables
   database: {
     connectionString: process.env.DATABASE_URL ||
-      `postgresql://${process.env.PGUSER || 'postgres'}:${process.env.PGPASSWORD || '<password>'}@${process.env.PGHOST || defaultHost}:${process.env.PGPORT || '5432'}/${process.env.PGDATABASE || 'polyaccess'}`,
+      `postgresql://${process.env.PGUSER || 'postgres'}:${process.env.PGPASSWORD || ''}@${process.env.PGHOST || defaultHost}:${process.env.PGPORT || '5432'}/${process.env.PGDATABASE || 'polyaccess'}`,
 
     // Pool settings
     max: 10,

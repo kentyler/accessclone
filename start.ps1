@@ -1,8 +1,8 @@
 # CloneTemplate - Start Application
 # Starts the backend server and optionally the UI dev server
 #
-# Usage: .\start.ps1 -Password <password>
-#        .\start.ps1 -Password <password> -Dev    # Also starts UI dev server
+# Usage: .\start.ps1 -Password <your_pg_password>
+#        .\start.ps1 -Password <your_pg_password> -Dev    # Also starts UI dev server
 
 param(
     [Parameter(Mandatory=$true)]

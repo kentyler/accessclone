@@ -1,7 +1,7 @@
 # CloneTemplate - Project Setup
 # Creates database, installs infrastructure, and prepares the project
 #
-# Usage: .\setup.ps1 -DatabaseName calculator -Password <password>
+# Usage: .\setup.ps1 -DatabaseName calculator -Password <your_pg_password>
 
 param(
     [Parameter(Mandatory=$true)]

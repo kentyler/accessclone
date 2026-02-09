@@ -1,6 +1,6 @@
 # Form Design Skill
 
-This skill guides LLMs in creating and modifying form definitions for PolyAccess (formerly CloneTemplate).
+This skill guides LLMs in creating and modifying form definitions for PolyAccess.
 
 ## Current Implementation Status
 

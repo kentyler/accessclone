@@ -1,4 +1,4 @@
-# CloneTemplate
+# PolyAccess
 
 A template for converting Microsoft Access databases to web applications using PostgreSQL and ClojureScript.
 
@@ -47,7 +47,7 @@ For UI development with hot reload:
 ## Project Structure
 
 ```
-clonetemplate/
+polyaccess/
 ├── server/              # Node.js backend
 │   ├── index.js         # Express server
 │   ├── config.js        # Database configuration

@@ -1,5 +1,5 @@
 {
-  "name": "clonetemplate",
+  "name": "polyaccess",
   "version": "0.1.0",
   "description": "Convert Access databases to web applications",
   "main": "main.js",
@@ -34,8 +34,8 @@
     "verbose": true
   },
   "build": {
-    "appId": "com.clonetemplate.app",
-    "productName": "CloneTemplate",
+    "appId": "com.polyaccess.app",
+    "productName": "PolyAccess",
     "directories": {
       "output": "dist"
     },

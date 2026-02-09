@@ -1,4 +1,4 @@
-# CloneTemplate - Install Dependencies
+# PolyAccess - Install Dependencies
 # Run this script as Administrator to install required software
 #
 # Usage: Right-click > Run with PowerShell (as Administrator)
@@ -13,7 +13,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "CloneTemplate - Dependency Installation" -ForegroundColor Cyan
+Write-Host "PolyAccess - Dependency Installation" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 

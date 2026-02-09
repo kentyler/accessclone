@@ -1,4 +1,4 @@
-# CloneTemplate - Start Application
+# PolyAccess - Start Application
 # Starts the backend server and optionally the UI dev server
 #
 # Usage: .\start.ps1 -Password <your_pg_password>
@@ -15,7 +15,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "CloneTemplate - Starting Application" -ForegroundColor Cyan
+Write-Host "PolyAccess - Starting Application" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 

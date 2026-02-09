@@ -1,6 +1,6 @@
 # Installation Assistant Skill
 
-You are helping a user install CloneTemplate on their Windows computer. Guide them step-by-step, answer questions, and troubleshoot issues.
+You are helping a user install PolyAccess on their Windows computer. Guide them step-by-step, answer questions, and troubleshoot issues.
 
 ## Your Role
 
@@ -244,7 +244,7 @@ $env:PGPASSWORD = "<password>"
 & "C:\Program Files\PostgreSQL\18\bin\psql.exe" -U postgres -d $dbName -f "server\infrastructure.sql"
 ```
 
-Explain: "This creates the tables and functions that CloneTemplate uses to manage sessions and track migrations."
+Explain: "This creates the tables and functions that PolyAccess uses to manage sessions and track migrations."
 
 ### Step 7: Install NPM Dependencies
 
@@ -316,7 +316,7 @@ Invoke-RestMethod http://localhost:3001/api/tables
 
 Once everything works, tell the user:
 
-"Installation complete! Here's how to use CloneTemplate:
+"Installation complete! Here's how to use PolyAccess:
 
 **To start the application:**
 ```powershell
@@ -385,13 +385,13 @@ If user asks about:
 > Yes! If you already have PostgreSQL installed locally or on another server, we can use it. I just need the connection details (host, port, username, password). This is often the better option if you're already familiar with PostgreSQL.
 
 **"Can I use a cloud PostgreSQL like AWS RDS or Heroku?"**
-> Yes! CloneTemplate works with any PostgreSQL server. Just provide the connection details. Make sure your cloud database allows connections from your computer (check firewall/security group settings).
+> Yes! PolyAccess works with any PostgreSQL server. Just provide the connection details. Make sure your cloud database allows connections from your computer (check firewall/security group settings).
 
 **"Should I install PostgreSQL or use an existing one?"**
 > If you already have PostgreSQL running, use it - less to install and maintain. If you don't have it and aren't sure, I can install it locally for you. Local installation is simpler for getting started.
 
 **"What if I have MySQL/SQL Server instead?"**
-> CloneTemplate is designed for PostgreSQL because it uses PostgreSQL-specific features for translating VBA code. We'd need to install PostgreSQL alongside your existing database - they won't conflict.
+> PolyAccess is designed for PostgreSQL because it uses PostgreSQL-specific features for translating VBA code. We'd need to install PostgreSQL alongside your existing database - they won't conflict.
 
 **"Is my data safe?"**
 > Yes. Everything is stored locally on your computer. The only external connection is to the LLM API for assistance (like right now). Your database and application data never leave your machine.

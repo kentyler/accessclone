@@ -1,5 +1,5 @@
 # PolyAccess Server Startup Script
-# Run from: C:\Users\Ken\Desktop\clonetemplate\run.ps1
+# Run from: C:\Users\Ken\Desktop\PolyAccess\run.ps1
 
 param(
     [string]$Password = "<password>",

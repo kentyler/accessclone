@@ -1,5 +1,5 @@
 /**
- * Configuration for CloneTemplate backend
+ * Configuration for PolyAccess backend
  *
  * Override with environment variables:
  *   DATABASE_URL or individual PG* variables

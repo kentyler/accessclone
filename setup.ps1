@@ -1,4 +1,4 @@
-# CloneTemplate - Project Setup
+# PolyAccess - Project Setup
 # Creates database, installs infrastructure, and prepares the project
 #
 # Usage: .\setup.ps1 -DatabaseName calculator -Password <your_pg_password>
@@ -18,7 +18,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "CloneTemplate - Project Setup" -ForegroundColor Cyan
+Write-Host "PolyAccess - Project Setup" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Database: $DatabaseName" -ForegroundColor White

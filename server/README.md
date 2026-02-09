@@ -1,4 +1,4 @@
-# CloneTemplate Backend
+# PolyAccess Backend
 
 Simple Node.js server for form file operations.
 
@@ -117,7 +117,7 @@ Forms are stored as JSON in the `shared.forms` PostgreSQL table with append-only
 Config is stored as JSON in `settings/config.json`.
 
 ```
-CloneTemplate/
+PolyAccess/
 ├── settings/
 │   └── config.json          # App configuration
 └── server/

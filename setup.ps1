@@ -58,8 +58,22 @@ Write-Host ""
 # Set password environment variable for psql
 $env:PGPASSWORD = $Password
 
-# Step 1: Create database
-Write-Host "[1/5] Creating database '$DatabaseName'..." -ForegroundColor Yellow
+# Step 1: Create secrets.json from example if needed
+Write-Host "[1/6] Checking secrets.json..." -ForegroundColor Yellow
+$secretsPath = Join-Path $PSScriptRoot "secrets.json"
+$examplePath = Join-Path $PSScriptRoot "secrets.json.example"
+if (Test-Path $secretsPath) {
+    Write-Host "      secrets.json already exists." -ForegroundColor Green
+} elseif (Test-Path $examplePath) {
+    Copy-Item $examplePath $secretsPath
+    Write-Host "      Created secrets.json from example." -ForegroundColor Green
+    Write-Host "      NOTE: Edit secrets.json to add your Anthropic API key for AI chat." -ForegroundColor Cyan
+} else {
+    Write-Host "      WARNING: No secrets.json.example found. AI chat will not work without secrets.json." -ForegroundColor Yellow
+}
+
+# Step 2: Create database
+Write-Host "[2/6] Creating database '$DatabaseName'..." -ForegroundColor Yellow
 try {
     & $psql -h $Host -p $Port -U $User -c "CREATE DATABASE $DatabaseName;" 2>&1 | Out-Null
     Write-Host "      Database created." -ForegroundColor Green
@@ -74,8 +88,8 @@ try {
     }
 }
 
-# Step 2: Install infrastructure
-Write-Host "[2/5] Installing infrastructure tables and functions..." -ForegroundColor Yellow
+# Step 3: Install infrastructure
+Write-Host "[3/6] Installing infrastructure tables and functions..." -ForegroundColor Yellow
 $infraPath = Join-Path $PSScriptRoot "server\infrastructure.sql"
 if (Test-Path $infraPath) {
     & $psql -h $Host -p $Port -U $User -d $DatabaseName -f $infraPath 2>&1 | Out-Null
@@ -84,8 +98,8 @@ if (Test-Path $infraPath) {
     Write-Host "      WARNING: infrastructure.sql not found at $infraPath" -ForegroundColor Yellow
 }
 
-# Step 3: Install server dependencies
-Write-Host "[3/5] Installing server dependencies (npm)..." -ForegroundColor Yellow
+# Step 4: Install server dependencies
+Write-Host "[4/6] Installing server dependencies (npm)..." -ForegroundColor Yellow
 $serverPath = Join-Path $PSScriptRoot "server"
 Push-Location $serverPath
 try {
@@ -95,8 +109,8 @@ try {
     Pop-Location
 }
 
-# Step 4: Install UI dependencies
-Write-Host "[4/5] Installing UI dependencies (npm)..." -ForegroundColor Yellow
+# Step 5: Install UI dependencies
+Write-Host "[5/6] Installing UI dependencies (npm)..." -ForegroundColor Yellow
 $uiPath = Join-Path $PSScriptRoot "ui"
 Push-Location $uiPath
 try {
@@ -106,8 +120,8 @@ try {
     Pop-Location
 }
 
-# Step 5: Update config
-Write-Host "[5/5] Updating configuration..." -ForegroundColor Yellow
+# Step 6: Update config
+Write-Host "[6/6] Updating configuration..." -ForegroundColor Yellow
 $configPath = Join-Path $PSScriptRoot "server\config.js"
 $configContent = Get-Content $configPath -Raw
 

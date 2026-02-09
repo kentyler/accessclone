@@ -58,18 +58,38 @@ Write-Host ""
 # Set password environment variable for psql
 $env:PGPASSWORD = $Password
 
-# Step 1: Create secrets.json from example if needed
-Write-Host "[1/6] Checking secrets.json..." -ForegroundColor Yellow
+# Step 1: Create secrets.json and configure API key
+Write-Host "[1/6] Configuring secrets.json..." -ForegroundColor Yellow
 $secretsPath = Join-Path $PSScriptRoot "secrets.json"
 $examplePath = Join-Path $PSScriptRoot "secrets.json.example"
-if (Test-Path $secretsPath) {
-    Write-Host "      secrets.json already exists." -ForegroundColor Green
-} elseif (Test-Path $examplePath) {
-    Copy-Item $examplePath $secretsPath
-    Write-Host "      Created secrets.json from example." -ForegroundColor Green
-    Write-Host "      NOTE: Edit secrets.json to add your Anthropic API key for AI chat." -ForegroundColor Cyan
+if (-not (Test-Path $secretsPath)) {
+    if (Test-Path $examplePath) {
+        Copy-Item $examplePath $secretsPath
+        Write-Host "      Created secrets.json from example." -ForegroundColor Green
+    } else {
+        # Create a minimal secrets.json
+        '{"anthropic":{"api_key":""},"openai":{"api_key":"","embedding_model":"text-embedding-3-small"}}' | Set-Content $secretsPath
+        Write-Host "      Created secrets.json." -ForegroundColor Green
+    }
+}
+# Check if the API key is still a placeholder
+$secretsContent = Get-Content $secretsPath -Raw | ConvertFrom-Json
+$currentKey = $secretsContent.anthropic.api_key
+if (-not $currentKey -or $currentKey -eq "sk-ant-api03-your-key-here") {
+    Write-Host ""
+    Write-Host "      PolyAccess uses an AI assistant for chat features." -ForegroundColor White
+    Write-Host "      To enable it, you need an Anthropic API key from https://console.anthropic.com" -ForegroundColor White
+    Write-Host ""
+    $apiKey = Read-Host "      Enter your Anthropic API key (or press Enter to skip)"
+    if ($apiKey) {
+        $secretsContent.anthropic.api_key = $apiKey
+        $secretsContent | ConvertTo-Json -Depth 3 | Set-Content $secretsPath
+        Write-Host "      API key saved." -ForegroundColor Green
+    } else {
+        Write-Host "      Skipped. You can add it later by editing secrets.json." -ForegroundColor Gray
+    }
 } else {
-    Write-Host "      WARNING: No secrets.json.example found. AI chat will not work without secrets.json." -ForegroundColor Yellow
+    Write-Host "      secrets.json already configured." -ForegroundColor Green
 }
 
 # Step 2: Create database

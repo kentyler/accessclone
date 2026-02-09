@@ -258,7 +258,34 @@ Set-Location ..\ui
 npm install
 ```
 
-### Step 8: Configure the Application
+### Step 8: Configure AI Chat (Optional)
+
+PolyAccess includes an AI assistant that can help analyze forms, reports, and data. It requires an Anthropic API key.
+
+If `secrets.json` doesn't exist yet, create it from the example:
+
+```powershell
+Copy-Item secrets.json.example secrets.json
+```
+
+Then ask the user:
+> "PolyAccess has an AI chat feature that can help you analyze and work with your database objects. To enable it, you need an API key from Anthropic (the company that makes Claude).
+>
+> If you have an Anthropic API key, I can set it up now. If not, we can skip this — the application works fine without it, and you can add the key later."
+
+If they have a key:
+```powershell
+$secrets = Get-Content secrets.json -Raw | ConvertFrom-Json
+$secrets.anthropic.api_key = "<their key>"
+$secrets | ConvertTo-Json -Depth 3 | Set-Content secrets.json
+```
+
+If they don't have a key:
+> "No problem. If you want to set it up later, just edit `secrets.json` in the project folder and replace `sk-ant-api03-your-key-here` with your actual key. You can get one at https://console.anthropic.com"
+
+**Note:** If the user ran `setup.ps1`, this step was already handled — the script prompts for the API key automatically.
+
+### Step 9: Configure the Application
 
 Update `server/config.js` with their database name:
 
@@ -269,7 +296,7 @@ $config = $config -replace "PGDATABASE \|\| '[^']*'", "PGDATABASE || '$dbName'"
 Set-Content $configPath $config
 ```
 
-### Step 9: Test the Installation
+### Step 10: Test the Installation
 
 Start the server and verify:
 
@@ -285,7 +312,7 @@ In another terminal, test the API:
 Invoke-RestMethod http://localhost:3001/api/tables
 ```
 
-### Step 10: Success!
+### Step 11: Success!
 
 Once everything works, tell the user:
 

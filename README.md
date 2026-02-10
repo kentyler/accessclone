@@ -8,8 +8,7 @@
 
 AccessClone imports your Access database — tables, queries, forms, reports, modules, and all — into a PostgreSQL-backed web application that looks and works like Access but runs in a browser.
 
-<!-- Screenshot placeholder: replace with actual screenshot once available -->
-<!-- ![AccessClone Screenshot](docs/screenshot.png) -->
+![AccessClone — Form View with AI chat assistant](docs/screenshot.jpg)
 
 ## Why AccessClone?
 

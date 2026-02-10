@@ -55,7 +55,6 @@ polyaccess/
 ├── ui/                  # ClojureScript frontend
 │   ├── src/app/         # Application source
 │   └── resources/public/  # Static files and compiled JS
-├── forms/               # (legacy, unused - forms stored in PostgreSQL)
 ├── skills/              # LLM guidance for conversions
 ├── install.ps1          # Install dependencies
 ├── setup.ps1            # Setup project
@@ -106,15 +105,23 @@ Or set `DATABASE_URL` for a full connection string.
 |----------|--------|-------------|
 | `/api/tables` | GET | List all tables with columns |
 | `/api/queries` | GET | List all views with columns |
+| `/api/queries/run` | POST | Execute a SELECT/WITH query |
 | `/api/functions` | GET | List all stored functions |
 | `/api/data/:source` | GET | Fetch records from table/view |
 | `/api/data/:table` | POST | Insert new record |
 | `/api/data/:table/:id` | PUT | Update record |
 | `/api/data/:table/:id` | DELETE | Delete record |
-| `/api/session` | POST | Create execution session |
-| `/api/function/:name` | POST | Call PostgreSQL function |
-| `/api/forms` | GET | List form files |
+| `/api/databases` | GET/POST | List or register databases |
+| `/api/forms` | GET | List forms |
 | `/api/forms/:name` | GET/PUT/DELETE | Form CRUD |
+| `/api/reports` | GET | List reports |
+| `/api/reports/:name` | GET/PUT/DELETE | Report CRUD |
+| `/api/modules/:name` | GET | Read module source |
+| `/api/lint/*` | POST | Validate forms/reports |
+| `/api/chat` | POST | LLM chat with context |
+| `/api/session/ui-state` | GET/PUT | Save/load UI state |
+| `/api/graph/*` | GET/POST | Dependency/intent graph |
+| `/api/access-import/*` | GET/POST | Import from Access databases |
 
 ## License
 

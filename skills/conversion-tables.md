@@ -2,6 +2,28 @@
 
 Phase 2 of the conversion process. Migrates table structures and data from Access to PostgreSQL.
 
+## Automated Import (Preferred)
+
+Tables can now be imported directly from the Access Database Import UI:
+
+1. Open the Access Database Viewer, select a database
+2. Switch to the **Tables** tab
+3. Select tables to import, choose a target database
+4. Click **Import** — each table is imported server-side via `POST /api/access-import/import-table`
+
+The endpoint runs `scripts/access/export_table.ps1` (DAO-based), maps Access type codes to PostgreSQL types, creates the table with PKs and NOT NULL constraints, batch-inserts all rows (500 per statement, parameterized), resets identity sequences, and creates non-PK indexes — all in a single transaction.
+
+**Skipped column types:** OLE Object (11), Binary (17), Calculated (18), Attachment (19) are excluded automatically.
+
+**After automated import**, you should still:
+- Check for tables missing primary keys (see "Tables Without Primary Keys" below)
+- Add foreign key constraints manually (Access relationships are not yet imported)
+- Verify row counts in the import log panel
+
+## Manual Import (Fallback)
+
+If the automated pipeline is not available or fails, follow the manual steps below.
+
 ## Prerequisites
 
 - Phase 1 (Setup) completed

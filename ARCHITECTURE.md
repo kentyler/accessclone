@@ -105,7 +105,7 @@ server/routes/
   lint.js           Form/report validation
   config.js         Application settings
   events.js         Event logging
-  access-import.js  Access database scanning and export
+  access-import.js  Access database scanning, export, and table import (structure + data)
 ```
 
 ### Error Logging

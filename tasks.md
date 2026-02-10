@@ -7,3 +7,5 @@
 ## In Progress
 
 ## Completed
+
+- [x] **Table import pipeline (Access → PostgreSQL)** — `export_table.ps1` extracts structure + data via DAO; `POST /api/access-import/import-table` creates table, batch-inserts rows, creates indexes in one transaction; frontend wires up `:tables` in import flow. (PR #10, 2026-02-09)

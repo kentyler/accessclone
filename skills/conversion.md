@@ -121,15 +121,19 @@ Outputs:
 
 Delegate to `conversion-tables.md`
 
+**Automated path (preferred):** Use the Access Database Viewer UI — select tables, pick target database, click Import. The server-side pipeline (`POST /api/access-import/import-table`) handles extraction, type mapping, table creation, data insertion, and index creation in one transaction.
+
+**Manual path (fallback):** Follow the step-by-step instructions in `conversion-tables.md`.
+
 Inputs needed:
 - Source database path
-- Target database connection
+- Target database connection (or target database selected in UI)
 
 Outputs:
 - All tables created in PostgreSQL
 - Data migrated
 - Primary keys and indexes created
-- Foreign keys created (if defined in Access)
+- Foreign keys need to be added manually (not yet part of automated import)
 
 ### Phase 3: Queries
 

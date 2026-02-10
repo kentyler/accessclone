@@ -522,8 +522,22 @@
                               {:error (get-in response [:body :error])})
             false)))))
 
+(defn import-table!
+  "Import a single table: server-side pipeline extracts structure + data from Access and creates PG table"
+  [access-db-path table-name target-database-id]
+  (go
+    (let [response (<! (http/post (str api-base "/api/access-import/import-table")
+                                  {:json-params {:databasePath access-db-path
+                                                 :tableName table-name
+                                                 :targetDatabaseId target-database-id}}))]
+      (if (and (:success response) (get-in response [:body :success]))
+        true
+        (do (state/log-event! "error" (str "Failed to import table: " table-name) "import-table"
+                              {:error (get-in response [:body :error])})
+            false)))))
+
 (defn import-selected!
-  "Import selected forms/reports/modules to the current PolyAccess database"
+  "Import selected forms/reports/modules/tables to the current PolyAccess database"
   [access-db-path target-database-id]
   (let [obj-type (:object-type @viewer-state)
         selected (:selected @viewer-state)]
@@ -534,12 +548,14 @@
           :forms   (<! (import-form! access-db-path item-name target-database-id))
           :reports (<! (import-report! access-db-path item-name target-database-id))
           :modules (<! (import-module! access-db-path item-name target-database-id))
+          :tables  (<! (import-table! access-db-path item-name target-database-id))
           nil)
         ;; Refresh history after each import
         (<! (load-import-history! access-db-path)))
       (swap! viewer-state assoc :importing? false :selected #{})
       ;; Refresh badges and the object lists in the target database
       (load-target-existing! target-database-id)
+      (state/load-tables!)
       (state/load-forms!)
       (state/load-reports!)
       (state/load-functions!))))

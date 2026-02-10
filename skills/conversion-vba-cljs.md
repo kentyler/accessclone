@@ -1,8 +1,8 @@
 # VBA to ClojureScript Translation Guide
 
-Translating Access VBA modules to ClojureScript for the PolyAccess application. PolyAccess runs locally as an Electron app with a local Express backend — file system access and local paths are valid, but must route through backend API endpoints. The VBA source is stored in `shared.modules` and the ClojureScript translation lives alongside it.
+Translating Access VBA modules to ClojureScript for the AccessClone application. AccessClone runs locally as an Electron app with a local Express backend — file system access and local paths are valid, but must route through backend API endpoints. The VBA source is stored in `shared.modules` and the ClojureScript translation lives alongside it.
 
-## PolyAccess Architecture (for translation context)
+## AccessClone Architecture (for translation context)
 
 - **UI**: Reagent (React wrapper) with a single `app-state` atom
 - **State**: `app.state` namespace — shared helpers, tabs, database selection
@@ -124,7 +124,7 @@ These become API calls since the data lives in PostgreSQL:
 
 ### Database Operations (via API)
 
-**CRITICAL: Never build SQL by string concatenation.** VBA commonly builds SQL strings with user values spliced in. In PolyAccess, use the data API which handles parameterization automatically.
+**CRITICAL: Never build SQL by string concatenation.** VBA commonly builds SQL strings with user values spliced in. In AccessClone, use the data API which handles parameterization automatically.
 
 #### Writes — Use `/api/data/:table` (parameterized, safe)
 
@@ -241,7 +241,7 @@ Every translated module should follow this pattern:
 
 4. **Null vs Empty String**: VBA often treats `""` and `Null` interchangeably via `Nz()`. In ClojureScript, use `(or value "")` or `(when (seq value) ...)`.
 
-5. **Form references across forms**: VBA can read `Forms!OtherForm!Control`. In PolyAccess, each form's state is independent. Cross-form communication goes through `app-state` keys or API calls.
+5. **Form references across forms**: VBA can read `Forms!OtherForm!Control`. In AccessClone, each form's state is independent. Cross-form communication goes through `app-state` keys or API calls.
 
 6. **Event procedures**: VBA event handlers (OnClick, BeforeUpdate, etc.) become ClojureScript functions referenced in the form definition's event properties. The form editor wires these up.
 
@@ -258,7 +258,7 @@ Every translated module should follow this pattern:
 
 ## Runtime Capabilities
 
-PolyAccess can run locally (Electron + Express) or as a web app. The server exposes capabilities via `/api/config`. Two helpers are available:
+AccessClone can run locally (Electron + Express) or as a web app. The server exposes capabilities via `/api/config`. Two helpers are available:
 
 - `(state/has-capability? :file-system)` — silent check, returns true/false
 - `(state/require-local! :file-system)` — checks and **alerts the user** if unavailable: *"This feature requires a local installation and can't run from the web. Visit accessclone.com for help converting your application to run on the web."* Returns true if available.
@@ -317,7 +317,7 @@ Each module has a `status` field tracking translation progress:
 
 **When to mark "needs-review"**: If the translated code includes functions or patterns that may become unnecessary once *other* modules are translated, set status to `needs-review` and explain why in `review_notes`. Common examples:
 
-- **SQL string escaping** (e.g. `escape-single-quotes`): VBA builds SQL by concatenation, but PolyAccess uses parameterized queries via the API. These helper functions may be unnecessary once callers are translated to use API calls instead of string-built SQL. Mark as `needs-review` with a note like: "escape-single-quotes may be unnecessary — callers should use parameterized API queries instead of string concatenation."
+- **SQL string escaping** (e.g. `escape-single-quotes`): VBA builds SQL by concatenation, but AccessClone uses parameterized queries via the API. These helper functions may be unnecessary once callers are translated to use API calls instead of string-built SQL. Mark as `needs-review` with a note like: "escape-single-quotes may be unnecessary — callers should use parameterized API queries instead of string concatenation."
 - **Cross-module dependencies**: If module A calls functions from module B that hasn't been translated yet, mark A as `needs-review` with a note listing the dependencies.
 - **Hardcoded paths or constants**: If the VBA has hardcoded file paths or configuration that should come from app config, mark for review.
 

@@ -1,5 +1,5 @@
 /**
- * Express app factory for PolyAccess
+ * Express app factory for AccessClone
  * Creates the app with routes and middleware, without starting the server.
  */
 

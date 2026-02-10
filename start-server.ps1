@@ -1,12 +1,11 @@
-# PolyAccess Server Startup Script
-# Run from: C:\Users\Ken\Desktop\PolyAccess\run.ps1
+# AccessClone Server Startup Script
 
 param(
     [string]$Password = "<password>",
     [int]$Port = 3001
 )
 
-Write-Host "PolyAccess Server" -ForegroundColor Cyan
+Write-Host "AccessClone Server" -ForegroundColor Cyan
 Write-Host "=================" -ForegroundColor Cyan
 
 # Kill existing server on this port

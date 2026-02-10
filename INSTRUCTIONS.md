@@ -1,8 +1,8 @@
-# PolyAccess Setup Instructions
+# AccessClone Setup Instructions
 
 > **Note to the user:** If you get stuck on any step below, paste the step and any error messages into an AI assistant (ChatGPT, Claude, etc.) and it can walk you through it. When the AI gives you a command to run, always paste the full output back so it can see what happened and know whether to proceed or troubleshoot.
 
-These instructions are designed for both human readers and AI assistants. If you are an AI agent helping a user install PolyAccess, follow the steps below. PolyAccess converts Microsoft Access databases (.accdb/.mdb) into web applications backed by PostgreSQL.
+These instructions are designed for both human readers and AI assistants. If you are an AI agent helping a user install AccessClone, follow the steps below. AccessClone converts Microsoft Access databases (.accdb/.mdb) into web applications backed by PostgreSQL.
 
 If you can execute commands directly (e.g. Claude Code, Codex, or another agent with shell access), run the commands yourself instead of asking the user to copy-paste them. The user-facing tips about pasting output back don't apply — you can see the results directly.
 
@@ -79,9 +79,9 @@ $env:PGPASSWORD="<your password>"; & "C:\Program Files\PostgreSQL\<version>\bin\
 
 If this fails, see Troubleshooting below.
 
-## Step 4: Locate the PolyAccess Folder
+## Step 4: Locate the AccessClone Folder
 
-Ask the user where they unzipped PolyAccess. The folder should contain `server/`, `ui/`, and `scripts/` subdirectories. All subsequent commands should run from this folder.
+Ask the user where they unzipped AccessClone. The folder should contain `server/`, `ui/`, and `scripts/` subdirectories. All subsequent commands should run from this folder.
 
 ```powershell
 # Verify the folder structure
@@ -117,7 +117,7 @@ cd ..
 
 ## Step 7: Configure AI Chat (Optional)
 
-PolyAccess has a built-in AI assistant that can analyze forms, reports, and data. It needs an Anthropic API key.
+AccessClone has a built-in AI assistant that can analyze forms, reports, and data. It needs an Anthropic API key.
 
 If the user wants to set this up:
 1. Copy the example file: `Copy-Item secrets.json.example secrets.json`
@@ -148,7 +148,7 @@ If the user has .accdb files to import:
 2. In the sidebar, paste the folder path where their .accdb files are and click **Browse**
 3. If they don't know where the files are, click **"Or scan all locations"** to search Desktop and Documents
 4. Select a database from the list to see its tables, forms, reports, and modules
-5. Import objects one at a time into PolyAccess
+5. Import objects one at a time into AccessClone
 
 Note: Importing forms, reports, and modules from Access requires Microsoft Access to be installed on the same machine (the export scripts use Access COM automation via PowerShell). Tables and queries can be exported without Access.
 
@@ -156,10 +156,10 @@ Note: Importing forms, reports, and modules from Access requires Microsoft Acces
 
 ## Everyday Startup
 
-After installation, starting PolyAccess each time is just:
+After installation, starting AccessClone each time is just:
 
 ```powershell
-cd <polyaccess-folder>\server
+cd <accessclone-folder>\server
 $env:PGPASSWORD = "<password>"
 node index.js
 ```

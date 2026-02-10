@@ -1,4 +1,4 @@
--- CloneAccess VBA Translation Infrastructure
+-- AccessClone VBA Translation Infrastructure
 -- Run this script after table migration to enable VBA function translation
 --
 -- This creates the session-state infrastructure that all translated VBA functions use.

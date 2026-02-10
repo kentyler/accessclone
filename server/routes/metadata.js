@@ -7,48 +7,9 @@ const express = require('express');
 const router = express.Router();
 const { logError } = require('../lib/events');
 const { clearPkCache } = require('./data');
+const { resolveType, quoteIdent } = require('../lib/access-types');
 
 const NAME_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
-
-/**
- * Map Access-friendly type names to PostgreSQL types
- */
-function resolveType(field) {
-  const t = (field.type || '').trim();
-  switch (t) {
-    case 'Short Text':
-      return `character varying(${field.maxLength || 255})`;
-    case 'Long Text':
-      return 'text';
-    case 'Number': {
-      const fs = (field.fieldSize || 'Long Integer').trim();
-      switch (fs) {
-        case 'Byte':         return 'smallint';
-        case 'Integer':      return 'smallint';
-        case 'Long Integer': return 'integer';
-        case 'Single':       return 'real';
-        case 'Double':       return 'double precision';
-        case 'Decimal':      return `numeric(${field.precision || 18},${field.scale || 0})`;
-        default:             return 'integer';
-      }
-    }
-    case 'Yes/No':
-      return 'boolean';
-    case 'Date/Time':
-      return 'timestamp without time zone';
-    case 'Currency':
-      return 'numeric(19,4)';
-    case 'AutoNumber':
-      return 'integer';
-    default:
-      // Pass through raw PG types
-      return t;
-  }
-}
-
-function quoteIdent(name) {
-  return '"' + name.replace(/"/g, '""') + '"';
-}
 
 module.exports = function(pool) {
   /**

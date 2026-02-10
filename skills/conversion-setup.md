@@ -4,7 +4,7 @@ Phase 1 of the conversion process. Creates the PostgreSQL database, installs inf
 
 ## Quick Start (Automated)
 
-PolyAccess includes PowerShell scripts for automated setup:
+AccessClone includes PowerShell scripts for automated setup:
 
 ```powershell
 # 1. Install dependencies (run as Administrator)
@@ -47,7 +47,7 @@ PGPASSWORD=<password> psql -h 10.255.255.254 -U postgres -c "CREATE DATABASE cal
 Run the infrastructure script:
 
 ```bash
-PGPASSWORD=<password> psql -h localhost -U postgres -d calculator -f /path/to/polyaccess/server/infrastructure.sql
+PGPASSWORD=<password> psql -h localhost -U postgres -d calculator -f /path/to/accessclone/server/infrastructure.sql
 ```
 
 This creates:
@@ -76,15 +76,15 @@ SELECT create_session();
 
 ### 4. Create Project Folder
 
-Copy the polyaccess folder:
+Copy the accessclone folder:
 
 ```bash
-cp -r /path/to/polyaccess/ /path/to/calculator/
+cp -r /path/to/accessclone/ /path/to/calculator/
 ```
 
 On Windows:
 ```powershell
-Copy-Item -Path "C:\path\to\polyaccess" -Destination "C:\path\to\calculator" -Recurse
+Copy-Item -Path "C:\path\to\accessclone" -Destination "C:\path\to\calculator" -Recurse
 ```
 
 ### 5. Initialize Git Repository
@@ -102,7 +102,7 @@ Copy-Item -Path "C:\path\to\polyaccess" -Destination "C:\path\to\calculator" -Re
 cd /path/to/calculator
 git init
 git add .
-git commit -m "Initial commit from polyaccess"
+git commit -m "Initial commit from accessclone"
 ```
 
 #### If GitHub

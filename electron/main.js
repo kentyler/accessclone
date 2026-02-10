@@ -1,5 +1,5 @@
 /**
- * PolyAccess - Electron Main Process
+ * AccessClone - Electron Main Process
  *
  * LLM-first approach: Chat interface guides user through installation
  */
@@ -55,7 +55,7 @@ function createWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js')
     },
-    title: 'PolyAccess Setup'
+    title: 'AccessClone Setup'
   });
 
   mainWindow.loadFile(path.join(__dirname, 'chat.html'));
@@ -194,11 +194,11 @@ The database name in PostgreSQL should be: ${config.project.name}
     // Build install log context
     const logSummary = generateSummary(installLog);
 
-    const systemPrompt = `You are an assistant for PolyAccess, helping users set up and develop their application on Windows.
+    const systemPrompt = `You are an assistant for AccessClone, helping users set up and develop their application on Windows.
 ${projectContext}
 ${logSummary}
 
-${installSkill || 'Help the user install PolyAccess.'}
+${installSkill || 'Help the user install AccessClone.'}
 
 ## Available Actions
 

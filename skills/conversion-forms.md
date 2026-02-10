@@ -1,12 +1,12 @@
 # Conversion Forms Skill
 
-Phase 4 of the conversion process. Imports Access forms into PolyAccess via the Import UI or API.
+Phase 4 of the conversion process. Imports Access forms into AccessClone via the Import UI or API.
 
 ## Prerequisites
 
 - Phase 1-3 completed
 - Access database accessible via COM automation
-- Target database configured in PolyAccess
+- Target database configured in AccessClone
 
 ## Tools
 
@@ -62,7 +62,7 @@ $access.Quit()
 
 ## Step 2: Import Forms via UI
 
-Use the Import mode in the PolyAccess UI:
+Use the Import mode in the AccessClone UI:
 1. Switch to Import mode (radio toggle in header)
 2. Select an Access database from the scan results
 3. Select "Forms" as the object type
@@ -93,7 +93,7 @@ See `form-design.md` for complete details. Basic structure:
 ## Critical Transformations
 
 ### Twips to Pixels
-Access stores coordinates in twips (1440 per inch). PolyAccess uses pixels. **Divide by 15**:
+Access stores coordinates in twips (1440 per inch). AccessClone uses pixels. **Divide by 15**:
 ```javascript
 :x ${Math.round(parseInt(twips) / 15)}
 :y ${Math.round(parseInt(twips) / 15)}
@@ -115,8 +115,8 @@ Export must group controls by section:
 ```
 
 ### Default View Values
-Must match PolyAccess exactly (case-sensitive):
-| Access Value | PolyAccess Value |
+Must match AccessClone exactly (case-sensitive):
+| Access Value | AccessClone Value |
 |--------------|------------------|
 | 0 | "Single Form" |
 | 1 | "Continuous Forms" |
@@ -130,7 +130,7 @@ Use string "form" not keyword :form:
 ```
 
 ### Caption to Text
-PolyAccess uses `:text` not `:caption`:
+AccessClone uses `:text` not `:caption`:
 ```clojure
 :text "Form Title"  ; correct
 :caption "..."      ; incorrect
@@ -241,7 +241,7 @@ The UI lists all current forms in the sidebar automatically.
 
 ## Standard Button Handlers
 
-PolyAccess recognizes certain button captions and provides built-in functionality:
+AccessClone recognizes certain button captions and provides built-in functionality:
 
 | Button Text | Action |
 |-------------|--------|
@@ -286,7 +286,7 @@ SELECT log_migration(
 );
 ```
 
-## Continuous Forms in PolyAccess
+## Continuous Forms in AccessClone
 
 Forms with `:default-view "Continuous Forms"` render as a scrollable list:
 - Header section displays once at top

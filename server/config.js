@@ -1,5 +1,5 @@
 /**
- * Configuration for PolyAccess backend
+ * Configuration for AccessClone backend
  *
  * Override with environment variables:
  *   DATABASE_URL or individual PG* variables

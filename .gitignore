@@ -1,5 +1,7 @@
-# Secrets
+# Secrets & environment
 secrets.json
+.env
+.env.local
 
 # Dependencies
 node_modules/
@@ -8,6 +10,13 @@ node_modules/
 ui/resources/public/js/
 ui/.shadow-cljs/
 electron/dist/
+
+# Access database files
+*.accdb
+*.mdb
+
+# Distribution archives
+*.zip
 
 # Editor files
 .idea/

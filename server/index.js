@@ -1,5 +1,5 @@
 /**
- * Backend for PolyAccess
+ * Backend for AccessClone
  * Main server entry point - routes are in /routes
  */
 
@@ -81,7 +81,7 @@ pool.query('SELECT NOW()')
 // ============================================================
 
 app.listen(PORT, () => {
-  console.log(`PolyAccess backend running on http://localhost:${PORT}`);
+  console.log(`AccessClone backend running on http://localhost:${PORT}`);
   console.log(`Database: ${config.database.connectionString.replace(/:[^:@]+@/, ':****@')}`);
   console.log(`Forms: stored in shared.forms table`);
 

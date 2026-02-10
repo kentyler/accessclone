@@ -1,8 +1,8 @@
-# PolyAccess - Create Distribution Package
-# Creates a PolyAccess.zip ready to share with new users
+# AccessClone - Create Distribution Package
+# Creates a AccessClone.zip ready to share with new users
 #
 # Usage: .\package.ps1
-#        .\package.ps1 -OutputPath C:\Users\Ken\Desktop\PolyAccess.zip
+#        .\package.ps1 -OutputPath C:\Users\Ken\Desktop\AccessClone.zip
 
 param(
     [string]$OutputPath
@@ -15,16 +15,16 @@ $packageJson = Get-Content (Join-Path $PSScriptRoot "package.json") -Raw | Conve
 $version = $packageJson.version
 
 if (-not $OutputPath) {
-    $OutputPath = Join-Path $PSScriptRoot "PolyAccess-$version.zip"
+    $OutputPath = Join-Path $PSScriptRoot "AccessClone-$version.zip"
 }
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "PolyAccess $version - Build Distribution Package" -ForegroundColor Cyan
+Write-Host "AccessClone $version - Build Distribution Package" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 $sourceDir = $PSScriptRoot
-$stagingDir = Join-Path ([System.IO.Path]::GetTempPath()) "PolyAccess"
+$stagingDir = Join-Path ([System.IO.Path]::GetTempPath()) "AccessClone"
 
 # Clean up any previous staging directory
 if (Test-Path $stagingDir) {
@@ -122,6 +122,6 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "Package complete!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "The zip extracts to a 'PolyAccess' folder." -ForegroundColor White
+Write-Host "The zip extracts to a 'AccessClone' folder." -ForegroundColor White
 Write-Host "Share it with users and have them follow README.md to get started." -ForegroundColor Gray
 Write-Host ""

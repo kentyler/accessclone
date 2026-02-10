@@ -11,12 +11,31 @@ const path = require('path');
 const fs = require('fs').promises;
 const { clearSchemaCache } = require('./data');
 const { convertAccessQuery, sanitizeName } = require('../lib/query-converter');
+const { resolveType, quoteIdent } = require('../lib/access-types');
 
-// Default scan locations
-const DEFAULT_SCAN_LOCATIONS = [
-  'C:\\Users\\Ken\\Desktop',
-  'C:\\Users\\Ken\\Documents'
-];
+/**
+ * Create an import logger closure for a specific import operation.
+ */
+function makeLogImport(pool, sourcePath, objectName, objectType, targetDatabaseId) {
+  return async function logImport(status, errorMessage = null, details = null) {
+    try {
+      await pool.query(`
+        INSERT INTO shared.import_log
+          (source_path, source_object_name, source_object_type, target_database_id, status, error_message, details)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `, [sourcePath, objectName, objectType, targetDatabaseId || '_none', status, errorMessage, details ? JSON.stringify(details) : null]);
+    } catch (logErr) {
+      console.error('Error writing to import_log:', logErr);
+    }
+  };
+}
+
+// Default scan locations — use the current user's Desktop and Documents
+const userProfile = process.env.USERPROFILE || process.env.HOME || '';
+const DEFAULT_SCAN_LOCATIONS = userProfile ? [
+  path.join(userProfile, 'Desktop'),
+  path.join(userProfile, 'Documents')
+] : [];
 
 /**
  * Run a PowerShell script and return the output
@@ -253,18 +272,7 @@ module.exports = function(pool) {
   router.post('/export-form', async (req, res) => {
     const { databasePath, formName, targetDatabaseId } = req.body;
 
-    // Helper to log import attempt
-    async function logImport(status, errorMessage = null, details = null) {
-      try {
-        await pool.query(`
-          INSERT INTO shared.import_log
-            (source_path, source_object_name, source_object_type, target_database_id, status, error_message, details)
-          VALUES ($1, $2, $3, $4, $5, $6, $7)
-        `, [databasePath, formName, 'form', targetDatabaseId || '_none', status, errorMessage, details ? JSON.stringify(details) : null]);
-      } catch (logErr) {
-        console.error('Error writing to import_log:', logErr);
-      }
-    }
+    const logImport = makeLogImport(pool, databasePath, formName, 'form', targetDatabaseId);
 
     try {
       if (!databasePath || !formName) {
@@ -314,18 +322,7 @@ module.exports = function(pool) {
   router.post('/export-report', async (req, res) => {
     const { databasePath, reportName, targetDatabaseId } = req.body;
 
-    // Helper to log import attempt
-    async function logImport(status, errorMessage = null, details = null) {
-      try {
-        await pool.query(`
-          INSERT INTO shared.import_log
-            (source_path, source_object_name, source_object_type, target_database_id, status, error_message, details)
-          VALUES ($1, $2, $3, $4, $5, $6, $7)
-        `, [databasePath, reportName, 'report', targetDatabaseId || '_none', status, errorMessage, details ? JSON.stringify(details) : null]);
-      } catch (logErr) {
-        console.error('Error writing to import_log:', logErr);
-      }
-    }
+    const logImport = makeLogImport(pool, databasePath, reportName, 'report', targetDatabaseId);
 
     try {
       if (!databasePath || !reportName) {
@@ -376,18 +373,7 @@ module.exports = function(pool) {
   router.post('/export-module', async (req, res) => {
     const { databasePath, moduleName, targetDatabaseId } = req.body;
 
-    // Helper to log import attempt
-    async function logImport(status, errorMessage = null, details = null) {
-      try {
-        await pool.query(`
-          INSERT INTO shared.import_log
-            (source_path, source_object_name, source_object_type, target_database_id, status, error_message, details)
-          VALUES ($1, $2, $3, $4, $5, $6, $7)
-        `, [databasePath, moduleName, 'module', targetDatabaseId || '_none', status, errorMessage, details ? JSON.stringify(details) : null]);
-      } catch (logErr) {
-        console.error('Error writing to import_log:', logErr);
-      }
-    }
+    const logImport = makeLogImport(pool, databasePath, moduleName, 'module', targetDatabaseId);
 
     try {
       if (!databasePath || !moduleName) {
@@ -436,17 +422,7 @@ module.exports = function(pool) {
   router.post('/import-table', async (req, res) => {
     const { databasePath, tableName, targetDatabaseId } = req.body;
 
-    async function logImport(status, errorMessage = null, details = null) {
-      try {
-        await pool.query(`
-          INSERT INTO shared.import_log
-            (source_path, source_object_name, source_object_type, target_database_id, status, error_message, details)
-          VALUES ($1, $2, $3, $4, $5, $6, $7)
-        `, [databasePath, tableName, 'table', targetDatabaseId || '_none', status, errorMessage, details ? JSON.stringify(details) : null]);
-      } catch (logErr) {
-        console.error('Error writing to import_log:', logErr);
-      }
-    }
+    const logImport = makeLogImport(pool, databasePath, tableName, 'table', targetDatabaseId);
 
     try {
       if (!databasePath || !tableName || !targetDatabaseId) {
@@ -510,47 +486,6 @@ module.exports = function(pool) {
           case 16: return { type: 'Number', fieldSize: 'Long Integer' };
           default: return { type: 'Short Text', maxLength: 255 };
         }
-      }
-
-      function resolveType(f) {
-        const t = (f.type || '').trim();
-        switch (t) {
-          case 'Short Text':
-            return `character varying(${f.maxLength || 255})`;
-          case 'Long Text':
-            return 'text';
-          case 'Number': {
-            const fs = (f.fieldSize || 'Long Integer').trim();
-            switch (fs) {
-              case 'Byte':         return 'smallint';
-              case 'Integer':      return 'smallint';
-              case 'Long Integer': return 'integer';
-              case 'Single':       return 'real';
-              case 'Double':       return 'double precision';
-              case 'Decimal':      return `numeric(${f.precision || 18},${f.scale || 0})`;
-              default:             return 'integer';
-            }
-          }
-          case 'Yes/No':
-            return 'boolean';
-          case 'Date/Time':
-            return 'timestamp without time zone';
-          case 'Currency':
-            return 'numeric(19,4)';
-          case 'AutoNumber':
-            return 'integer';
-          default:
-            return t || 'text';
-        }
-      }
-
-      function quoteIdent(name) {
-        return '"' + name.replace(/"/g, '""') + '"';
-      }
-
-      // Sanitize name: lowercase, spaces → underscores, strip non-alphanumeric
-      function sanitizeName(name) {
-        return name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
       }
 
       const pgTableName = sanitizeName(tableName);
@@ -709,17 +644,7 @@ module.exports = function(pool) {
   router.post('/import-query', async (req, res) => {
     const { databasePath, queryName, targetDatabaseId } = req.body;
 
-    async function logImport(status, errorMessage = null, details = null) {
-      try {
-        await pool.query(`
-          INSERT INTO shared.import_log
-            (source_path, source_object_name, source_object_type, target_database_id, status, error_message, details)
-          VALUES ($1, $2, $3, $4, $5, $6, $7)
-        `, [databasePath, queryName, 'query', targetDatabaseId || '_none', status, errorMessage, details ? JSON.stringify(details) : null]);
-      } catch (logErr) {
-        console.error('Error writing to import_log:', logErr);
-      }
-    }
+    const logImport = makeLogImport(pool, databasePath, queryName, 'query', targetDatabaseId);
 
     try {
       if (!databasePath || !queryName || !targetDatabaseId) {

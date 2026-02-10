@@ -1,6 +1,6 @@
 # Architecture
 
-PolyAccess converts Microsoft Access databases into multi-tenant web applications backed by PostgreSQL.
+AccessClone converts Microsoft Access databases into multi-tenant web applications backed by PostgreSQL.
 
 ## High-Level Overview
 
@@ -137,7 +137,7 @@ About 90% of medium-to-large ClojureScript SPAs use re-frame. This project delib
 
 **The problem re-frame solves** is managing state in event-driven UIs where components are loosely coupled. You dispatch a keyword event, a registered handler updates the db, subscriptions react. This works well for apps with independent pages or widgets.
 
-**The problem with re-frame here** is that PolyAccess is an IDE, not a page-based app. The form editor, report editor, table editor, property sheet, and tab bar all need coordinated access to the same state. A single operation like "user clicks a control in the design surface" must simultaneously update the selection state, populate the property sheet, and highlight the control — across three different view modules reading from the same paths.
+**The problem with re-frame here** is that AccessClone is an IDE, not a page-based app. The form editor, report editor, table editor, property sheet, and tab bar all need coordinated access to the same state. A single operation like "user clicks a control in the design surface" must simultaneously update the selection state, populate the property sheet, and highlight the control — across three different view modules reading from the same paths.
 
 With re-frame, this becomes a chain: `(rf/dispatch [:form/select-control id])` → find the event handler → it returns an effects map → effects trigger more dispatches → subscriptions in other components react. Understanding one user action requires tracing through 3-4 files connected only by keyword. With direct mutation, `select-control!` is a single function that does the `swap!` and every component re-renders from the atom. The control flow is linear and readable top to bottom.
 

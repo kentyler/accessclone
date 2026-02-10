@@ -1,6 +1,6 @@
 # Conversion Orchestrator Skill
 
-This skill guides the complete conversion of an MS Access database to a PostgreSQL + PolyAccess application.
+This skill guides the complete conversion of an MS Access database to a PostgreSQL + AccessClone application.
 
 ## Overview
 

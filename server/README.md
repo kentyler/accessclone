@@ -1,6 +1,6 @@
-# PolyAccess Backend
+# AccessClone Backend
 
-Node.js/Express server for PolyAccess — handles data CRUD, form/report storage, LLM chat, Access import, and more.
+Node.js/Express server for AccessClone — handles data CRUD, form/report storage, LLM chat, Access import, and more.
 
 ## Setup
 

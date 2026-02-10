@@ -6,7 +6,7 @@ This skill guides LLMs in creating and modifying PostgreSQL functions for this a
 
 ## Conversion Workflow
 
-When converting an MS Access database to PostgreSQL with PolyAccess:
+When converting an MS Access database to PostgreSQL with AccessClone:
 
 ### Step 1: Ask for Target Name
 
@@ -38,10 +38,10 @@ This creates:
 
 ### Step 4: Create Project Folder
 
-Copy the polyaccess folder to a new folder with the target name:
+Copy the accessclone folder to a new folder with the target name:
 
 ```bash
-cp -r polyaccess/ calculator/
+cp -r accessclone/ calculator/
 ```
 
 ### Step 5: Update Configuration
@@ -494,7 +494,7 @@ The UI layer:
 
 ## Form Designer Integration
 
-The PolyAccess UI includes a visual form designer that generates form definitions as JSON data.
+The AccessClone UI includes a visual form designer that generates form definitions as JSON data.
 
 ### Form Definition Storage
 
@@ -577,7 +577,7 @@ AND table_name = 'ingredient_with_total_grams_on_hand';
 
 ### See Also
 
-- `PolyAccess/skills/form-design.md` - Form definition structure and patterns
+- `AccessClone/skills/form-design.md` - Form definition structure and patterns
 
 ---
 

@@ -1,36 +1,21 @@
 (ns app.views.form-utils
-  "Shared utility functions for the form editor"
-  (:require [clojure.string]
-            [app.state :as state]
-            [app.views.expressions :as expr]))
+  "Utility functions for the form editor.
+   Shared functions delegated to editor-utils; form-specific functions here."
+  (:require [app.views.editor-utils :as eu]))
 
-(defn snap-to-grid
-  "Snap a coordinate to the nearest grid point.
-   If ctrl-key? is true, return the original value (pixel-perfect positioning)."
-  [value ctrl-key?]
-  (if ctrl-key?
-    value
-    (let [grid-size (state/get-grid-size)]
-      (* grid-size (js/Math.round (/ value grid-size))))))
+;; --- Re-export shared functions ---
+(def snap-to-grid eu/snap-to-grid)
+(def get-record-source-fields eu/get-record-source-fields)
+(def get-section-controls eu/get-section-controls)
+(def control-style eu/control-style)
+(def resolve-control-field eu/resolve-control-field)
+(def resolve-field-value eu/resolve-field-value)
+(def display-text eu/display-text)
 
-(defn get-record-source-fields
-  "Get fields for the current record source (table or query)"
-  [record-source]
-  (when record-source
-    (let [tables (get-in @state/app-state [:objects :tables])
-          queries (get-in @state/app-state [:objects :queries])
-          ;; Check if it's a query (ends with " (query)" in display, but stored as just name)
-          table (first (filter #(= (:name %) record-source) tables))
-          query (first (filter #(= (:name %) record-source) queries))]
-      (or (:fields table) (:fields query) []))))
-
-(defn get-section-controls
-  "Get controls for a specific section (header, detail, or footer)"
-  [form-def section]
-  (or (get-in form-def [section :controls]) []))
+;; --- Form-specific functions ---
 
 (defn get-section-height
-  "Get height of a section, with defaults"
+  "Get height of a form section, with form-specific defaults"
   [form-def section]
   (or (get-in form-def [section :height])
       (case section
@@ -45,41 +30,3 @@
     :detail :header
     :footer :detail
     nil))
-
-;; --- Shared control utilities ---
-
-(defn control-style
-  "Position and size style map for a control"
-  [ctrl]
-  {:left (:x ctrl)
-   :top (:y ctrl)
-   :width (:width ctrl)
-   :height (:height ctrl)})
-
-
-(defn resolve-control-field
-  "Get the bound field name from a control, normalized to lowercase.
-   Checks :control-source (Property Sheet) then :field (drag-drop).
-   Returns the raw string (with =) for expressions."
-  [ctrl]
-  (when-let [raw-field (or (:control-source ctrl) (:field ctrl))]
-    (if (expr/expression? raw-field)
-      raw-field
-      (clojure.string/lower-case raw-field))))
-
-(defn resolve-field-value
-  "Look up a field's value from the current record.
-   If field starts with '=', evaluates it as an Access expression.
-   Handles both keyword and string keys."
-  [field current-record]
-  (when field
-    (if (expr/expression? field)
-      (expr/evaluate-expression (subs field 1) {:record current-record})
-      (or (get current-record (keyword field))
-          (get current-record field)
-          ""))))
-
-(defn display-text
-  "Get display text from a control, checking common text keys"
-  [ctrl]
-  (or (:text ctrl) (:label ctrl) (:caption ctrl) ""))

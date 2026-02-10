@@ -7,16 +7,27 @@ const express = require('express');
 const router = express.Router();
 const { logError } = require('../lib/events');
 
-// Cache: "databaseId:tableName" → pkColumnName
-// Invalidated via clearPkCache() when table schema changes
+// Cache: "databaseId:tableName" → { value, expiry }
+// Invalidated via clearSchemaCache() when table schema changes, or auto-expires after TTL
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const pkCache = new Map();
-
-// Cache: "databaseId:tableName" → Set of column names
 const colCache = new Map();
+
+function cacheGet(cache, key) {
+  const entry = cache.get(key);
+  if (!entry) return undefined;
+  if (Date.now() > entry.expiry) { cache.delete(key); return undefined; }
+  return entry.value;
+}
+
+function cacheSet(cache, key, value) {
+  cache.set(key, { value, expiry: Date.now() + CACHE_TTL_MS });
+}
 
 async function getPrimaryKey(pool, tableName, databaseId) {
   const cacheKey = `${databaseId}:${tableName}`;
-  if (pkCache.has(cacheKey)) return pkCache.get(cacheKey);
+  const cached = cacheGet(pkCache, cacheKey);
+  if (cached !== undefined) return cached;
 
   const result = await pool.query(`
     SELECT kcu.column_name
@@ -29,13 +40,14 @@ async function getPrimaryKey(pool, tableName, databaseId) {
   `, [tableName]);
 
   const pkColumn = result.rows.length > 0 ? result.rows[0].column_name : null;
-  pkCache.set(cacheKey, pkColumn);
+  cacheSet(pkCache, cacheKey, pkColumn);
   return pkColumn;
 }
 
 async function getTableColumns(pool, tableName, databaseId) {
   const cacheKey = `${databaseId}:${tableName}`;
-  if (colCache.has(cacheKey)) return colCache.get(cacheKey);
+  const cached = cacheGet(colCache, cacheKey);
+  if (cached !== undefined) return cached;
 
   const result = await pool.query(`
     SELECT column_name
@@ -44,7 +56,7 @@ async function getTableColumns(pool, tableName, databaseId) {
   `, [tableName]);
 
   const columns = new Set(result.rows.map(r => r.column_name));
-  colCache.set(cacheKey, columns);
+  cacheSet(colCache, cacheKey, columns);
   return columns;
 }
 
@@ -52,7 +64,7 @@ function quoteIdent(name) {
   return '"' + name.replace(/"/g, '""') + '"';
 }
 
-function clearPkCache(databaseId) {
+function clearSchemaCache(databaseId) {
   if (databaseId) {
     for (const key of pkCache.keys()) {
       if (key.startsWith(`${databaseId}:`)) pkCache.delete(key);
@@ -327,4 +339,5 @@ module.exports = function(pool) {
   return router;
 };
 
-module.exports.clearPkCache = clearPkCache;
+module.exports.clearPkCache = clearSchemaCache;
+module.exports.clearSchemaCache = clearSchemaCache;

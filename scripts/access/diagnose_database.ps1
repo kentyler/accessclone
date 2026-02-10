@@ -76,15 +76,22 @@ Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
 # ============================================================
 # Main diagnostic
 # ============================================================
+$dbe = $null
+$db = $null
 $accessApp = $null
 $startTime = Get-Date
 
 try {
+    # Use DAO for database-level operations (tables, queries, relationships)
+    # This avoids VBA compilation issues that break Access.Application.CurrentDb
+    $dbe = New-Object -ComObject DAO.DBEngine.120
+    $db = $dbe.OpenDatabase($DatabasePath, $false, $true)  # shared, read-only
+
+    # Use Access.Application for form/report/module inspection
     $accessApp = New-Object -ComObject Access.Application
     $accessApp.AutomationSecurity = 3  # msoAutomationSecurityForceDisable
     $accessApp.Visible = $false
     $accessApp.OpenCurrentDatabase($DatabasePath)
-    $db = $accessApp.CurrentDb
 
     # Result containers
     $findings = @()
@@ -762,6 +769,12 @@ catch {
     exit 1
 }
 finally {
+    if ($db) {
+        try { $db.Close() } catch {}
+    }
+    if ($dbe) {
+        try { [System.Runtime.Interopservices.Marshal]::ReleaseComObject($dbe) | Out-Null } catch {}
+    }
     if ($accessApp) {
         try {
             $accessApp.Quit()

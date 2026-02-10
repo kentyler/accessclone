@@ -1,7 +1,7 @@
 {
-  "name": "polyaccess",
+  "name": "accessclone",
   "version": "0.2.0",
-  "description": "Low-code platform for converting MS Access databases to web applications",
+  "description": "Convert Microsoft Access databases to modern web applications — PostgreSQL, Node.js, ClojureScript",
   "private": true,
   "scripts": {
     "test": "cd server && npm test",
@@ -11,6 +11,6 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/kentyler/PolyAccess.git"
+    "url": "https://github.com/kentyler/accessclone.git"
   }
 }

@@ -10,6 +10,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs').promises;
 const { clearSchemaCache } = require('./data');
+const { convertAccessQuery, sanitizeName } = require('../lib/query-converter');
 
 // Default scan locations
 const DEFAULT_SCAN_LOCATIONS = [
@@ -697,6 +698,149 @@ module.exports = function(pool) {
       });
       await logImport('error', err.message);
       res.status(500).json({ error: err.message || 'Failed to import table' });
+    }
+  });
+
+  /**
+   * POST /api/access-import/import-query
+   * Import a query from Access: extract SQL via PowerShell,
+   * convert to PostgreSQL view or function, execute DDL.
+   */
+  router.post('/import-query', async (req, res) => {
+    const { databasePath, queryName, targetDatabaseId } = req.body;
+
+    async function logImport(status, errorMessage = null, details = null) {
+      try {
+        await pool.query(`
+          INSERT INTO shared.import_log
+            (source_path, source_object_name, source_object_type, target_database_id, status, error_message, details)
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `, [databasePath, queryName, 'query', targetDatabaseId || '_none', status, errorMessage, details ? JSON.stringify(details) : null]);
+      } catch (logErr) {
+        console.error('Error writing to import_log:', logErr);
+      }
+    }
+
+    try {
+      if (!databasePath || !queryName || !targetDatabaseId) {
+        await logImport('error', 'databasePath, queryName, and targetDatabaseId required');
+        return res.status(400).json({ error: 'databasePath, queryName, and targetDatabaseId required' });
+      }
+
+      // 1. Look up target schema
+      const dbResult = await pool.query(
+        'SELECT schema_name FROM shared.databases WHERE database_id = $1',
+        [targetDatabaseId]
+      );
+      if (dbResult.rows.length === 0) {
+        await logImport('error', 'Target database not found');
+        return res.status(404).json({ error: 'Target database not found' });
+      }
+      const schemaName = dbResult.rows[0].schema_name;
+
+      // 2. Run export_query.ps1
+      const scriptsDir = path.join(__dirname, '..', '..', 'scripts', 'access');
+      const exportScript = path.join(scriptsDir, 'export_query.ps1');
+      const jsonOutput = await runPowerShell(exportScript, [
+        '-DatabasePath', databasePath,
+        '-QueryName', queryName
+      ]);
+
+      const cleanOutput = jsonOutput.replace(/^\uFEFF/, '').trim();
+      const jsonStart = cleanOutput.indexOf('{');
+      if (jsonStart === -1) {
+        throw new Error('No JSON object found in PowerShell output');
+      }
+      const queryData = JSON.parse(cleanOutput.substring(jsonStart));
+
+      // 3. Build column type map from the target schema for param type resolution
+      const colTypesResult = await pool.query(`
+        SELECT table_name, column_name, data_type
+        FROM information_schema.columns
+        WHERE table_schema = $1
+      `, [schemaName]);
+      const columnTypes = {};
+      for (const row of colTypesResult.rows) {
+        columnTypes[`${row.table_name}.${row.column_name}`] = row.data_type;
+        columnTypes[row.column_name] = row.data_type;
+      }
+
+      // 4. Convert Access SQL → PostgreSQL
+      const result = convertAccessQuery(queryData, schemaName, columnTypes);
+
+      if (result.statements.length === 0) {
+        await logImport('error', 'No SQL statements generated', { warnings: result.warnings });
+        return res.status(400).json({ error: 'No SQL statements generated', warnings: result.warnings });
+      }
+
+      // 4. Check name conflicts (views + functions)
+      const pgName = result.pgObjectName;
+      if (result.pgObjectType === 'view') {
+        const existsResult = await pool.query(
+          `SELECT 1 FROM information_schema.views WHERE table_schema = $1 AND table_name = $2`,
+          [schemaName, pgName]
+        );
+        if (existsResult.rows.length > 0) {
+          await logImport('error', `View "${pgName}" already exists in target database`);
+          return res.status(409).json({ error: `View "${pgName}" already exists in target database` });
+        }
+      }
+      if (result.pgObjectType === 'function') {
+        const existsResult = await pool.query(
+          `SELECT 1 FROM information_schema.routines WHERE routine_schema = $1 AND routine_name = $2`,
+          [schemaName, pgName]
+        );
+        if (existsResult.rows.length > 0) {
+          await logImport('error', `Function "${pgName}" already exists in target database`);
+          return res.status(409).json({ error: `Function "${pgName}" already exists in target database` });
+        }
+      }
+
+      // 5. Execute statements in a transaction
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        for (const stmt of result.statements) {
+          // Skip comment-only statements
+          if (stmt.trim().startsWith('--')) {
+            result.warnings.push('Skipped comment-only statement');
+            continue;
+          }
+          await client.query(stmt);
+        }
+        await client.query('COMMIT');
+      } catch (txErr) {
+        await client.query('ROLLBACK');
+        throw txErr;
+      } finally {
+        client.release();
+      }
+
+      // 6. Clear schema cache
+      clearSchemaCache(targetDatabaseId);
+
+      // 7. Log success
+      await logImport('success', null, {
+        pgObjectType: result.pgObjectType,
+        originalType: queryData.queryType,
+        warnings: result.warnings.length > 0 ? result.warnings : undefined,
+        extractedFunctions: result.extractedFunctions.length > 0 ? result.extractedFunctions.map(f => f.name) : undefined
+      });
+
+      res.json({
+        success: true,
+        queryName: pgName,
+        pgObjectType: result.pgObjectType,
+        warnings: result.warnings,
+        originalType: queryData.queryType
+      });
+    } catch (err) {
+      console.error('Error importing query:', err);
+      logError(pool, 'POST /api/access-import/import-query', 'Failed to import query', err, {
+        details: { databasePath, queryName, targetDatabaseId }
+      });
+      await logImport('error', err.message);
+      res.status(500).json({ error: err.message || 'Failed to import query' });
     }
   });
 

@@ -8,7 +8,7 @@
 (def api-base (str (.-protocol js/location) "//" (.-host js/location)))
 
 ;; Forward declarations for functions used before definition
-(declare load-tables! load-queries! load-functions! load-access-databases!
+(declare load-tables! load-queries! load-functions! load-sql-functions! load-access-databases!
          save-ui-state! load-forms! load-reports! filename->display-name
          save-chat-transcript! add-chat-message! set-chat-input! send-chat-message!
          maybe-auto-analyze!)
@@ -194,7 +194,7 @@
 (defonce pending-ui-state (atom nil))
 
 (defn start-loading-objects! []
-  (reset! pending-loads 5)  ; 5 types: tables, queries, functions, forms, reports
+  (reset! pending-loads 6)  ; 6 types: tables, queries, sql-functions, modules, forms, reports
   (set-loading-objects! true))
 
 (defn object-load-complete! []
@@ -225,6 +225,7 @@
           (load-tables!)
           (load-queries!)
           (load-functions!)
+          (load-sql-functions!)
           (load-forms!)
           (load-reports!))
         (log-error! "Failed to load databases" "load-databases" {:response (:body response)})))))
@@ -253,9 +254,9 @@
           (load-tables!)
           (load-queries!)
           (load-functions!)
+          (load-sql-functions!)
           (load-forms!)
-          (load-reports!)
-)
+          (load-reports!))
         (log-error! "Failed to switch database" "switch-database" {:response (:body response)})))))
 
 ;; Sidebar
@@ -296,6 +297,7 @@
   (case obj-type
     :tables "tables"
     :queries "queries"
+    :sql-functions "sql-functions"
     :forms "forms"
     :reports "reports"
     :modules "modules"
@@ -345,8 +347,8 @@
                              (get-in response [:body :transcript]))))
             (do
               (swap! app-state assoc :chat-messages [])
-              ;; Auto-analyze reports/forms with no transcript
-              (when (#{:reports :forms} (:type tab))
+              ;; Auto-analyze all object types with no transcript
+              (when (#{:reports :forms :sql-functions :tables :queries :modules} (:type tab))
                 (swap! app-state assoc :auto-analyze-pending true)
                 (maybe-auto-analyze!)))))))))
 
@@ -545,7 +547,8 @@
                                        :review-notes (:review_notes data)
                                        :version (:version data)
                                        :created-at (:created_at data)})
-                  :loading? false}))
+                  :loading? false})
+          (maybe-auto-analyze!))
         (swap! app-state assoc-in [:module-viewer :loading?] false)))))
 
 (defn- get-app-objects
@@ -828,6 +831,30 @@
           (log-event! "warning" "Could not load modules from API" "load-functions")
           (object-load-complete!))))))
 
+;; Load SQL functions (PostgreSQL functions created from imported queries)
+(defn load-sql-functions!
+  "Load SQL functions from PostgreSQL via backend API"
+  []
+  (go
+    (let [response (<! (http/get (str api-base "/api/functions")
+                                 {:headers (db-headers)}))]
+      (if (:success response)
+        (let [functions (get-in response [:body :functions] [])
+              fns-with-ids (vec (map-indexed
+                                  (fn [idx f]
+                                    {:id (inc idx)
+                                     :name (:name f)
+                                     :arguments (:arguments f)
+                                     :return-type (:returnType f)
+                                     :source (:source f)
+                                     :description (:description f)})
+                                  functions))]
+          (swap! app-state assoc-in [:objects :sql-functions] fns-with-ids)
+          (object-load-complete!))
+        (do
+          (log-event! "warning" "Could not load SQL functions from API" "load-sql-functions")
+          (object-load-complete!))))))
+
 ;; Create a new database (schema + shared.databases row)
 (defn create-database!
   "Create a new database via POST /api/databases, add to available-databases on success.
@@ -936,6 +963,34 @@
                                 :cljs_source (:cljs-source module-info)
                                 :vba_source (:vba-source module-info)
                                 :app_objects (get-app-objects)})
+              ;; Query context when viewing a query/view
+              query-context (when (= (:type active-tab) :queries)
+                              (let [qi (get-in @app-state [:query-viewer :query-info])]
+                                (when qi
+                                  {:query_name (:name qi)
+                                   :sql (:sql qi)
+                                   :fields (mapv (fn [f] {:name (:name f) :type (:type f)})
+                                                 (:fields qi))})))
+              ;; Table context when viewing a table
+              table-context (when (= (:type active-tab) :tables)
+                              (let [tbl (get-in @app-state [:table-viewer :table-info])]
+                                (when tbl
+                                  {:table_name (:name tbl)
+                                   :description (:description tbl)
+                                   :fields (mapv (fn [f] {:name (:name f)
+                                                          :type (:type f)
+                                                          :pk (:pk f)
+                                                          :nullable (:nullable f)})
+                                                 (:fields tbl))})))
+              ;; SQL function context when viewing a SQL function
+              sql-fn-context (when (= (:type active-tab) :sql-functions)
+                               (let [func (first (filter #(= (:id %) (:id active-tab))
+                                                         (get-in @app-state [:objects :sql-functions])))]
+                                 (when func
+                                   {:function_name (:name func)
+                                    :arguments (:arguments func)
+                                    :return_type (:return-type func)
+                                    :source (:source func)})))
               ;; Send full conversation history for context
               history (vec (:chat-messages @app-state))
               response (<! (http/post (str api-base "/api/chat")
@@ -944,7 +999,10 @@
                                                      :database_id (:database_id (:current-database @app-state))
                                                      :form_context form-context
                                                      :report_context report-context
-                                                     :module_context module-context}
+                                                     :module_context module-context
+                                                     :sql_function_context sql-fn-context
+                                                     :table_context table-context
+                                                     :query_context query-context}
                                        :headers (db-headers)}))]
           (set-chat-loading! false)
           (if (:success response)
@@ -969,7 +1027,8 @@
   "If auto-analyze is pending and the object definition is loaded, send an
    initial analysis to the chat. Called from load-chat-transcript! (when
    transcript is empty) and from setup-form-editor!/setup-report-editor!
-   (when definition finishes loading) — whichever completes second triggers."
+   (when definition finishes loading) — whichever completes second triggers.
+   For sql-functions, the definition is already loaded in :objects so it fires immediately."
   []
   (when (:auto-analyze-pending @app-state)
     (let [active-tab (:active-tab @app-state)
@@ -977,12 +1036,47 @@
           has-def? (case tab-type
                      :reports (some? (get-in @app-state [:report-editor :current]))
                      :forms   (some? (get-in @app-state [:form-editor :current]))
+                     :sql-functions (some? (first (filter #(= (:id %) (:id active-tab))
+                                                         (get-in @app-state [:objects :sql-functions]))))
+                     :tables  (some? (get-in @app-state [:table-viewer :table-info]))
+                     :queries (some? (get-in @app-state [:query-viewer :query-info]))
+                     :modules (and (some? (get-in @app-state [:module-viewer :module-info]))
+                                   (not (get-in @app-state [:module-viewer :loading?])))
                      false)]
       (when has-def?
         (swap! app-state dissoc :auto-analyze-pending)
         (let [prompt (case tab-type
                        :reports "Briefly describe this report's structure and purpose. Note any potential issues such as missing field bindings, empty bands, layout problems, or other concerns."
                        :forms   "Briefly describe this form's structure and purpose. Note any potential issues such as missing field bindings, empty sections, layout problems, or other concerns."
+                       :sql-functions (let [func (first (filter #(= (:id %) (:id active-tab))
+                                                               (get-in @app-state [:objects :sql-functions])))]
+                                        (str "Analyze this SQL function and briefly describe its purpose, parameters, and return type. "
+                                             "Note any potential issues.\n\n"
+                                             (:source func)))
+                       :tables (let [tbl (get-in @app-state [:table-viewer :table-info])
+                                     fields (:fields tbl)
+                                     field-summary (clojure.string/join ", "
+                                                     (map (fn [f] (str (:name f) " (" (:type f)
+                                                                       (when (:pk f) " PK") ")"))
+                                                          fields))]
+                                 (str "Briefly describe this table's structure and likely purpose. "
+                                      "Note any potential issues such as missing primary keys, unusual data types, or naming concerns.\n\n"
+                                      "Table: " (:name tbl) "\n"
+                                      (when (:description tbl) (str "Description: " (:description tbl) "\n"))
+                                      "Columns: " field-summary))
+                       :queries (let [qi (get-in @app-state [:query-viewer :query-info])
+                                      fields (:fields qi)
+                                      field-summary (clojure.string/join ", " (map :name fields))]
+                                  (str "Briefly describe this query/view's purpose. "
+                                       "Note any potential issues such as missing joins, performance concerns, or unusual patterns.\n\n"
+                                       "Query: " (:name qi) "\n"
+                                       "SQL: " (:sql qi) "\n"
+                                       (when (seq fields) (str "Fields: " field-summary))))
+                       :modules (let [mi (get-in @app-state [:module-viewer :module-info])]
+                                  (str "Briefly describe this VBA module's purpose and functionality. "
+                                       "Note any potential issues or complexities for translation to ClojureScript.\n\n"
+                                       "Module: " (:name mi) "\n"
+                                       (when (:vba-source mi) (str "VBA Source:\n" (:vba-source mi)))))
                        nil)]
           (when prompt
             (set-chat-input! prompt)

@@ -346,7 +346,15 @@
     (let [headers {"X-Database-ID" database-id}]
       (fetch-existing-names! headers "/api/forms" :forms :forms identity)
       (fetch-existing-names! headers "/api/tables" :tables :tables #(map :name %))
-      (fetch-existing-names! headers "/api/queries" :queries :queries #(map :name %))
+      ;; Queries may be imported as views OR functions (parameterized queries become functions).
+      ;; Check both endpoints and merge names.
+      (go
+        (let [qr (<! (http/get (str api-base "/api/queries") {:headers headers}))
+              fr (<! (http/get (str api-base "/api/functions") {:headers headers}))
+              view-names (when (:success qr) (map :name (get-in qr [:body :queries] [])))
+              func-names (when (:success fr) (map :name (get-in fr [:body :functions] [])))]
+          (swap! viewer-state assoc-in [:target-existing :queries]
+                 (set (concat view-names func-names)))))
       (fetch-existing-names! headers "/api/modules" :modules :modules identity)
       (fetch-existing-names! headers "/api/reports" :reports :reports identity))))
 
@@ -536,6 +544,20 @@
                               {:error (get-in response [:body :error])})
             false)))))
 
+(defn import-query!
+  "Import a single query: server-side pipeline extracts SQL from Access, converts to PG view/function"
+  [access-db-path query-name target-database-id]
+  (go
+    (let [response (<! (http/post (str api-base "/api/access-import/import-query")
+                                  {:json-params {:databasePath access-db-path
+                                                 :queryName query-name
+                                                 :targetDatabaseId target-database-id}}))]
+      (if (and (:success response) (get-in response [:body :success]))
+        true
+        (do (state/log-event! "error" (str "Failed to import query: " query-name) "import-query"
+                              {:error (get-in response [:body :error])})
+            false)))))
+
 (defn import-selected!
   "Import selected forms/reports/modules/tables to the current PolyAccess database"
   [access-db-path target-database-id]
@@ -549,6 +571,7 @@
           :reports (<! (import-report! access-db-path item-name target-database-id))
           :modules (<! (import-module! access-db-path item-name target-database-id))
           :tables  (<! (import-table! access-db-path item-name target-database-id))
+          :queries (<! (import-query! access-db-path item-name target-database-id))
           nil)
         ;; Refresh history after each import
         (<! (load-import-history! access-db-path)))
@@ -556,6 +579,8 @@
       ;; Refresh badges and the object lists in the target database
       (load-target-existing! target-database-id)
       (state/load-tables!)
+      (state/load-queries!)
+      (state/load-sql-functions!)
       (state/load-forms!)
       (state/load-reports!)
       (state/load-functions!))))

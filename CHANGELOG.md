@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-02-10
+
 ### Added
 - **Table import pipeline** — Import tables from Access with full structure (columns, types, PKs, indexes) and all row data via a single server-side endpoint (`POST /api/access-import/import-table`). Uses `export_table.ps1` (DAO) to extract, maps Access type codes to PostgreSQL types, batch-inserts rows (500/stmt), resets identity sequences, creates non-PK indexes — all in one transaction.
 - Comprehensive error logging to `shared.events` table across all server routes and frontend error sites

@@ -11,6 +11,9 @@ const { logError } = require('../lib/events');
 // Invalidated via clearPkCache() when table schema changes
 const pkCache = new Map();
 
+// Cache: "databaseId:tableName" → Set of column names
+const colCache = new Map();
+
 async function getPrimaryKey(pool, tableName, databaseId) {
   const cacheKey = `${databaseId}:${tableName}`;
   if (pkCache.has(cacheKey)) return pkCache.get(cacheKey);
@@ -30,13 +33,36 @@ async function getPrimaryKey(pool, tableName, databaseId) {
   return pkColumn;
 }
 
+async function getTableColumns(pool, tableName, databaseId) {
+  const cacheKey = `${databaseId}:${tableName}`;
+  if (colCache.has(cacheKey)) return colCache.get(cacheKey);
+
+  const result = await pool.query(`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_name = $1
+  `, [tableName]);
+
+  const columns = new Set(result.rows.map(r => r.column_name));
+  colCache.set(cacheKey, columns);
+  return columns;
+}
+
+function quoteIdent(name) {
+  return '"' + name.replace(/"/g, '""') + '"';
+}
+
 function clearPkCache(databaseId) {
   if (databaseId) {
     for (const key of pkCache.keys()) {
       if (key.startsWith(`${databaseId}:`)) pkCache.delete(key);
     }
+    for (const key of colCache.keys()) {
+      if (key.startsWith(`${databaseId}:`)) colCache.delete(key);
+    }
   } else {
     pkCache.clear();
+    colCache.clear();
   }
 }
 
@@ -179,12 +205,22 @@ module.exports = function(pool) {
         return res.status(400).json({ error: 'Invalid table name' });
       }
 
-      const columns = Object.keys(data);
-      const values = Object.values(data);
+      // Validate columns against actual table schema
+      const validColumns = await getTableColumns(pool, table, req.databaseId);
+      const allKeys = Object.keys(data);
+      const invalid = allKeys.filter(k => !validColumns.has(k));
+      if (invalid.length > 0) {
+        console.warn(`POST /api/data/${table}: stripping invalid columns:`, invalid);
+      }
+      const columns = allKeys.filter(k => validColumns.has(k));
+      if (columns.length === 0) {
+        return res.status(400).json({ error: 'No valid columns provided' });
+      }
+      const values = columns.map(c => data[c]);
       const placeholders = columns.map((_, i) => `$${i + 1}`);
 
       const query = `
-        INSERT INTO "${table}" (${columns.map(c => `"${c}"`).join(', ')})
+        INSERT INTO ${quoteIdent(table)} (${columns.map(c => quoteIdent(c)).join(', ')})
         VALUES (${placeholders.join(', ')})
         RETURNING *
       `;
@@ -218,14 +254,24 @@ module.exports = function(pool) {
         return res.status(400).json({ error: 'Table has no primary key' });
       }
 
-      const columns = Object.keys(data);
-      const values = Object.values(data);
+      // Validate columns against actual table schema
+      const validColumns = await getTableColumns(pool, table, req.databaseId);
+      const allKeys = Object.keys(data);
+      const invalid = allKeys.filter(k => !validColumns.has(k));
+      if (invalid.length > 0) {
+        console.warn(`PUT /api/data/${table}/${id}: stripping invalid columns:`, invalid);
+      }
+      const columns = allKeys.filter(k => validColumns.has(k));
+      if (columns.length === 0) {
+        return res.status(400).json({ error: 'No valid columns provided' });
+      }
+      const values = columns.map(c => data[c]);
 
-      const setClause = columns.map((col, i) => `"${col}" = $${i + 1}`).join(', ');
+      const setClause = columns.map((col, i) => `${quoteIdent(col)} = $${i + 1}`).join(', ');
       const query = `
-        UPDATE "${table}"
+        UPDATE ${quoteIdent(table)}
         SET ${setClause}
-        WHERE "${pkColumn}" = $${columns.length + 1}
+        WHERE ${quoteIdent(pkColumn)} = $${columns.length + 1}
         RETURNING *
       `;
 

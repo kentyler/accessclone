@@ -5,13 +5,21 @@
 #        .\package.ps1 -OutputPath C:\Users\Ken\Desktop\PolyAccess.zip
 
 param(
-    [string]$OutputPath = (Join-Path $PSScriptRoot "PolyAccess.zip")
+    [string]$OutputPath
 )
 
 $ErrorActionPreference = "Stop"
 
+# Read version from package.json
+$packageJson = Get-Content (Join-Path $PSScriptRoot "package.json") -Raw | ConvertFrom-Json
+$version = $packageJson.version
+
+if (-not $OutputPath) {
+    $OutputPath = Join-Path $PSScriptRoot "PolyAccess-$version.zip"
+}
+
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "PolyAccess - Build Distribution Package" -ForegroundColor Cyan
+Write-Host "PolyAccess $version - Build Distribution Package" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 

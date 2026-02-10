@@ -55,6 +55,8 @@
           :table-description nil
           :original-description nil
           :selected-field nil})
+  ;; Trigger auto-analyze if transcript was already loaded empty
+  (state/maybe-auto-analyze!)
   ;; Load the data
   (go
     (let [response (<! (http/get (str state/api-base "/api/data/" (:name table))

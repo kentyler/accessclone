@@ -300,7 +300,7 @@ module.exports = function(pool, secrets) {
    * Send a message to the LLM and get a response
    */
   router.post('/', async (req, res) => {
-    const { message, history, database_id, form_context, report_context, module_context } = req.body;
+    const { message, history, database_id, form_context, report_context, module_context, sql_function_context, table_context, query_context } = req.body;
 
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
@@ -347,6 +347,38 @@ Use search_records when users want to FIND specific items. Use analyze_data when
       if (report_context?.definition) {
         const summary = summarizeDefinition(report_context.definition, 'report');
         reportContext = `\n\nThe user is currently viewing a report in Design view. Here is the report structure:\n${summary}`;
+      }
+
+      // Table context (when viewing a table)
+      let tableContext = '';
+      if (table_context?.table_name) {
+        const fields = (table_context.fields || []).map(f => {
+          let desc = `${f.name} (${f.type}`;
+          if (f.pk) desc += ', PK';
+          if (f.nullable === false) desc += ', NOT NULL';
+          desc += ')';
+          return desc;
+        }).join(', ');
+        tableContext = `\n\nThe user is viewing table "${table_context.table_name}".`;
+        if (table_context.description) {
+          tableContext += ` Description: ${table_context.description}`;
+        }
+        tableContext += `\nColumns: ${fields}`;
+        tableContext += `\n\nHelp the user understand the table structure, identify issues, or answer questions about the data.`;
+      }
+
+      // Query context (when viewing a query/view)
+      let queryContext = '';
+      if (query_context?.query_name) {
+        queryContext = `\n\nThe user is viewing query/view "${query_context.query_name}".`;
+        if (query_context.sql) {
+          queryContext += `\nSQL: ${query_context.sql}`;
+        }
+        if (query_context.fields?.length) {
+          const fieldList = query_context.fields.map(f => `${f.name} (${f.type})`).join(', ');
+          queryContext += `\nFields: ${fieldList}`;
+        }
+        queryContext += `\n\nHelp the user understand this query, identify issues, or suggest improvements.`;
       }
 
       // Graph tools context
@@ -397,6 +429,23 @@ IMPORTANT — PolyAccess architecture context for reviews:
 When the user asks you to make changes, use the update_translation tool to apply them.`;
       }
 
+      // SQL function context (when viewing an imported query/function)
+      let sqlFunctionContext = '';
+      if (sql_function_context?.function_name) {
+        sqlFunctionContext = `\n\nThe user is viewing a SQL function "${sql_function_context.function_name}"`;
+        if (sql_function_context.arguments) {
+          sqlFunctionContext += ` with arguments (${sql_function_context.arguments})`;
+        }
+        if (sql_function_context.return_type) {
+          sqlFunctionContext += ` returning ${sql_function_context.return_type}`;
+        }
+        sqlFunctionContext += '.';
+        if (sql_function_context.source) {
+          sqlFunctionContext += `\n\nFunction definition:\n${sql_function_context.source}`;
+        }
+        sqlFunctionContext += `\n\nThis function was imported from a Microsoft Access query and converted to PostgreSQL. Help the user understand it, identify issues, or suggest improvements.`;
+      }
+
       // Combine all available tools
       const availableTools = [
         ...(form_context?.record_source ? tools : []),
@@ -414,9 +463,9 @@ When the user asks you to make changes, use the update_translation tool to apply
         },
         body: JSON.stringify({
           model: 'claude-sonnet-4-20250514',
-          max_tokens: module_context?.module_name ? 4096 : 1024,
+          max_tokens: (module_context?.module_name || sql_function_context?.function_name || query_context?.query_name) ? 4096 : 1024,
           tools: availableTools,
-          system: `You are a helpful assistant for a database application called PolyAccess. You help users understand their data, create forms, write queries, and work with their databases. ${dbContext}${formContext}${reportContext}${moduleContext}${graphContext}
+          system: `You are a helpful assistant for a database application called PolyAccess. You help users understand their data, create forms, write queries, and work with their databases. ${dbContext}${tableContext}${queryContext}${formContext}${reportContext}${moduleContext}${sqlFunctionContext}${graphContext}
 
 Keep responses concise and helpful. When discussing code or SQL, use markdown code blocks.`,
           messages: [

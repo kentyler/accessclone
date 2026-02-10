@@ -8,11 +8,12 @@
 
 ;; Object types available in the dropdown (like Access navigation pane)
 (def object-types
-  [{:id :tables   :label "Tables"}
-   {:id :queries  :label "Queries"}
-   {:id :forms    :label "Forms"}
-   {:id :reports  :label "Reports"}
-   {:id :modules  :label "Modules"}])
+  [{:id :tables         :label "Tables"}
+   {:id :queries        :label "Queries"}
+   {:id :sql-functions  :label "SQL Functions"}
+   {:id :forms          :label "Forms"}
+   {:id :reports        :label "Reports"}
+   {:id :modules        :label "Modules"}])
 
 (defn object-type-selector
   "Dropdown to select which type of objects to display"

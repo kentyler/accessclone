@@ -24,6 +24,8 @@
           :view-mode :results
           :loading? true
           :error nil})
+  ;; Trigger auto-analyze if pending (query-info is set synchronously above)
+  (state/maybe-auto-analyze!)
   ;; Run the query to get results
   (run-query!))
 

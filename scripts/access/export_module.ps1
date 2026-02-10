@@ -21,6 +21,7 @@ Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
 $accessApp = $null
 try {
     $accessApp = New-Object -ComObject Access.Application
+    $accessApp.AutomationSecurity = 3  # msoAutomationSecurityForceDisable
     $accessApp.OpenCurrentDatabase($DatabasePath)
 
     # Access VBA source via the VBE object model

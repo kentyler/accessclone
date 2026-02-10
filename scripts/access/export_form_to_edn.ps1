@@ -378,6 +378,7 @@ Remove-Item $lockFile -ErrorAction SilentlyContinue
 
 try {
     $accessApp = New-Object -ComObject Access.Application
+    $accessApp.AutomationSecurity = 3  # msoAutomationSecurityForceDisable
     $accessApp.Visible = $true
     $accessApp.OpenCurrentDatabase($DatabasePath)
 

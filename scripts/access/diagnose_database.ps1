@@ -81,6 +81,7 @@ $startTime = Get-Date
 
 try {
     $accessApp = New-Object -ComObject Access.Application
+    $accessApp.AutomationSecurity = 3  # msoAutomationSecurityForceDisable
     $accessApp.Visible = $false
     $accessApp.OpenCurrentDatabase($DatabasePath)
     $db = $accessApp.CurrentDb

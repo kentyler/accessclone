@@ -152,6 +152,8 @@ If the user has .accdb files to import:
 
 Note: Importing forms, reports, and modules from Access requires Microsoft Access to be installed on the same machine (the export scripts use Access COM automation via PowerShell). Tables and queries can be exported without Access.
 
+**Important:** The Access database files (.accdb/.mdb) must be in a **Trusted Location** in Access, otherwise Access will block the COM automation scripts from running code. To add a trusted location: open Access → File → Options → Trust Center → Trust Center Settings → Trusted Locations → Add new location. Add the folder where the .accdb files are stored.
+
 ## Everyday Startup
 
 After installation, starting PolyAccess each time is just:

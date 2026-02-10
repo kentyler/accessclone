@@ -207,6 +207,16 @@ Form with filter controls and results list:
 
 ---
 
+## Design View Control Interaction
+
+### Rectangle and Line Controls
+
+Rectangle and line controls get `pointer-events: none` in Design View, making them click-through. They are selected via the Property Sheet control name dropdown. This is because Access uses rectangles as masks/shields that overlay functional controls — in Design View, the underlying controls must remain clickable.
+
+This applies to both forms and reports. In View/Preview mode, rectangles and lines render normally with full pointer events (their visibility may be toggled by runtime logic).
+
+---
+
 ## Layout Guidelines
 
 ### Spacing Standards

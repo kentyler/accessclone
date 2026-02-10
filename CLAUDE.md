@@ -44,7 +44,6 @@ This is PolyAccess, a platform for converting MS Access databases to web applica
 - Property Sheet: Access-style tabbed interface (Format/Data/Event/Other/All) for report-level, section (band), group-level, and control properties
 - Group-level properties (field, sort-order, group-on, group-interval, keep-together) stored in `:grouping` array, edited via Data tab when a group band is selected
 - `normalize-report-definition` in state_report.cljs normalizes report data on load (same pattern as forms)
-- EDN-format legacy reports (from PowerShell export) display as read-only preformatted text
 - Files: report_editor.cljs (orchestrator), report_design.cljs (design surface), report_properties.cljs (property sheet), report_view.cljs (preview), report_utils.cljs (utilities)
 
 ### Table Viewer (ui/src/app/views/table_viewer.cljs)

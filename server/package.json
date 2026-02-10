@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
-    "test": "jest --verbose"
+    "test": "jest --verbose",
+    "test:db": "node -e \"process.env.POLYACCESS_DB_TESTS='1'; require('jest').run(['__tests__/db.schema-routing.test.js'])\""
   },
   "dependencies": {
     "cors": "^2.8.5",

@@ -4,8 +4,8 @@
   "description": "Low-code platform for converting MS Access databases to web applications",
   "private": true,
   "scripts": {
-    "lint:forms": "node scripts/lint-forms.js",
-    "test": "npm run lint:forms",
+    "test": "cd server && npm test",
+    "test:db": "cd server && npm run test:db",
     "start": "cd server && npm start",
     "build:ui": "cd ui && npx shadow-cljs compile app"
   },

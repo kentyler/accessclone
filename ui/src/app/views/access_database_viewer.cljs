@@ -351,13 +351,30 @@
       (fetch-existing-names! headers "/api/reports" :reports :reports identity))))
 
 (defn load-import-history!
-  "Load import history for the current Access database"
+  "Load import history for the current Access database.
+   Also sets target-database-id based on prior successful imports:
+   if any objects were imported, selects that target database;
+   if none, clears the dropdown."
   [db-path]
   (go
     (let [response (<! (http/get (str api-base "/api/access-import/history")
                                  {:query-params {:source_path db-path :limit 50}}))]
       (when (:success response)
-        (swap! viewer-state assoc :import-log (get-in response [:body :history] []))))))
+        (let [history (get-in response [:body :history] [])
+              ;; Find all distinct target databases from successful imports
+              targets (->> history
+                           (filter #(= (:status %) "success"))
+                           (map :target_database_id)
+                           (remove #(= % "_none"))
+                           distinct)]
+          (swap! viewer-state assoc :import-log history)
+          ;; Auto-select if objects were previously imported to a database
+          (if (seq targets)
+            (let [target (first targets)]
+              (swap! viewer-state assoc :target-database-id target)
+              (load-target-existing! target))
+            (swap! viewer-state assoc :target-database-id nil))
+          (save-import-state!))))))
 
 (defn- apply-cached-contents!
   "Apply cached Access database contents to viewer-state"
@@ -645,25 +662,25 @@
     (fn []
       (let [available-dbs (filter #(not= (:database_id %) "_access_import")
                                   (:available-databases @state/app-state))
-            target-id (:target-database-id @viewer-state)
-            effective-id (or target-id
-                             (:database_id (:current-database @state/app-state)))]
-        ;; Sync effective-id into viewer-state if not set, and load existing objects
-        (when (and (nil? target-id) effective-id)
-          (swap! viewer-state assoc :target-database-id effective-id)
-          (load-target-existing! effective-id))
+            target-id (:target-database-id @viewer-state)]
         [:div.target-db-selector
          [:label "Import into:"]
          [:select
-          {:value (or effective-id "")
+          {:value (or target-id "")
            :on-change #(let [v (.. % -target -value)]
-                         (if (= v "__create_new__")
+                         (cond
+                           (= v "__create_new__")
                            (do (reset! creating? true)
                                (reset! new-name (or (suggest-name-from-path) ""))
                                (reset! create-error nil))
+                           (= v "")
+                           (do (swap! viewer-state assoc :target-database-id nil)
+                               (save-import-state!))
+                           :else
                            (do (swap! viewer-state assoc :target-database-id v)
                                (load-target-existing! v)
                                (save-import-state!))))}
+          [:option {:value ""} "Select a database..."]
           (for [db available-dbs]
             ^{:key (:database_id db)}
             [:option {:value (:database_id db)} (:name db)])

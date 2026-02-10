@@ -1,26 +1,22 @@
 # List all tables in an Access database
 # Usage: .\list_tables.ps1 -DatabasePath "path\to\db.accdb"
 # Output: JSON array of table objects with name, field count, and row count
+# Uses DAO.DBEngine.120 directly to avoid VBA compilation issues
 
 param(
     [Parameter(Mandatory=$true)]
     [string]$DatabasePath
 )
 
-# Kill any existing Access processes
-Get-Process MSACCESS -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-Start-Sleep -Milliseconds 500
-
 # Remove lock file if exists
 $lockFile = $DatabasePath -replace '\.accdb$', '.laccdb'
 Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
 
-$accessApp = $null
+$dbe = $null
+$db = $null
 try {
-    $accessApp = New-Object -ComObject Access.Application
-    $accessApp.AutomationSecurity = 3  # msoAutomationSecurityForceDisable
-    $accessApp.OpenCurrentDatabase($DatabasePath)
-    $db = $accessApp.CurrentDb
+    $dbe = New-Object -ComObject DAO.DBEngine.120
+    $db = $dbe.OpenDatabase($DatabasePath)
 
     $tables = @()
     foreach ($table in $db.TableDefs) {
@@ -46,19 +42,16 @@ try {
 
     # Output as JSON
     $tables | ConvertTo-Json -Compress
-
-    $accessApp.CloseCurrentDatabase()
 }
 catch {
     Write-Error $_.Exception.Message
     exit 1
 }
 finally {
-    if ($accessApp) {
-        try {
-            $accessApp.Quit()
-            [System.Runtime.Interopservices.Marshal]::ReleaseComObject($accessApp) | Out-Null
-        } catch {}
+    if ($db) {
+        try { $db.Close() } catch {}
     }
-    Get-Process MSACCESS -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    if ($dbe) {
+        try { [System.Runtime.Interopservices.Marshal]::ReleaseComObject($dbe) | Out-Null } catch {}
+    }
 }

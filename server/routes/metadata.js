@@ -283,22 +283,43 @@ module.exports = function(pool) {
         return res.status(400).json({ error: 'SQL query is required' });
       }
 
-      // Basic safety check - only allow SELECT statements
-      const trimmedSql = sql.trim().toLowerCase();
-      if (!trimmedSql.startsWith('select')) {
-        return res.status(400).json({ error: 'Only SELECT queries are allowed' });
+      // Strip optional trailing semicolon, then reject if any remain (multi-statement)
+      let cleanSql = sql.trim();
+      if (cleanSql.endsWith(';')) {
+        cleanSql = cleanSql.slice(0, -1).trim();
+      }
+      if (cleanSql.includes(';')) {
+        return res.status(400).json({ error: 'Multiple statements are not allowed' });
       }
 
-      const result = await pool.query(sql);
+      // Allow SELECT and WITH (CTE) queries only
+      const lowerSql = cleanSql.toLowerCase();
+      if (!lowerSql.startsWith('select') && !lowerSql.startsWith('with')) {
+        return res.status(400).json({ error: 'Only SELECT and WITH queries are allowed' });
+      }
 
-      res.json({
-        data: result.rows,
-        fields: result.fields.map(f => ({
-          name: f.name,
-          type: f.dataTypeID
-        })),
-        rowCount: result.rowCount
-      });
+      // Execute in a read-only transaction (defense in depth)
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN READ ONLY');
+        await client.query('SET statement_timeout = \'30s\'');
+        const result = await client.query(cleanSql);
+        await client.query('COMMIT');
+
+        res.json({
+          data: result.rows,
+          fields: result.fields.map(f => ({
+            name: f.name,
+            type: f.dataTypeID
+          })),
+          rowCount: result.rowCount
+        });
+      } catch (queryErr) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw queryErr;
+      } finally {
+        client.release();
+      }
     } catch (err) {
       console.error('Error running query:', err);
       logError(pool, 'POST /api/queries/run', 'Failed to run query', err, { databaseId: req.databaseId });

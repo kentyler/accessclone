@@ -1,6 +1,6 @@
 # PolyAccess Backend
 
-Simple Node.js server for form file operations.
+Node.js/Express server for PolyAccess — handles data CRUD, form/report storage, LLM chat, Access import, and more.
 
 ## Setup
 
@@ -11,124 +11,29 @@ npm start
 
 Server runs on http://localhost:3001 (or `PORT` env variable).
 
-## API Endpoints
+## Route Files
 
-### List Forms
-```
-GET /api/forms
-```
-Returns: `{ "forms": ["recipe_calculator", "ingredient_entry", ...] }`
-
-### Read Form
-```
-GET /api/forms/:name
-```
-Returns: JSON form definition
-
-### Save Form
-```
-PUT /api/forms/:name
-Content-Type: application/json
-
-{
-  "id": 1,
-  "name": "Recipe Calculator",
-  "type": "form",
-  "record-source": "recipe",
-  "default-view": "single",
-  "controls": [...]
-}
-```
-- Creates a new version in `shared.forms` table
-- Old versions preserved for rollback
-
-### Delete Form
-```
-DELETE /api/forms/:name
-```
-- Deletes all versions of the form
-
-### Read Config
-```
-GET /api/config
-```
-Returns: JSON content of `settings/config.json`
-
-### Save Config
-```
-PUT /api/config
-Content-Type: application/json
-
-{
-  "form-designer": {
-    "grid-size": 8
-  }
-}
-```
-- Saves app configuration to `settings/config.json`
-
-### Graph API (Dependency/Intent Graph)
-
-The graph tracks relationships between database objects (tables, columns, forms, controls) and business intents.
-
-#### Query Nodes
-```
-GET /api/graph/node/:id           # Get node by ID
-GET /api/graph/nodes?type=table&database_id=calc  # Query by type
-GET /api/graph/find?type=table&name=ingredient&database_id=calc
-```
-
-#### Dependencies
-```
-GET /api/graph/dependencies/:nodeId?direction=downstream&depth=3
-GET /api/graph/dependencies/:nodeId/prose  # Human-readable
-GET /api/graph/impact?type=table&name=ingredient&database_id=calc
-```
-
-#### Intents
-```
-GET /api/graph/intents            # List all intents
-GET /api/graph/intents/prose      # Human-readable summary
-GET /api/graph/intent/:id/structures   # What serves this intent
-GET /api/graph/structure/:id/intents   # What intents this serves
-
-POST /api/graph/intent
-{
-  "name": "Track Inventory Costs",
-  "description": "Monitor ingredient pricing and usage",
-  "structures": [
-    { "node_type": "table", "name": "ingredient" }
-  ]
-}
-
-POST /api/graph/intent/confirm
-{ "structure_id": "uuid", "intent_id": "uuid" }
-```
-
-#### Admin
-```
-POST /api/graph/populate   # Re-scan schemas (use after schema changes)
-POST /api/graph/clear      # Clear all graph data (dangerous!)
-```
+| File | Prefix | Purpose |
+|------|--------|---------|
+| `metadata.js` | `/api` | Tables, queries, functions, query execution |
+| `data.js` | `/api/data` | Record CRUD (INSERT/UPDATE/DELETE) |
+| `databases.js` | `/api/databases` | Multi-database management |
+| `forms.js` | `/api/forms` | Form CRUD (append-only versioning) |
+| `reports.js` | `/api/reports` | Report CRUD (append-only versioning) |
+| `modules.js` | `/api/modules` | PostgreSQL function source |
+| `lint.js` | `/api/lint` | Form/report validation |
+| `chat.js` | `/api/chat` | LLM chat with context |
+| `sessions.js` | `/api/session` | UI state persistence |
+| `transcripts.js` | `/api/transcripts` | Chat transcript storage |
+| `events.js` | `/api/events` | Error/event logging |
+| `config.js` | `/api/config` | App configuration |
+| `graph.js` | `/api/graph` | Dependency/intent graph |
+| `access-import.js` | `/api/access-import` | Import from Access databases |
 
 ## Data Storage
 
-Forms are stored as JSON in the `shared.forms` PostgreSQL table with append-only versioning.
+Forms and reports are stored as JSON in `shared.forms` / `shared.reports` PostgreSQL tables with append-only versioning.
 Config is stored as JSON in `settings/config.json`.
-
-```
-PolyAccess/
-├── settings/
-│   └── config.json          # App configuration
-└── server/
-    ├── index.js             # Main server
-    ├── routes/              # API route handlers
-    └── graph/               # Dependency/intent graph
-        ├── schema.js        # Table creation
-        ├── query.js         # CRUD operations
-        ├── populate.js      # Schema/form scanning
-        └── render.js        # Prose rendering for LLM
-```
 
 ## Development
 

@@ -24,7 +24,10 @@ Thanks for your interest in contributing! This guide will help you get set up an
    .\setup.ps1 -DatabaseName polyaccess -Password <your_pg_password>
    ```
 
-3. Copy `.env.example` to `.env` and fill in your database credentials.
+3. Set database credentials via environment variables (see `server/config.js`):
+   ```powershell
+   $env:PGPASSWORD = "<your_pg_password>"
+   ```
 
 4. Start the server:
    ```

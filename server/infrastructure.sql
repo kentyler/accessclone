@@ -1,4 +1,4 @@
--- CloneTemplate Infrastructure
+-- AccessClone Infrastructure
 -- Run this on a fresh PostgreSQL database before migrating Access data
 --
 -- Usage:
@@ -264,7 +264,7 @@ $$;
 -- Verify infrastructure is set up correctly
 DO $$
 BEGIN
-    RAISE NOTICE 'CloneTemplate infrastructure installed successfully.';
+    RAISE NOTICE 'AccessClone infrastructure installed successfully.';
     RAISE NOTICE 'Tables: execution_state, app_config, migration_log';
     RAISE NOTICE 'Functions: create_session, clear_session, cleanup_old_sessions,';
     RAISE NOTICE '           get_state, get_state_int, get_state_numeric, get_state_bool,';

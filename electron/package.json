@@ -1,5 +1,5 @@
 {
-  "name": "polyaccess",
+  "name": "accessclone",
   "version": "0.2.0",
   "description": "Convert Access databases to web applications",
   "main": "main.js",
@@ -34,8 +34,8 @@
     "verbose": true
   },
   "build": {
-    "appId": "com.polyaccess.app",
-    "productName": "PolyAccess",
+    "appId": "com.accessclone.app",
+    "productName": "AccessClone",
     "directories": {
       "output": "dist"
     },

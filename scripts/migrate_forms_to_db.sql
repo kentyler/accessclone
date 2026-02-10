@@ -1,6 +1,6 @@
 -- Migration: Move form EDN files into shared.forms table
 -- All forms belong to the 'calculator' database
--- Run with: psql -h localhost -U postgres -d polyaccess -f migrate_forms_to_db.sql
+-- Run with: psql -h localhost -U postgres -d <your_database> -f migrate_forms_to_db.sql
 
 -- Ensure shared schema and tables exist
 CREATE SCHEMA IF NOT EXISTS shared;

@@ -1,7 +1,7 @@
 {
-  "name": "app-template",
+  "name": "accessclone-ui",
   "version": "0.2.0",
-  "description": "CloneAccess Application Template",
+  "description": "AccessClone Frontend",
   "scripts": {
     "dev": "shadow-cljs watch app",
     "release": "shadow-cljs release app",

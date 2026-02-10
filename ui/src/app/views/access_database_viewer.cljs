@@ -11,7 +11,7 @@
 (declare get-item-name load-access-database-contents! load-target-existing! load-import-history!)
 
 ;; ============================================================
-;; Access JSON → PolyAccess Form Definition Converter
+;; Access JSON → AccessClone Form Definition Converter
 ;; ============================================================
 
 (def twips-per-pixel 15)
@@ -101,7 +101,7 @@
     (:hasLostFocusEvent ctrl)    (assoc :has-lostfocus-event true)))
 
 (defn convert-control
-  "Convert a single Access control JSON object to PolyAccess format"
+  "Convert a single Access control JSON object to AccessClone format"
   [ctrl]
   (apply-form-control-props (control-base ctrl) ctrl))
 
@@ -114,7 +114,7 @@
       record-source)))
 
 ;; ============================================================
-;; Access JSON → PolyAccess Report Definition Converter
+;; Access JSON → AccessClone Report Definition Converter
 ;; ============================================================
 
 (def running-sum-map
@@ -139,7 +139,7 @@
    2 :with-first-detail})
 
 (defn convert-report-control
-  "Convert a single Access report control JSON object to PolyAccess format"
+  "Convert a single Access report control JSON object to AccessClone format"
   [ctrl]
   (cond-> (control-base ctrl)
     (:runningSum ctrl)    (assoc :running-sum (get running-sum-map (:runningSum ctrl)))
@@ -158,7 +158,7 @@
     (:hasClickEvent ctrl)  (assoc :has-click-event true)))
 
 (defn convert-report-section
-  "Convert a report section JSON object to PolyAccess format"
+  "Convert a report section JSON object to AccessClone format"
   [section]
   (let [controls (mapv convert-report-control (or (:controls section) []))]
     (cond-> {:height (twips->px (:height section))
@@ -178,7 +178,7 @@
       (:hasRetreatEvent section) (assoc :has-retreat-event true))))
 
 (defn- convert-grouping
-  "Convert Access grouping array to PolyAccess format."
+  "Convert Access grouping array to AccessClone format."
   [grouping-data]
   (mapv (fn [grp]
           {:field (:field grp)
@@ -207,7 +207,7 @@
      :report-footer (get section-map :report-footer empty-section)}))
 
 (defn convert-access-report
-  "Convert Access report JSON metadata to PolyAccess report definition"
+  "Convert Access report JSON metadata to AccessClone report definition"
   [report-data]
   (let [section-map (into {} (map (fn [sec]
                                     [(keyword (:name sec))
@@ -242,7 +242,7 @@
 (defn- bool->int [v] (if (false? v) 0 1))
 
 (defn convert-access-form
-  "Convert Access form JSON metadata to PolyAccess form definition"
+  "Convert Access form JSON metadata to AccessClone form definition"
   [form-data]
   (let [sections (build-form-sections form-data)]
     (cond-> (merge {:name (:name form-data)
@@ -464,7 +464,7 @@
                                                  :formName form-name
                                                  :targetDatabaseId target-database-id}}))]
       (if (and (:success response) (get-in response [:body :formData]))
-        ;; Step 2: Convert JSON to PolyAccess form definition
+        ;; Step 2: Convert JSON to AccessClone form definition
         (let [form-data (get-in response [:body :formData])
               form-def (convert-access-form form-data)
               ;; Step 3: Save to target database via forms API
@@ -490,7 +490,7 @@
                                                  :reportName report-name
                                                  :targetDatabaseId target-database-id}}))]
       (if (and (:success response) (get-in response [:body :reportData]))
-        ;; Step 2: Convert JSON to PolyAccess report definition
+        ;; Step 2: Convert JSON to AccessClone report definition
         (let [report-data (get-in response [:body :reportData])
               report-def (convert-access-report report-data)
               ;; Step 3: Save to target database via reports API
@@ -559,7 +559,7 @@
             false)))))
 
 (defn import-selected!
-  "Import selected forms/reports/modules/tables to the current PolyAccess database"
+  "Import selected forms/reports/modules/tables to the current AccessClone database"
   [access-db-path target-database-id]
   (let [obj-type (:object-type @viewer-state)
         selected (:selected @viewer-state)]
@@ -695,7 +695,7 @@
         (.replace #"_" " "))))
 
 (defn target-database-selector
-  "Dropdown to choose which PolyAccess database to import into"
+  "Dropdown to choose which AccessClone database to import into"
   []
   (let [creating? (r/atom false)
         new-name (r/atom "")

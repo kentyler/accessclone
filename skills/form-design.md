@@ -1,6 +1,6 @@
 # Form Design Skill
 
-This skill guides LLMs in creating and modifying form definitions for PolyAccess.
+This skill guides LLMs in creating and modifying form definitions for AccessClone.
 
 ## Current Implementation Status
 

@@ -1,4 +1,4 @@
-# PolyAccess - Project Setup
+# AccessClone - Project Setup
 # Creates database, installs infrastructure, and prepares the project
 #
 # Usage: .\setup.ps1 -DatabaseName calculator -Password <your_pg_password>
@@ -18,7 +18,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "PolyAccess - Project Setup" -ForegroundColor Cyan
+Write-Host "AccessClone - Project Setup" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Database: $DatabaseName" -ForegroundColor White
@@ -77,7 +77,7 @@ $secretsContent = Get-Content $secretsPath -Raw | ConvertFrom-Json
 $currentKey = $secretsContent.anthropic.api_key
 if (-not $currentKey -or $currentKey -eq "sk-ant-api03-your-key-here") {
     Write-Host ""
-    Write-Host "      PolyAccess uses an AI assistant for chat features." -ForegroundColor White
+    Write-Host "      AccessClone uses an AI assistant for chat features." -ForegroundColor White
     Write-Host "      To enable it, you need an Anthropic API key from https://console.anthropic.com" -ForegroundColor White
     Write-Host ""
     $apiKey = Read-Host "      Enter your Anthropic API key (or press Enter to skip)"

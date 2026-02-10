@@ -417,7 +417,7 @@ Use these when users ask about dependencies, impact of changes, or what structur
         moduleContext += `\n\nYou have a tool available:
 - update_translation: Use this to provide revised ClojureScript code when the user asks for changes. Always include the COMPLETE updated source.
 
-IMPORTANT — PolyAccess architecture context for reviews:
+IMPORTANT — AccessClone architecture context for reviews:
 - Forms carry their own configuration: popup, modal, dimensions, record-source, default-view, etc. are properties in the form definition JSON. The framework renders them accordingly.
 - state/open-object! handles opening any object type — it reads the form definition and renders popups, modals, continuous forms, etc. automatically based on the form's properties.
 - Do NOT suggest adding modal handling, z-index management, positioning, focus trapping, or other rendering concerns — the framework already does this.
@@ -465,7 +465,7 @@ When the user asks you to make changes, use the update_translation tool to apply
           model: 'claude-sonnet-4-20250514',
           max_tokens: (module_context?.module_name || sql_function_context?.function_name || query_context?.query_name) ? 4096 : 1024,
           tools: availableTools,
-          system: `You are a helpful assistant for a database application called PolyAccess. You help users understand their data, create forms, write queries, and work with their databases. ${dbContext}${tableContext}${queryContext}${formContext}${reportContext}${moduleContext}${sqlFunctionContext}${graphContext}
+          system: `You are a helpful assistant for a database application called AccessClone. You help users understand their data, create forms, write queries, and work with their databases. ${dbContext}${tableContext}${queryContext}${formContext}${reportContext}${moduleContext}${sqlFunctionContext}${graphContext}
 
 Keep responses concise and helpful. When discussing code or SQL, use markdown code blocks.`,
           messages: [
@@ -776,7 +776,7 @@ Keep responses concise and helpful. When discussing code or SQL, use markdown co
         body: JSON.stringify({
           model: 'claude-sonnet-4-20250514',
           max_tokens: 4096,
-          system: `You are an expert at translating Microsoft Access VBA code to ClojureScript for the PolyAccess web application framework.
+          system: `You are an expert at translating Microsoft Access VBA code to ClojureScript for the AccessClone web application framework.
 
 Follow this translation guide precisely:
 

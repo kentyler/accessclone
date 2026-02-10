@@ -1,13 +1,13 @@
 {
-  "name": "polyaccess-server",
+  "name": "accessclone-server",
   "version": "0.2.0",
-  "description": "Backend for PolyAccess form and database operations",
+  "description": "Backend for AccessClone form and database operations",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
     "test": "jest --verbose",
-    "test:db": "node -e \"process.env.POLYACCESS_DB_TESTS='1'; require('jest').run(['__tests__/db.schema-routing.test.js'])\""
+    "test:db": "node -e \"process.env.ACCESSCLONE_DB_TESTS='1'; require('jest').run(['__tests__/db.schema-routing.test.js'])\""
   },
   "dependencies": {
     "cors": "^2.8.5",

@@ -14,7 +14,7 @@ ALTER TABLE users ADD COLUMN email VARCHAR(255)
 
 ## Project Overview
 
-This is PolyAccess, a platform for converting MS Access databases to web applications with multi-database support using PostgreSQL.
+This is AccessClone, a platform for converting MS Access databases to web applications with multi-database support using PostgreSQL.
 
 ## Architecture
 

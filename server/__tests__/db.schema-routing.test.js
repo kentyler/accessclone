@@ -4,7 +4,7 @@ const request = require('supertest');
 const config = require('../config');
 const { createApp } = require('../app');
 
-const shouldRun = process.env.POLYACCESS_DB_TESTS === '1';
+const shouldRun = process.env.ACCESSCLONE_DB_TESTS === '1';
 const describeDb = shouldRun ? describe : describe.skip;
 
 const DB_A = 'test_db_a';

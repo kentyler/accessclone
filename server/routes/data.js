@@ -7,6 +7,9 @@ const express = require('express');
 const router = express.Router();
 const { logError } = require('../lib/events');
 
+// Valid SQL identifier pattern (table/column names)
+const NAME_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
 // Cache: "databaseId:tableName" → { value, expiry }
 // Invalidated via clearSchemaCache() when table schema changes, or auto-expires after TTL
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -93,7 +96,7 @@ module.exports = function(pool) {
       const orderDir = req.query.orderDir === 'desc' ? 'DESC' : 'ASC';
 
       // Validate source name (prevent SQL injection)
-      if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(source)) {
+      if (!NAME_RE.test(source)) {
         return res.status(400).json({ error: 'Invalid source name' });
       }
 
@@ -108,7 +111,7 @@ module.exports = function(pool) {
           const conditions = [];
           for (const [col, val] of Object.entries(filter)) {
             // Validate column name to prevent injection
-            if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(col)) {
+            if (NAME_RE.test(col)) {
               conditions.push(`"${col}" = $${paramIdx}`);
               params.push(val);
               paramIdx++;
@@ -122,7 +125,7 @@ module.exports = function(pool) {
         }
       }
 
-      if (orderBy && /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(orderBy)) {
+      if (orderBy && NAME_RE.test(orderBy)) {
         query += ` ORDER BY "${orderBy}" ${orderDir}`;
       }
       query += ` LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`;
@@ -139,7 +142,7 @@ module.exports = function(pool) {
           const conditions = [];
           let ci = 1;
           for (const [col, val] of Object.entries(filter)) {
-            if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(col)) {
+            if (NAME_RE.test(col)) {
               conditions.push(`"${col}" = $${ci}`);
               countParams.push(val);
               ci++;
@@ -177,7 +180,7 @@ module.exports = function(pool) {
     try {
       const { source, id } = req.params;
 
-      if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(source)) {
+      if (!NAME_RE.test(source)) {
         return res.status(400).json({ error: 'Invalid source name' });
       }
 
@@ -213,7 +216,7 @@ module.exports = function(pool) {
       const { table } = req.params;
       const data = req.body;
 
-      if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(table)) {
+      if (!NAME_RE.test(table)) {
         return res.status(400).json({ error: 'Invalid table name' });
       }
 
@@ -251,12 +254,11 @@ module.exports = function(pool) {
    * Update an existing record
    */
   router.put('/:table/:id', async (req, res) => {
-    console.log('PUT /api/data/:table/:id called', { table: req.params.table, id: req.params.id, body: req.body });
     try {
       const { table, id } = req.params;
       const data = req.body;
 
-      if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(table)) {
+      if (!NAME_RE.test(table)) {
         return res.status(400).json({ error: 'Invalid table name' });
       }
 
@@ -309,7 +311,7 @@ module.exports = function(pool) {
     try {
       const { table, id } = req.params;
 
-      if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(table)) {
+      if (!NAME_RE.test(table)) {
         return res.status(400).json({ error: 'Invalid table name' });
       }
 

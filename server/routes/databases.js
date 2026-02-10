@@ -93,8 +93,9 @@ module.exports = function(pool) {
         return res.status(409).json({ error: `Database "${database_id}" already exists` });
       }
 
-      // Create schema (schema_name is generated, not user input)
-      await pool.query(`CREATE SCHEMA IF NOT EXISTS ${schema_name}`);
+      // Create schema (schema_name is generated as db_<id>, quote for safety)
+      const quoted = '"' + schema_name.replace(/"/g, '""') + '"';
+      await pool.query(`CREATE SCHEMA IF NOT EXISTS ${quoted}`);
 
       // Insert into shared.databases
       await pool.query(

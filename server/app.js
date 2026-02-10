@@ -75,9 +75,8 @@ function createApp({
       const schemaName = result.rows[0]?.schema_name || 'public';
 
       // Set search_path for this request.
-      // schemaName comes from a parameterized lookup against shared.databases,
-      // not from user input, so string interpolation is safe here.
-      await pool.query(`SET search_path = ${schemaName}, shared, public`);
+      const quoted = '"' + schemaName.replace(/"/g, '""') + '"';
+      await pool.query(`SET search_path = ${quoted}, shared, public`);
 
       req.databaseId = dbId;
       req.schemaName = schemaName;

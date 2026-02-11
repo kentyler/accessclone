@@ -11,7 +11,7 @@
 (declare load-tables! load-queries! load-functions! load-sql-functions! load-macros! load-access-databases!
          save-ui-state! load-forms! load-reports! filename->display-name
          save-chat-transcript! add-chat-message! set-chat-input! send-chat-message!
-         maybe-auto-analyze! load-import-completeness!)
+         maybe-auto-analyze! load-import-completeness! load-log-entries!)
 
 ;; Application state atom
 (defonce app-state
@@ -27,7 +27,14 @@
            :loading? false
            :error nil
            :options-dialog-open? false
-           :app-mode :run  ; :run or :import
+           :app-mode :run  ; :run, :import, or :logs
+
+           ;; Logs mode state
+           :logs-entries []           ;; Import log entries for sidebar
+           :logs-selected-entry nil   ;; Currently selected entry
+           :logs-issues []            ;; Issues for selected entry
+           :logs-loading? false
+           :logs-filter {:object-type nil :status nil}
 
            ;; Sidebar state
            :sidebar-collapsed? false
@@ -268,9 +275,11 @@
 (defn set-sidebar-object-type! [object-type]
   (swap! app-state assoc :sidebar-object-type object-type))
 
-;; App mode (Import / Run)
+;; App mode (Import / Run / Logs)
 (defn set-app-mode! [mode]
   (swap! app-state assoc :app-mode mode)
+  (when (= mode :logs)
+    (load-log-entries!))
   (save-ui-state!))
 
 ;; Objects
@@ -709,6 +718,87 @@
   (swap! app-state assoc-in [:macro-viewer :cljs-dirty?] true))
 
 ;; ============================================================
+;; LOGS MODE
+;; ============================================================
+
+(defn load-log-entries!
+  "Load import history for the current database"
+  []
+  (let [db-id (:database_id (:current-database @app-state))]
+    (when db-id
+      (swap! app-state assoc :logs-loading? true)
+      (go
+        (let [response (<! (http/get (str api-base "/api/access-import/history")
+                                     {:query-params {:target_database_id db-id
+                                                     :limit 200}}))]
+          (swap! app-state assoc :logs-loading? false)
+          (if (:success response)
+            (swap! app-state assoc :logs-entries (get-in response [:body :history] []))
+            (log-error! "Failed to load import history" "load-log-entries")))))))
+
+(defn load-issues-for-entry!
+  "Load issues for a specific import log entry"
+  [entry]
+  (let [db-id (:database_id (:current-database @app-state))]
+    (when (and db-id (:id entry))
+      (swap! app-state assoc :logs-loading? true)
+      (go
+        (let [response (<! (http/get (str api-base "/api/import-issues")
+                                     {:query-params {:database_id db-id
+                                                     :import_log_id (:id entry)}}))]
+          (swap! app-state assoc :logs-loading? false)
+          (if (:success response)
+            (swap! app-state assoc :logs-issues (get-in response [:body :issues] []))
+            (log-error! "Failed to load issues" "load-issues-for-entry")))))))
+
+(defn load-all-issues!
+  "Load all issues for the current database (no entry filter)"
+  []
+  (let [db-id (:database_id (:current-database @app-state))]
+    (when db-id
+      (swap! app-state assoc :logs-loading? true)
+      (go
+        (let [response (<! (http/get (str api-base "/api/import-issues")
+                                     {:query-params {:database_id db-id}}))]
+          (swap! app-state assoc :logs-loading? false)
+          (if (:success response)
+            (swap! app-state assoc :logs-issues (get-in response [:body :issues] []))
+            (log-error! "Failed to load issues" "load-all-issues")))))))
+
+(defn select-log-entry!
+  "Select a log entry and load its issues"
+  [entry]
+  (swap! app-state assoc :logs-selected-entry entry)
+  (if entry
+    (load-issues-for-entry! entry)
+    (load-all-issues!))
+  ;; Load chat transcript for this entry
+  (when entry
+    (load-chat-transcript! {:type :logs
+                            :name (str (:source_object_type entry) "/" (:source_object_name entry))})))
+
+(defn toggle-issue-resolved!
+  "Toggle the resolved status of an issue"
+  [issue-id currently-resolved?]
+  (go
+    (let [response (<! (http/patch (str api-base "/api/import-issues/" issue-id)
+                                   {:json-params {:resolved (not currently-resolved?)}}))]
+      (if (:success response)
+        ;; Refresh issues list
+        (let [entry (:logs-selected-entry @app-state)]
+          (if entry
+            (load-issues-for-entry! entry)
+            (load-all-issues!))
+          ;; Also refresh log entries to update badge counts
+          (load-log-entries!))
+        (log-error! "Failed to update issue" "toggle-issue-resolved")))))
+
+(defn set-logs-filter!
+  "Update logs filter and re-query"
+  [filter-key value]
+  (swap! app-state assoc-in [:logs-filter filter-key] value))
+
+;; ============================================================
 ;; UI STATE PERSISTENCE
 ;; ============================================================
 
@@ -1106,6 +1196,13 @@
                                :macro_xml (:macro-xml macro-info)
                                :cljs_source (:cljs-source macro-info)
                                :app_objects (get-app-objects)})
+              ;; Issue context when in Logs mode
+              logs-entry (:logs-selected-entry @app-state)
+              issue-context (when (and (= (:app-mode @app-state) :logs) logs-entry)
+                              {:import_log_entry logs-entry
+                               :issues (:logs-issues @app-state)
+                               :object_name (:source_object_name logs-entry)
+                               :object_type (:source_object_type logs-entry)})
               ;; Send full conversation history for context
               history (vec (:chat-messages @app-state))
               response (<! (http/post (str api-base "/api/chat")
@@ -1118,7 +1215,8 @@
                                                      :macro_context macro-context
                                                      :sql_function_context sql-fn-context
                                                      :table_context table-context
-                                                     :query_context query-context}
+                                                     :query_context query-context
+                                                     :issue_context issue-context}
                                        :headers (db-headers)}))]
           (set-chat-loading! false)
           (if (:success response)

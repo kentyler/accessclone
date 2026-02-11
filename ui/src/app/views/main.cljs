@@ -7,7 +7,8 @@
             [app.views.sidebar :as sidebar]
             [app.views.tabs :as tabs]
             [app.views.form-editor :as form-editor]
-            [app.views.access-database-viewer :as access-db-viewer]))
+            [app.views.access-database-viewer :as access-db-viewer]
+            [app.views.logs-viewer :as logs-viewer]))
 
 (defn- grid-size-selector [local-grid-size]
   [:div.options-section
@@ -68,7 +69,7 @@
        [:span.loading-indicator "Loading..."])]))
 
 (defn mode-toggle
-  "Radio buttons to switch between Import and Run modes"
+  "Radio buttons to switch between Import, Run, and Logs modes"
   []
   (let [mode (:app-mode @state/app-state)]
     [:div.mode-toggle
@@ -86,7 +87,14 @@
                :name "app-mode"
                :checked (= mode :run)
                :on-change #(state/set-app-mode! :run)}]
-      "Run"]]))
+      "Run"]
+     [:label.mode-option
+      {:class (when (= mode :logs) "active")}
+      [:input {:type "radio"
+               :name "app-mode"
+               :checked (= mode :logs)
+               :on-change #(state/set-app-mode! :logs)}]
+      "Logs"]]))
 
 (defn header []
   [:header.header
@@ -124,9 +132,12 @@
 
 (defn main-area []
   (let [mode (:app-mode @state/app-state)]
-    (if (= mode :import)
-      [:div.main-area
-       [access-db-viewer/access-database-viewer]]
+    (case mode
+      :import [:div.main-area
+               [access-db-viewer/access-database-viewer]]
+      :logs   [:div.main-area
+               [logs-viewer/log-detail-panel]]
+      ;; default :run
       [:div.main-area
        [tabs/tab-bar]
        [:div.editor-container
@@ -139,22 +150,30 @@
    [:div.message-content content]])
 
 (defn get-chat-context
-  "Get context-aware hint and placeholder based on active tab"
+  "Get context-aware hint and placeholder based on active tab or mode"
   []
-  (let [active-tab (:active-tab @state/app-state)
+  (let [mode (:app-mode @state/app-state)
+        active-tab (:active-tab @state/app-state)
         tab-type (:type active-tab)
         tab-name (:name active-tab)]
-    (case tab-type
-      :forms {:empty-hint (str "I can help you find records, analyze data, or modify the form design for \"" tab-name "\".")
-              :placeholder "Ask about records or form design..."}
-      :tables {:empty-hint (str "I can help you query data, add columns, or modify the \"" tab-name "\" table structure.")
-               :placeholder "Ask about table data or structure..."}
-      :queries {:empty-hint (str "I can help you modify the SQL, create new queries, or explain what \"" tab-name "\" does.")
-                :placeholder "Ask about this query or create new ones..."}
-      :modules {:empty-hint (str "I can help you edit \"" tab-name "\", create new functions, or explain what this code does.")
-                :placeholder "Ask me to edit or create functions..."}
-      {:empty-hint "Ask me anything about your database, forms, or code. I can help you find records, write queries, and create functions."
-       :placeholder "Type a message..."})))
+    (if (= mode :logs)
+      (let [entry (:logs-selected-entry @state/app-state)]
+        {:empty-hint (if entry
+                       (str "I can help you understand and resolve issues for \""
+                            (:source_object_name entry) "\".")
+                       "Select an import entry to review its issues.")
+         :placeholder "Ask about import issues..."})
+      (case tab-type
+        :forms {:empty-hint (str "I can help you find records, analyze data, or modify the form design for \"" tab-name "\".")
+                :placeholder "Ask about records or form design..."}
+        :tables {:empty-hint (str "I can help you query data, add columns, or modify the \"" tab-name "\" table structure.")
+                 :placeholder "Ask about table data or structure..."}
+        :queries {:empty-hint (str "I can help you modify the SQL, create new queries, or explain what \"" tab-name "\" does.")
+                  :placeholder "Ask about this query or create new ones..."}
+        :modules {:empty-hint (str "I can help you edit \"" tab-name "\", create new functions, or explain what this code does.")
+                  :placeholder "Ask me to edit or create functions..."}
+        {:empty-hint "Ask me anything about your database, forms, or code. I can help you find records, write queries, and create functions."
+         :placeholder "Type a message..."}))))
 
 (defn- chat-messages-list [messages loading? empty-hint messages-end]
   [:div.chat-messages

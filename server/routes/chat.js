@@ -375,7 +375,7 @@ module.exports = function(pool, secrets) {
    * Send a message to the LLM and get a response
    */
   router.post('/', async (req, res) => {
-    const { message, history, database_id, form_context, report_context, module_context, macro_context, sql_function_context, table_context, query_context } = req.body;
+    const { message, history, database_id, form_context, report_context, module_context, macro_context, sql_function_context, table_context, query_context, issue_context } = req.body;
 
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
@@ -549,6 +549,21 @@ When the user asks you to make changes, use the update_translation tool to apply
         }
       }
 
+      // Issue context (when in Logs mode reviewing import issues)
+      let issueContextStr = '';
+      if (issue_context?.object_name) {
+        issueContextStr = `\n\nThe user is reviewing import issues for ${issue_context.object_type} "${issue_context.object_name}".`;
+        if (Array.isArray(issue_context.issues) && issue_context.issues.length > 0) {
+          issueContextStr += '\nIssues found during import:';
+          for (const issue of issue_context.issues) {
+            const resolved = issue.resolved ? ' [RESOLVED]' : '';
+            issueContextStr += `\n- [${issue.severity}] ${issue.message}${issue.location ? ` (at ${issue.location})` : ''}${resolved}`;
+            if (issue.suggestion) issueContextStr += `\n  Suggestion: ${issue.suggestion}`;
+          }
+        }
+        issueContextStr += '\n\nHelp the user understand and resolve these import issues. Suggest concrete fixes when possible.';
+      }
+
       // Check import completeness for module/macro contexts — warn LLM if incomplete
       let completenessWarning = '';
       if ((module_context?.module_name || macro_context?.macro_name) && database_id) {
@@ -577,7 +592,7 @@ When the user asks you to make changes, use the update_translation tool to apply
           model: 'claude-sonnet-4-20250514',
           max_tokens: (module_context?.module_name || macro_context?.macro_name || sql_function_context?.function_name || query_context?.query_name) ? 4096 : 1024,
           tools: availableTools,
-          system: `You are a helpful assistant for a database application called AccessClone. You help users understand their data, create forms, write queries, and work with their databases. ${dbContext}${tableContext}${queryContext}${formContext}${reportContext}${moduleContext}${macroContext}${sqlFunctionContext}${graphContext}${completenessWarning}
+          system: `You are a helpful assistant for a database application called AccessClone. You help users understand their data, create forms, write queries, and work with their databases. ${dbContext}${tableContext}${queryContext}${formContext}${reportContext}${moduleContext}${macroContext}${sqlFunctionContext}${issueContextStr}${graphContext}${completenessWarning}
 
 Keep responses concise and helpful. When discussing code or SQL, use markdown code blocks.`,
           messages: [

@@ -136,21 +136,100 @@
       :title (if collapsed? "Expand sidebar" "Collapse sidebar")}
      (if collapsed? "\u25B6" "\u25C0")]))
 
+(defn- type-icon [object-type]
+  (case object-type
+    "table" "\uD83D\uDDD2"
+    "query" "\uD83D\uDD0D"
+    "form"  "\uD83D\uDCCB"
+    "report" "\uD83D\uDCC4"
+    "module" "\uD83D\uDCDD"
+    "macro" "\u26A1"
+    "\uD83D\uDCC1"))
+
+(defn- format-timestamp [ts]
+  (when ts
+    (let [d (js/Date. ts)]
+      (str (.toLocaleDateString d) " " (.toLocaleTimeString d)))))
+
+(defn logs-entry-list
+  "Sidebar list of import log entries for Logs mode"
+  []
+  (let [entries (:logs-entries @state/app-state)
+        selected (:logs-selected-entry @state/app-state)
+        loading? (:logs-loading? @state/app-state)
+        logs-filter (:logs-filter @state/app-state)
+        ;; Apply filters
+        filtered (cond->> entries
+                   (:object-type logs-filter)
+                   (filter #(= (:source_object_type %) (:object-type logs-filter)))
+                   (= (:status logs-filter) "issues-only")
+                   (filter #(pos? (or (:open_issue_count %) 0))))]
+    [:div
+     ;; Filter bar
+     [:div.logs-filter-bar
+      [:select
+       {:value (or (:object-type logs-filter) "")
+        :on-change #(state/set-logs-filter! :object-type
+                      (let [v (.. % -target -value)]
+                        (when (seq v) v)))}
+       [:option {:value ""} "All types"]
+       [:option {:value "table"} "Tables"]
+       [:option {:value "query"} "Queries"]
+       [:option {:value "form"} "Forms"]
+       [:option {:value "report"} "Reports"]
+       [:option {:value "module"} "Modules"]
+       [:option {:value "macro"} "Macros"]]
+      [:label.logs-issues-toggle
+       [:input {:type "checkbox"
+                :checked (= (:status logs-filter) "issues-only")
+                :on-change #(state/set-logs-filter! :status
+                              (if (.. % -target -checked) "issues-only" nil))}]
+       "Issues only"]]
+     ;; Entry list
+     (when loading?
+       [:div.logs-loading "Loading..."])
+     [:ul.object-list
+      (if (empty? filtered)
+        [:li.empty-list "No import entries"]
+        (for [entry filtered]
+          (let [entry-id (:id entry)
+                selected? (= (:id selected) entry-id)
+                issue-count (or (:open_issue_count entry) 0)]
+            ^{:key entry-id}
+            [:li.log-entry-item
+             {:class (when selected? "selected")
+              :on-click #(state/select-log-entry! entry)}
+             [:span.log-entry-type (type-icon (:source_object_type entry))]
+             [:span.log-entry-name (:source_object_name entry)]
+             [:span.log-entry-meta
+              [:span {:class (str "status-badge " (:status entry))}
+               (:status entry)]
+              (when (pos? issue-count)
+                [:span.issue-badge issue-count])]])))]]))
+
 (defn sidebar
   "Main sidebar component"
   []
   (let [collapsed? (:sidebar-collapsed? @state/app-state)
-        import-mode? (= (:app-mode @state/app-state) :import)]
+        app-mode (:app-mode @state/app-state)]
     [:aside.sidebar {:class (when collapsed? "collapsed")}
      [:div.sidebar-header
       [collapse-toggle]
       (when-not collapsed?
-        [:span.sidebar-title (if import-mode? "Access Databases" "Objects")])]
+        [:span.sidebar-title
+         (case app-mode
+           :import "Access Databases"
+           :logs   "Import History"
+           "Objects")])]
      (when-not collapsed?
-       (if import-mode?
-         [:<>
-          [:div.object-list-container
-           [access-database-list]]]
+       (case app-mode
+         :import [:<>
+                  [:div.object-list-container
+                   [access-database-list]]]
+         :logs   [:<>
+                  [:div.object-list-container
+                   [logs-entry-list]]]
+         ;; default: :run
          [:<>
           [object-type-selector]
           [new-object-button]

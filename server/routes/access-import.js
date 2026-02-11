@@ -19,13 +19,16 @@ const { resolveType, quoteIdent } = require('../lib/access-types');
 function makeLogImport(pool, sourcePath, objectName, objectType, targetDatabaseId) {
   return async function logImport(status, errorMessage = null, details = null) {
     try {
-      await pool.query(`
+      const result = await pool.query(`
         INSERT INTO shared.import_log
           (source_path, source_object_name, source_object_type, target_database_id, status, error_message, details)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING id
       `, [sourcePath, objectName, objectType, targetDatabaseId || '_none', status, errorMessage, details ? JSON.stringify(details) : null]);
+      return result.rows[0]?.id || null;
     } catch (logErr) {
       console.error('Error writing to import_log:', logErr);
+      return null;
     }
   };
 }
@@ -311,12 +314,13 @@ module.exports = function(pool) {
       const formData = JSON.parse(cleanOutput.substring(jsonStart));
 
       // Log success
-      await logImport('success', null, { controls: formData.controls ? formData.controls.length : 0 });
+      const formLogId = await logImport('success', null, { controls: formData.controls ? formData.controls.length : 0 });
 
       // Return raw JSON to frontend for conversion
       res.json({
         success: true,
-        formData: formData
+        formData: formData,
+        import_log_id: formLogId
       });
     } catch (err) {
       console.error('Error exporting form:', err);
@@ -362,12 +366,13 @@ module.exports = function(pool) {
 
       // Log success
       const sectionCount = reportData.sections ? reportData.sections.length : 0;
-      await logImport('success', null, { sections: sectionCount });
+      const reportLogId = await logImport('success', null, { sections: sectionCount });
 
       // Return raw JSON to frontend for conversion
       res.json({
         success: true,
-        reportData: reportData
+        reportData: reportData,
+        import_log_id: reportLogId
       });
     } catch (err) {
       console.error('Error exporting report:', err);
@@ -411,7 +416,20 @@ module.exports = function(pool) {
       const moduleData = JSON.parse(cleanOutput.substring(jsonStart));
 
       // Log success
-      await logImport('success', null, { lineCount: moduleData.lineCount || 0 });
+      const moduleLogId = await logImport('success', null, { lineCount: moduleData.lineCount || 0 });
+
+      // Create issue for untranslated VBA
+      if (moduleLogId && targetDatabaseId) {
+        try {
+          await pool.query(`
+            INSERT INTO shared.import_issues
+              (import_log_id, database_id, object_name, object_type, severity, category, message)
+            VALUES ($1, $2, $3, 'module', 'warning', 'untranslated-vba', $4)
+          `, [moduleLogId, targetDatabaseId, moduleName, 'VBA module needs translation to ClojureScript']);
+        } catch (issueErr) {
+          console.error('Error creating import issue for module:', issueErr);
+        }
+      }
 
       // Return raw JSON to frontend
       res.json({
@@ -460,7 +478,20 @@ module.exports = function(pool) {
       const macroData = JSON.parse(cleanOutput.substring(jsonStart));
 
       // Log success
-      await logImport('success', null, { hasDefinition: !!macroData.definition });
+      const macroLogId = await logImport('success', null, { hasDefinition: !!macroData.definition });
+
+      // Create issue for untranslated macro
+      if (macroLogId && targetDatabaseId) {
+        try {
+          await pool.query(`
+            INSERT INTO shared.import_issues
+              (import_log_id, database_id, object_name, object_type, severity, category, message)
+            VALUES ($1, $2, $3, 'macro', 'warning', 'untranslated-macro', $4)
+          `, [macroLogId, targetDatabaseId, macroName, 'Access macro needs translation to ClojureScript']);
+        } catch (issueErr) {
+          console.error('Error creating import issue for macro:', issueErr);
+        }
+      }
 
       // Return raw JSON to frontend
       res.json({
@@ -674,11 +705,26 @@ module.exports = function(pool) {
 
       // 12. Log success
       const skippedNames = (tableData.skippedColumns || []).map(c => c.name);
-      await logImport('success', null, {
+      const logId = await logImport('success', null, {
         fieldCount: fields.length,
         rowCount: rows.length,
         skippedColumns: skippedNames.length > 0 ? skippedNames : undefined
       });
+
+      // 13. Create issues for skipped columns
+      if (logId && skippedNames.length > 0) {
+        try {
+          for (const sc of tableData.skippedColumns) {
+            await pool.query(`
+              INSERT INTO shared.import_issues
+                (import_log_id, database_id, object_name, object_type, severity, category, message)
+              VALUES ($1, $2, $3, 'table', 'warning', 'skipped-column', $4)
+            `, [logId, targetDatabaseId, tableName, `Column '${sc.name}' skipped (Access type: ${sc.type}) — not importable`]);
+          }
+        } catch (issueErr) {
+          console.error('Error creating import issues for skipped columns:', issueErr);
+        }
+      }
 
       res.json({
         success: true,
@@ -806,12 +852,27 @@ module.exports = function(pool) {
       clearSchemaCache(targetDatabaseId);
 
       // 7. Log success
-      await logImport('success', null, {
+      const queryLogId = await logImport('success', null, {
         pgObjectType: result.pgObjectType,
         originalType: queryData.queryType,
         warnings: result.warnings.length > 0 ? result.warnings : undefined,
         extractedFunctions: result.extractedFunctions.length > 0 ? result.extractedFunctions.map(f => f.name) : undefined
       });
+
+      // 8. Create issues for conversion warnings
+      if (queryLogId && result.warnings.length > 0) {
+        try {
+          for (const warning of result.warnings) {
+            await pool.query(`
+              INSERT INTO shared.import_issues
+                (import_log_id, database_id, object_name, object_type, severity, category, message)
+              VALUES ($1, $2, $3, 'query', 'warning', 'conversion-warning', $4)
+            `, [queryLogId, targetDatabaseId, queryName, warning]);
+          }
+        } catch (issueErr) {
+          console.error('Error creating import issues for query warnings:', issueErr);
+        }
+      }
 
       res.json({
         success: true,
@@ -973,32 +1034,42 @@ module.exports = function(pool) {
    */
   router.get('/history', async (req, res) => {
     try {
-      const { source_path, limit = 100 } = req.query;
+      const { source_path, target_database_id, limit = 100 } = req.query;
 
-      let query, params;
+      const conditions = [];
+      const params = [];
+      let idx = 1;
+
       if (source_path) {
-        query = `
-          SELECT id, created_at, source_path, source_object_name, source_object_type,
-                 target_database_id, status, error_message
-          FROM shared.import_log
-          WHERE source_path = $1
-          ORDER BY created_at DESC
-          LIMIT $2
-        `;
-        params = [source_path, parseInt(limit)];
-      } else {
-        query = `
-          SELECT id, created_at, source_path, source_object_name, source_object_type,
-                 target_database_id, status, error_message
-          FROM shared.import_log
-          ORDER BY created_at DESC
-          LIMIT $1
-        `;
-        params = [parseInt(limit)];
+        conditions.push(`il.source_path = $${idx++}`);
+        params.push(source_path);
+      }
+      if (target_database_id) {
+        conditions.push(`il.target_database_id = $${idx++}`);
+        params.push(target_database_id);
       }
 
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+      params.push(parseInt(limit));
+
+      const query = `
+        SELECT il.id, il.created_at, il.source_path, il.source_object_name, il.source_object_type,
+               il.target_database_id, il.status, il.error_message, il.details,
+               (SELECT COUNT(*) FROM shared.import_issues
+                WHERE import_log_id = il.id AND NOT resolved) AS open_issue_count
+        FROM shared.import_log il
+        ${whereClause}
+        ORDER BY il.created_at DESC
+        LIMIT $${idx}
+      `;
+
       const result = await pool.query(query, params);
-      res.json({ history: result.rows });
+      // Parse open_issue_count to integer
+      const history = result.rows.map(r => ({
+        ...r,
+        open_issue_count: parseInt(r.open_issue_count)
+      }));
+      res.json({ history });
     } catch (err) {
       console.error('Error fetching import history:', err);
       logError(pool, 'GET /api/access-import/history', 'Failed to fetch import history', err);

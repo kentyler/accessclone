@@ -198,6 +198,32 @@ function createRouter(pool) {
         }
       }
 
+      // Post-import lint: detect issues for imported reports
+      if (req.query.source === 'import' && req.query.import_log_id) {
+        try {
+          const { validateReport, validateReportCrossObject, getSchemaInfo } = require('./lint');
+          const reportDef = JSON.parse(content);
+          const issues = validateReport(reportDef);
+          const dbResult = await pool.query(
+            'SELECT schema_name FROM shared.databases WHERE database_id = $1', [databaseId]
+          );
+          if (dbResult.rows.length > 0) {
+            const schemaInfo = await getSchemaInfo(pool, dbResult.rows[0].schema_name);
+            issues.push(...validateReportCrossObject(reportDef, schemaInfo));
+          }
+          const logId = parseInt(req.query.import_log_id);
+          for (const issue of issues) {
+            await pool.query(`
+              INSERT INTO shared.import_issues
+                (import_log_id, database_id, object_name, object_type, severity, category, location, message, suggestion)
+              VALUES ($1, $2, $3, 'report', $4, 'lint', $5, $6, $7)
+            `, [logId, databaseId, reportName, issue.severity, issue.location || null, issue.message, issue.suggestion || null]);
+          }
+        } catch (lintErr) {
+          console.error('Error running post-import lint for report:', lintErr.message);
+        }
+      }
+
       console.log(`Saved report: ${reportName} v${newVersion} (database: ${databaseId})`);
       res.json({ success: true, name: reportName, version: newVersion, database_id: databaseId });
     } catch (err) {

@@ -63,6 +63,21 @@ For each phase:
 3. Record completion status
 4. Handle any errors before proceeding
 
+### Critical: Import Everything Before Translation
+
+**Do NOT attempt to translate VBA modules, macros, or form code-behind until ALL objects discovered in the Access database have been imported into the target.** This is a hard rule. The check is simple: compare what the discovery scan found against what exists in the target database. If anything is missing, do not translate.
+
+Without the full picture, the LLM guesses at query logic and produces incorrect, insecure code — fabricated SQL, string concatenation instead of parameterized queries, calls to non-existent endpoints. This was confirmed empirically: translating modules before queries were imported produced code that couldn't work.
+
+Import order (dependencies flow downward):
+1. Tables (no dependencies)
+2. Queries (depend on tables)
+3. Forms & Reports (reference tables and queries)
+4. Modules & Macros (reference all of the above)
+5. Translation (requires ALL of the above imported first)
+
+**Planned**: The app should enforce this automatically — block translation in the chat panel until import completeness is verified, showing a clear message listing what's still missing.
+
 ## Phase Details
 
 ### Phase 0: Diagnose

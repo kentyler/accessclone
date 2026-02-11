@@ -294,6 +294,81 @@ const moduleTools = [
   }
 ];
 
+/**
+ * Check import completeness for a database.
+ * Returns { has_discovery, complete, missing, missing_count } or null on error.
+ */
+async function checkImportCompleteness(pool, databaseId) {
+  try {
+    const discResult = await pool.query(
+      'SELECT discovery FROM shared.source_discovery WHERE database_id = $1',
+      [databaseId]
+    );
+    if (discResult.rows.length === 0) return { has_discovery: false, complete: true };
+
+    const discovery = discResult.rows[0].discovery;
+    const dbResult = await pool.query(
+      'SELECT schema_name FROM shared.databases WHERE database_id = $1',
+      [databaseId]
+    );
+    if (dbResult.rows.length === 0) return null;
+    const schemaName = dbResult.rows[0].schema_name;
+
+    const [tablesRes, viewsRes, routinesRes, formsRes, reportsRes, modulesRes, macrosRes] = await Promise.all([
+      pool.query(`SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_type = 'BASE TABLE'`, [schemaName]),
+      pool.query(`SELECT table_name FROM information_schema.views WHERE table_schema = $1`, [schemaName]),
+      pool.query(`SELECT routine_name FROM information_schema.routines WHERE routine_schema = $1`, [schemaName]),
+      pool.query(`SELECT DISTINCT name FROM shared.forms WHERE database_id = $1 AND is_current = true`, [databaseId]),
+      pool.query(`SELECT DISTINCT name FROM shared.reports WHERE database_id = $1 AND is_current = true`, [databaseId]),
+      pool.query(`SELECT DISTINCT name FROM shared.modules WHERE database_id = $1 AND is_current = true`, [databaseId]),
+      pool.query(`SELECT DISTINCT name FROM shared.macros WHERE database_id = $1 AND is_current = true`, [databaseId])
+    ]);
+
+    const actualTables = new Set(tablesRes.rows.map(r => r.table_name.toLowerCase()));
+    const actualViews = new Set(viewsRes.rows.map(r => r.table_name.toLowerCase()));
+    const actualRoutines = new Set(routinesRes.rows.map(r => r.routine_name.toLowerCase()));
+    const actualForms = new Set(formsRes.rows.map(r => r.name.toLowerCase()));
+    const actualReports = new Set(reportsRes.rows.map(r => r.name.toLowerCase()));
+    const actualModules = new Set(modulesRes.rows.map(r => r.name.toLowerCase()));
+    const actualMacros = new Set(macrosRes.rows.map(r => r.name.toLowerCase()));
+
+    function isImported(name, set) {
+      const lower = name.toLowerCase();
+      return set.has(lower) || set.has(lower.replace(/\s+/g, '_'));
+    }
+
+    const missing = {};
+    let missingCount = 0;
+    for (const [type, srcList, actualSet] of [
+      ['tables', discovery.tables || [], actualTables],
+      ['queries', discovery.queries || [], new Set([...actualViews, ...actualRoutines])],
+      ['forms', discovery.forms || [], actualForms],
+      ['reports', discovery.reports || [], actualReports],
+      ['modules', discovery.modules || [], actualModules],
+      ['macros', discovery.macros || [], actualMacros]
+    ]) {
+      const m = srcList.filter(n => !isImported(n, actualSet));
+      if (m.length > 0) { missing[type] = m; missingCount += m.length; }
+    }
+
+    return { has_discovery: true, complete: missingCount === 0, missing, missing_count: missingCount };
+  } catch (err) {
+    console.error('Error checking import completeness:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Format missing objects into a human-readable string for the LLM.
+ */
+function formatMissingList(missing) {
+  const parts = [];
+  for (const [type, names] of Object.entries(missing)) {
+    if (names.length > 0) parts.push(`  ${type}: ${names.join(', ')}`);
+  }
+  return parts.join('\n');
+}
+
 module.exports = function(pool, secrets) {
   /**
    * POST /api/chat
@@ -457,6 +532,30 @@ When the user asks you to make changes, use the update_translation tool to apply
           macroContext += `\n\nCurrent ClojureScript translation:\n${macro_context.cljs_source}`;
         }
         macroContext += `\n\nThis is a Microsoft Access macro exported as XML. Help the user understand the macro's actions, conditions, and flow. If asked, translate the macro logic to ClojureScript event handlers that work with the AccessClone framework.`;
+
+        // Add app objects inventory for macro context (same as modules)
+        if (macro_context.app_objects) {
+          const ao = macro_context.app_objects;
+          const parts = [];
+          if (ao.tables?.length)  parts.push(`Tables: ${ao.tables.join(', ')}`);
+          if (ao.queries?.length) parts.push(`Queries: ${ao.queries.join(', ')}`);
+          if (ao.forms?.length)   parts.push(`Forms: ${ao.forms.join(', ')}`);
+          if (ao.reports?.length) parts.push(`Reports: ${ao.reports.join(', ')}`);
+          if (ao.modules?.length) parts.push(`Modules: ${ao.modules.join(', ')}`);
+          if (ao.macros?.length)  parts.push(`Macros: ${ao.macros.join(', ')}`);
+          if (parts.length > 0) {
+            macroContext += `\n\nDatabase objects available in this application:\n${parts.join('\n')}`;
+          }
+        }
+      }
+
+      // Check import completeness for module/macro contexts — warn LLM if incomplete
+      let completenessWarning = '';
+      if ((module_context?.module_name || macro_context?.macro_name) && database_id) {
+        const completeness = await checkImportCompleteness(pool, database_id);
+        if (completeness?.has_discovery && !completeness.complete) {
+          completenessWarning = `\n\nIMPORTANT — INCOMPLETE IMPORT:\nThe following objects have NOT been imported from the Access source:\n${formatMissingList(completeness.missing)}\nYou MUST NOT produce ClojureScript code translations. You may analyze structure, identify dependencies, and explain logic, but do NOT generate translation code until all objects are imported.`;
+        }
       }
 
       // Combine all available tools
@@ -478,7 +577,7 @@ When the user asks you to make changes, use the update_translation tool to apply
           model: 'claude-sonnet-4-20250514',
           max_tokens: (module_context?.module_name || macro_context?.macro_name || sql_function_context?.function_name || query_context?.query_name) ? 4096 : 1024,
           tools: availableTools,
-          system: `You are a helpful assistant for a database application called AccessClone. You help users understand their data, create forms, write queries, and work with their databases. ${dbContext}${tableContext}${queryContext}${formContext}${reportContext}${moduleContext}${macroContext}${sqlFunctionContext}${graphContext}
+          system: `You are a helpful assistant for a database application called AccessClone. You help users understand their data, create forms, write queries, and work with their databases. ${dbContext}${tableContext}${queryContext}${formContext}${reportContext}${moduleContext}${macroContext}${sqlFunctionContext}${graphContext}${completenessWarning}
 
 Keep responses concise and helpful. When discussing code or SQL, use markdown code blocks.`,
           messages: [
@@ -753,10 +852,23 @@ Keep responses concise and helpful. When discussing code or SQL, use markdown co
    * Translate VBA source code to ClojureScript
    */
   router.post('/translate', async (req, res) => {
-    const { vba_source, module_name, app_objects } = req.body;
+    const { vba_source, module_name, app_objects, database_id } = req.body;
 
     if (!vba_source) {
       return res.status(400).json({ error: 'vba_source is required' });
+    }
+
+    // Hard block: refuse translation if import is incomplete
+    const databaseId = database_id || req.headers['x-database-id'];
+    if (databaseId) {
+      const completeness = await checkImportCompleteness(pool, databaseId);
+      if (completeness?.has_discovery && !completeness.complete) {
+        return res.status(400).json({
+          error: 'Cannot translate until all Access objects are imported.',
+          missing: completeness.missing,
+          missing_count: completeness.missing_count
+        });
+      }
     }
 
     const apiKey = secrets.anthropic?.api_key || process.env.ANTHROPIC_API_KEY;

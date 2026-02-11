@@ -296,6 +296,25 @@
            :access-db-cache {}  ;; {path {:forms [] :reports [] :tables [] :queries [] :modules [] :macros []}}
            }))
 
+(defn save-source-discovery!
+  "Save the Access database discovery inventory to the server for completeness checks."
+  [target-database-id]
+  (when target-database-id
+    (let [loaded-path (:loaded-path @viewer-state)
+          cached (get-in @viewer-state [:access-db-cache loaded-path])]
+      (when (and loaded-path cached)
+        (let [discovery {:tables  (mapv get-item-name (:tables cached))
+                         :queries (mapv get-item-name (:queries cached))
+                         :forms   (mapv get-item-name (:forms cached))
+                         :reports (mapv get-item-name (:reports cached))
+                         :modules (mapv get-item-name (:modules cached))
+                         :macros  (mapv get-item-name (:macros cached))}]
+          (go
+            (<! (http/put (str api-base "/api/access-import/source-discovery")
+                          {:json-params {:database_id target-database-id
+                                         :source_path loaded-path
+                                         :discovery discovery}}))))))))
+
 (defn save-import-state!
   "Persist import viewer state to server"
   []
@@ -606,7 +625,8 @@
         ;; Refresh history after each import
         (<! (load-import-history! access-db-path)))
       (swap! viewer-state assoc :importing? false :selected #{})
-      ;; Refresh badges and the object lists in the target database
+      ;; Re-save discovery (in case contents changed) and refresh badges
+      (save-source-discovery! target-database-id)
       (load-target-existing! target-database-id)
       (state/load-tables!)
       (state/load-queries!)
@@ -752,6 +772,7 @@
                            :else
                            (do (swap! viewer-state assoc :target-database-id v)
                                (load-target-existing! v)
+                               (save-source-discovery! v)
                                (save-import-state!))))}
           [:option {:value ""} "Select a database..."]
           (for [db available-dbs]
@@ -776,6 +797,7 @@
                            (fn [new-db]
                              (swap! viewer-state assoc :target-database-id (:database_id new-db))
                              (load-target-existing! (:database_id new-db))
+                             (save-source-discovery! (:database_id new-db))
                              (save-import-state!)
                              (reset! creating? false))
                            (fn [err-msg]

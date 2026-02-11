@@ -177,6 +177,17 @@ CREATE TABLE IF NOT EXISTS shared.import_log (
 );
 
 -- ============================================================
+-- Source Discovery - tracks what objects exist in the Access source
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.source_discovery (
+    id SERIAL PRIMARY KEY,
+    database_id VARCHAR(100) NOT NULL UNIQUE,
+    source_path TEXT NOT NULL,
+    discovery JSONB NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
 -- Chat Transcripts - persistent chat history per object
 -- ============================================================
 CREATE TABLE IF NOT EXISTS shared.chat_transcripts (

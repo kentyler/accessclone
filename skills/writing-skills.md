@@ -104,6 +104,7 @@ Common failure modes across all platforms:
 - **Large object limits** — OLE objects, attachments, binary data that can't transfer cleanly
 - **Reserved word conflicts** — platform column names that collide with PostgreSQL reserved words
 - **Case sensitivity** — platforms that are case-insensitive mapping to PostgreSQL which folds to lowercase
+- **Translation before full import** — if code references objects that haven't been imported yet, the LLM will guess at the logic and produce incorrect, insecure code. **Block translation until all objects from the source discovery scan have been imported into the target.** No dependency chain analysis needed — just compare discovery inventory vs. target inventory. This applies universally across platforms: Access VBA referencing queries, FileMaker scripts referencing layouts, etc.
 
 ## Maintaining Skill Files
 

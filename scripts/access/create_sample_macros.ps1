@@ -1,6 +1,11 @@
 # Create sample macros in an Access database for testing the import pipeline
 # Usage: .\create_sample_macros.ps1 -DatabasePath "path\to\northwinddev.accdb"
 # Creates 10 macros covering key Access macro action types
+#
+# LoadFromText requires the legacy Access macro text format with UTF-16 LE encoding.
+# Each macro needs: Version/PublishOption/ColumnsShown header, Begin/End action blocks,
+# and _AXL comment blocks containing the XML representation with escaped quotes and
+# continuation lines (8-space indent).
 
 param(
     [Parameter(Mandatory=$true)]
@@ -15,267 +20,294 @@ Start-Sleep -Milliseconds 500
 $lockFile = $DatabasePath -replace '\.accdb$', '.laccdb'
 Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
 
-# Define macros as name -> XML content pairs
-$macros = @{}
+$header = "Version =196611`r`nPublishOption =1`r`nColumnsShown =0"
+
+# Define macros: name -> LoadFromText content
+$macros = [ordered]@{}
 
 # 1. Simple OpenForm action
-$macros["Macro_OpenForm"] = @'
-<?xml version="1.0" encoding="UTF-16" standalone="no"?>
-<UserInterfaceMacros xmlns="http://schemas.microsoft.com/office/accessservices/2009/11/application">
-    <UserInterfaceMacro>
-        <Statements>
-            <Action Name="OpenForm">
-                <Argument Name="FormName">Order List</Argument>
-                <Argument Name="View">Form</Argument>
-                <Argument Name="WindowMode">Normal</Argument>
-            </Action>
-        </Statements>
-    </UserInterfaceMacro>
-</UserInterfaceMacros>
-'@
+$macros["Macro_OpenForm"] = @"
+$header
+Begin
+    Action ="OpenForm"
+    Argument ="Order List"
+    Argument ="0"
+    Argument =""
+    Argument =""
+    Argument ="-1"
+    Argument ="0"
+End
+Begin
+    Comment ="_AXL:<?xml version=\"1.0\" encoding=\"UTF-16\" standalone=\"no\"?>\015\012<UserI"
+        "nterfaceMacro MinimumClientDesignVersion=\"14.0.0000.0000\" xmlns=\"http://schem"
+        "as.microsoft.com/office/accessservices/2009/11/application\"><Statements><Action"
+        " Name=\"OpenForm\"><Argument Name=\"FormName\">Order List</Argument></Action></S"
+        "tatements></UserInterfaceMacro>"
+End
+"@
 
 # 2. OpenForm with WhereCondition filter
-$macros["Macro_OpenFormFiltered"] = @'
-<?xml version="1.0" encoding="UTF-16" standalone="no"?>
-<UserInterfaceMacros xmlns="http://schemas.microsoft.com/office/accessservices/2009/11/application">
-    <UserInterfaceMacro>
-        <Statements>
-            <Action Name="OpenForm">
-                <Argument Name="FormName">Order Details</Argument>
-                <Argument Name="View">Form</Argument>
-                <Argument Name="WhereCondition">=[OrderID]=Forms![Order List]![ID]</Argument>
-                <Argument Name="WindowMode">Normal</Argument>
-            </Action>
-        </Statements>
-    </UserInterfaceMacro>
-</UserInterfaceMacros>
-'@
+$macros["Macro_OpenFormFiltered"] = @"
+$header
+Begin
+    Action ="OpenForm"
+    Argument ="Order Details"
+    Argument ="0"
+    Argument ="[OrderID]=Forms![Order List]![ID]"
+    Argument =""
+    Argument ="-1"
+    Argument ="0"
+End
+Begin
+    Comment ="_AXL:<?xml version=\"1.0\" encoding=\"UTF-16\" standalone=\"no\"?>\015\012<UserI"
+        "nterfaceMacro MinimumClientDesignVersion=\"14.0.0000.0000\" xmlns=\"http://schem"
+        "as.microsoft.com/office/accessservices/2009/11/application\"><Statements><Action"
+        " Name=\"OpenForm\"><Argument Name=\"FormName\">Order Details</Argument><Argument"
+        " Name=\"WhereCondition\">[OrderID]=Forms![Order List]![ID]</Argument></Action></"
+        "Statements></UserInterfaceMacro>"
+End
+"@
 
 # 3. OpenReport in preview mode
-$macros["Macro_OpenReport"] = @'
-<?xml version="1.0" encoding="UTF-16" standalone="no"?>
-<UserInterfaceMacros xmlns="http://schemas.microsoft.com/office/accessservices/2009/11/application">
-    <UserInterfaceMacro>
-        <Statements>
-            <Action Name="OpenReport">
-                <Argument Name="ReportName">Sales Report</Argument>
-                <Argument Name="View">Print Preview</Argument>
-                <Argument Name="WindowMode">Normal</Argument>
-            </Action>
-        </Statements>
-    </UserInterfaceMacro>
-</UserInterfaceMacros>
-'@
+$macros["Macro_OpenReport"] = @"
+$header
+Begin
+    Action ="OpenReport"
+    Argument ="Sales Report"
+    Argument ="2"
+    Argument =""
+    Argument ="0"
+End
+Begin
+    Comment ="_AXL:<?xml version=\"1.0\" encoding=\"UTF-16\" standalone=\"no\"?>\015\012<UserI"
+        "nterfaceMacro MinimumClientDesignVersion=\"14.0.0000.0000\" xmlns=\"http://schem"
+        "as.microsoft.com/office/accessservices/2009/11/application\"><Statements><Action"
+        " Name=\"OpenReport\"><Argument Name=\"ReportName\">Sales Report</Argument><Argum"
+        "ent Name=\"View\">PrintPreview</Argument></Action></Statements></UserInterfaceMa"
+        "cro>"
+End
+"@
 
 # 4. MessageBox action
-$macros["Macro_MessageBox"] = @'
-<?xml version="1.0" encoding="UTF-16" standalone="no"?>
-<UserInterfaceMacros xmlns="http://schemas.microsoft.com/office/accessservices/2009/11/application">
-    <UserInterfaceMacro>
-        <Statements>
-            <Action Name="MessageBox">
-                <Argument Name="Message">Welcome to the Northwind database application.</Argument>
-                <Argument Name="Beep">Yes</Argument>
-                <Argument Name="Type">Information</Argument>
-                <Argument Name="Title">Northwind Traders</Argument>
-            </Action>
-        </Statements>
-    </UserInterfaceMacro>
-</UserInterfaceMacros>
-'@
+$macros["Macro_MessageBox"] = @"
+$header
+Begin
+    Action ="MsgBox"
+    Argument ="Welcome to the Northwind database application."
+    Argument ="-1"
+    Argument ="1"
+    Argument ="Northwind Traders"
+End
+Begin
+    Comment ="_AXL:<?xml version=\"1.0\" encoding=\"UTF-16\" standalone=\"no\"?>\015\012<UserI"
+        "nterfaceMacro MinimumClientDesignVersion=\"14.0.0000.0000\" xmlns=\"http://schem"
+        "as.microsoft.com/office/accessservices/2009/11/application\"><Statements><Action"
+        " Name=\"MessageBox\"><Argument Name=\"Message\">Welcome to the Northwind databas"
+        "e application.</Argument><Argument Name=\"Type\">Information</Argument><Argument"
+        " Name=\"Title\">Northwind Traders</Argument></Action></Statements></UserInterfac"
+        "eMacro>"
+End
+"@
 
-# 5. Multiple actions in sequence
-$macros["Macro_MultipleActions"] = @'
-<?xml version="1.0" encoding="UTF-16" standalone="no"?>
-<UserInterfaceMacros xmlns="http://schemas.microsoft.com/office/accessservices/2009/11/application">
-    <UserInterfaceMacro>
-        <Statements>
-            <Action Name="SetTempVar">
-                <Argument Name="Name">CurrentFilter</Argument>
-                <Argument Name="Expression">="Active"</Argument>
-            </Action>
-            <Action Name="OpenForm">
-                <Argument Name="FormName">Order List</Argument>
-                <Argument Name="View">Form</Argument>
-                <Argument Name="WindowMode">Normal</Argument>
-            </Action>
-            <Action Name="ApplyFilter">
-                <Argument Name="WhereCondition">=[Status Field]=[TempVars]![CurrentFilter]</Argument>
-            </Action>
-            <Action Name="MessageBox">
-                <Argument Name="Message">Filter applied: showing active orders only.</Argument>
-                <Argument Name="Type">Information</Argument>
-                <Argument Name="Title">Filter Applied</Argument>
-            </Action>
-        </Statements>
-    </UserInterfaceMacro>
-</UserInterfaceMacros>
-'@
+# 5. Multiple actions in sequence: SetTempVar + OpenForm + MsgBox
+$macros["Macro_MultipleActions"] = @"
+$header
+Begin
+    Action ="SetTempVar"
+    Argument ="CurrentFilter"
+    Argument ="=""Active"""
+End
+Begin
+    Action ="OpenForm"
+    Argument ="Order List"
+    Argument ="0"
+    Argument =""
+    Argument =""
+    Argument ="-1"
+    Argument ="0"
+End
+Begin
+    Action ="MsgBox"
+    Argument ="Filter applied: showing active orders only."
+    Argument ="-1"
+    Argument ="1"
+    Argument ="Filter Applied"
+End
+Begin
+    Comment ="_AXL:<?xml version=\"1.0\" encoding=\"UTF-16\" standalone=\"no\"?>\015\012<UserI"
+        "nterfaceMacro MinimumClientDesignVersion=\"14.0.0000.0000\" xmlns=\"http://schem"
+        "as.microsoft.com/office/accessservices/2009/11/application\"><Statements><Action"
+        " Name=\"SetTempVar\"><Argument Name=\"Name\">CurrentFilter</Argument><Argument N"
+        "ame=\"Expression\">=\"Active\"</Argument></Action><Action Name=\"OpenForm\"><Argu"
+        "ment Name=\"FormName\">Order List</Argument></Action><Action Name=\"MessageBox\""
+        "><Argument Name=\"Message\">Filter applied: showing active orders only.</Argument"
+        "><Argument Name=\"Type\">Information</Argument><Argument Name=\"Title\">Filter A"
+        "pplied</Argument></Action></Statements></UserInterfaceMacro>"
+End
+"@
 
-# 6. Conditional logic with If/ElseIf/Else
-$macros["Macro_ConditionalLogic"] = @'
-<?xml version="1.0" encoding="UTF-16" standalone="no"?>
-<UserInterfaceMacros xmlns="http://schemas.microsoft.com/office/accessservices/2009/11/application">
-    <UserInterfaceMacro>
-        <Statements>
-            <ConditionalBlock>
-                <If>
-                    <Condition>[TempVars]![UserRole]="Admin"</Condition>
-                    <Statements>
-                        <Action Name="OpenForm">
-                            <Argument Name="FormName">Admin Panel</Argument>
-                            <Argument Name="View">Form</Argument>
-                        </Action>
-                    </Statements>
-                </If>
-                <ElseIf>
-                    <Condition>[TempVars]![UserRole]="Manager"</Condition>
-                    <Statements>
-                        <Action Name="OpenForm">
-                            <Argument Name="FormName">Manager Dashboard</Argument>
-                            <Argument Name="View">Form</Argument>
-                        </Action>
-                    </Statements>
-                </ElseIf>
-                <Else>
-                    <Statements>
-                        <Action Name="OpenForm">
-                            <Argument Name="FormName">Order List</Argument>
-                            <Argument Name="View">Form</Argument>
-                        </Action>
-                    </Statements>
-                </Else>
-            </ConditionalBlock>
-        </Statements>
-    </UserInterfaceMacro>
-</UserInterfaceMacros>
-'@
+# 6. Conditional logic (If/ElseIf/Else)
+$macros["Macro_ConditionalLogic"] = @"
+$header
+Begin
+    Condition ="[TempVars]![UserRole]=""Admin"""
+    Action ="OpenForm"
+    Argument ="Order List"
+    Argument ="0"
+    Argument =""
+    Argument =""
+    Argument ="-1"
+    Argument ="0"
+End
+Begin
+    Condition ="[TempVars]![UserRole]=""Manager"""
+    Action ="MsgBox"
+    Argument ="Welcome, Manager!"
+    Argument ="-1"
+    Argument ="1"
+    Argument ="Northwind"
+End
+Begin
+    Condition ="..."
+    Action ="MsgBox"
+    Argument ="Welcome, User!"
+    Argument ="-1"
+    Argument ="1"
+    Argument ="Northwind"
+End
+Begin
+    Comment ="_AXL:<?xml version=\"1.0\" encoding=\"UTF-16\" standalone=\"no\"?>\015\012<UserI"
+        "nterfaceMacro MinimumClientDesignVersion=\"14.0.0000.0000\" xmlns=\"http://schem"
+        "as.microsoft.com/office/accessservices/2009/11/application\"><Statements><Condit"
+        "ionalBlock><If><Condition>[TempVars]![UserRole]=\"Admin\"</Condition><Statements>"
+        "<Action Name=\"OpenForm\"><Argument Name=\"FormName\">Order List</Argument></Act"
+        "ion></Statements></If><ElseIf><Condition>[TempVars]![UserRole]=\"Manager\"</Cond"
+        "ition><Statements><Action Name=\"MessageBox\"><Argument Name=\"Message\">Welcome"
+        ", Manager!</Argument><Argument Name=\"Type\">Information</Argument><Argument Nam"
+        "e=\"Title\">Northwind</Argument></Action></Statements></ElseIf><Else><Statements"
+        "><Action Name=\"MessageBox\"><Argument Name=\"Message\">Welcome, User!</Argument>"
+        "<Argument Name=\"Type\">Information</Argument><Argument Name=\"Title\">Northwind"
+        "</Argument></Action></Statements></Else></ConditionalBlock></Statements></UserIn"
+        "terfaceMacro>"
+End
+"@
 
-# 7. Named submacros
-$macros["Macro_Submacros"] = @'
-<?xml version="1.0" encoding="UTF-16" standalone="no"?>
-<UserInterfaceMacros xmlns="http://schemas.microsoft.com/office/accessservices/2009/11/application">
-    <UserInterfaceMacro>
-        <Statements>
-            <SubMacro Name="OpenCustomers">
-                <Statements>
-                    <Action Name="OpenForm">
-                        <Argument Name="FormName">Customer List</Argument>
-                        <Argument Name="View">Form</Argument>
-                    </Action>
-                </Statements>
-            </SubMacro>
-            <SubMacro Name="OpenOrders">
-                <Statements>
-                    <Action Name="OpenForm">
-                        <Argument Name="FormName">Order List</Argument>
-                        <Argument Name="View">Form</Argument>
-                    </Action>
-                </Statements>
-            </SubMacro>
-            <SubMacro Name="OpenProducts">
-                <Statements>
-                    <Action Name="OpenForm">
-                        <Argument Name="FormName">Product List</Argument>
-                        <Argument Name="View">Form</Argument>
-                    </Action>
-                </Statements>
-            </SubMacro>
-        </Statements>
-    </UserInterfaceMacro>
-</UserInterfaceMacros>
-'@
+# 7. Submacros (named sections)
+$macros["Macro_Submacros"] = @"
+$header
+Begin
+    Action ="MsgBox"
+    Argument ="Main macro body"
+    Argument ="-1"
+    Argument ="1"
+    Argument ="Info"
+End
+Begin
+    Comment ="_AXL:<?xml version=\"1.0\" encoding=\"UTF-16\" standalone=\"no\"?>\015\012<UserI"
+        "nterfaceMacro MinimumClientDesignVersion=\"14.0.0000.0000\" xmlns=\"http://schem"
+        "as.microsoft.com/office/accessservices/2009/11/application\"><Statements><Action"
+        " Name=\"MessageBox\"><Argument Name=\"Message\">Main macro body</Argument><Argum"
+        "ent Name=\"Type\">Information</Argument><Argument Name=\"Title\">Info</Argument>"
+        "</Action><SubMacro Name=\"OpenCustomers\"><Statements><Action Name=\"OpenForm\">"
+        "<Argument Name=\"FormName\">Customer List</Argument></Action></Statements></SubM"
+        "acro><SubMacro Name=\"OpenOrders\"><Statements><Action Name=\"OpenForm\"><Argumen"
+        "t Name=\"FormName\">Order List</Argument></Action></Statements></SubMacro></Stat"
+        "ements></UserInterfaceMacro>"
+End
+"@
 
-# 8. Error handling pattern
-$macros["Macro_ErrorHandling"] = @'
-<?xml version="1.0" encoding="UTF-16" standalone="no"?>
-<UserInterfaceMacros xmlns="http://schemas.microsoft.com/office/accessservices/2009/11/application">
-    <UserInterfaceMacro>
-        <Statements>
-            <Action Name="OnError">
-                <Argument Name="Goto">Macro Name</Argument>
-                <Argument Name="MacroName">ErrorHandler</Argument>
-            </Action>
-            <Action Name="OpenForm">
-                <Argument Name="FormName">Order List</Argument>
-                <Argument Name="View">Form</Argument>
-            </Action>
-            <Action Name="SetTempVar">
-                <Argument Name="Name">LastAction</Argument>
-                <Argument Name="Expression">="OpenedOrders"</Argument>
-            </Action>
-            <SubMacro Name="ErrorHandler">
-                <Statements>
-                    <Action Name="MessageBox">
-                        <Argument Name="Message">=[MacroError].[Description]</Argument>
-                        <Argument Name="Type">Critical</Argument>
-                        <Argument Name="Title">Error</Argument>
-                    </Action>
-                </Statements>
-            </SubMacro>
-        </Statements>
-    </UserInterfaceMacro>
-</UserInterfaceMacros>
-'@
+# 8. Error handling (OnError + handler submacro)
+$macros["Macro_ErrorHandling"] = @"
+$header
+Begin
+    Action ="OnError"
+    Argument ="1"
+    Argument ="ErrorHandler"
+End
+Begin
+    Action ="OpenForm"
+    Argument ="Order List"
+    Argument ="0"
+    Argument =""
+    Argument =""
+    Argument ="-1"
+    Argument ="0"
+End
+Begin
+    Comment ="_AXL:<?xml version=\"1.0\" encoding=\"UTF-16\" standalone=\"no\"?>\015\012<UserI"
+        "nterfaceMacro MinimumClientDesignVersion=\"14.0.0000.0000\" xmlns=\"http://schem"
+        "as.microsoft.com/office/accessservices/2009/11/application\"><Statements><Action"
+        " Name=\"OnError\"><Argument Name=\"Goto\">Macro Name</Argument><Argument Name=\""
+        "MacroName\">ErrorHandler</Argument></Action><Action Name=\"OpenForm\"><Argument "
+        "Name=\"FormName\">Order List</Argument></Action><SubMacro Name=\"ErrorHandler\">"
+        "<Statements><Action Name=\"MessageBox\"><Argument Name=\"Message\">=[MacroError]"
+        ".[Description]</Argument><Argument Name=\"Type\">Critical</Argument><Argument Na"
+        "me=\"Title\">Error</Argument></Action></Statements></SubMacro></Statements></Use"
+        "rInterfaceMacro>"
+End
+"@
 
 # 9. RunSQL actions
-$macros["Macro_RunSQL"] = @'
-<?xml version="1.0" encoding="UTF-16" standalone="no"?>
-<UserInterfaceMacros xmlns="http://schemas.microsoft.com/office/accessservices/2009/11/application">
-    <UserInterfaceMacro>
-        <Statements>
-            <Action Name="SetWarnings">
-                <Argument Name="WarningsOn">No</Argument>
-            </Action>
-            <Action Name="RunSQL">
-                <Argument Name="SQLStatement">UPDATE Orders SET [Status Field]='Archived' WHERE [Ship Date] &lt; DateAdd('m',-6,Date())</Argument>
-            </Action>
-            <Action Name="RunSQL">
-                <Argument Name="SQLStatement">INSERT INTO AuditLog (Action, ActionDate, UserName) VALUES ('Archive', Date(), CurrentUser())</Argument>
-            </Action>
-            <Action Name="SetWarnings">
-                <Argument Name="WarningsOn">Yes</Argument>
-            </Action>
-            <Action Name="MessageBox">
-                <Argument Name="Message">Old orders have been archived.</Argument>
-                <Argument Name="Type">Information</Argument>
-                <Argument Name="Title">Archive Complete</Argument>
-            </Action>
-        </Statements>
-    </UserInterfaceMacro>
-</UserInterfaceMacros>
-'@
+$macros["Macro_RunSQL"] = @"
+$header
+Begin
+    Action ="SetWarnings"
+    Argument ="0"
+End
+Begin
+    Action ="RunSQL"
+    Argument ="UPDATE Orders SET [Status Field]='Archived' WHERE [Ship Date] < DateAdd('m',-6,Date())"
+End
+Begin
+    Action ="SetWarnings"
+    Argument ="-1"
+End
+Begin
+    Action ="MsgBox"
+    Argument ="Old orders have been archived."
+    Argument ="-1"
+    Argument ="1"
+    Argument ="Archive Complete"
+End
+Begin
+    Comment ="_AXL:<?xml version=\"1.0\" encoding=\"UTF-16\" standalone=\"no\"?>\015\012<UserI"
+        "nterfaceMacro MinimumClientDesignVersion=\"14.0.0000.0000\" xmlns=\"http://schem"
+        "as.microsoft.com/office/accessservices/2009/11/application\"><Statements><Action"
+        " Name=\"SetWarnings\"><Argument Name=\"WarningsOn\">No</Argument></Action><Actio"
+        "n Name=\"RunSQL\"><Argument Name=\"SQLStatement\">UPDATE Orders SET [Status Field"
+        "]=&apos;Archived&apos; WHERE [Ship Date] &lt; DateAdd(&apos;m&apos;,-6,Date())</"
+        "Argument></Action><Action Name=\"SetWarnings\"><Argument Name=\"WarningsOn\">Yes"
+        "</Argument></Action><Action Name=\"MessageBox\"><Argument Name=\"Message\">Old or"
+        "ders have been archived.</Argument><Argument Name=\"Type\">Information</Argument>"
+        "<Argument Name=\"Title\">Archive Complete</Argument></Action></Statements></User"
+        "InterfaceMacro>"
+End
+"@
 
-# 10. SetProperty actions
-$macros["Macro_SetProperties"] = @'
-<?xml version="1.0" encoding="UTF-16" standalone="no"?>
-<UserInterfaceMacros xmlns="http://schemas.microsoft.com/office/accessservices/2009/11/application">
-    <UserInterfaceMacro>
-        <Statements>
-            <Action Name="SetProperty">
-                <Argument Name="ControlName">btnSubmit</Argument>
-                <Argument Name="Property">Enabled</Argument>
-                <Argument Name="Value">True</Argument>
-            </Action>
-            <Action Name="SetProperty">
-                <Argument Name="ControlName">txtNotes</Argument>
-                <Argument Name="Property">Visible</Argument>
-                <Argument Name="Value">True</Argument>
-            </Action>
-            <Action Name="SetProperty">
-                <Argument Name="ControlName">lblStatus</Argument>
-                <Argument Name="Property">Caption</Argument>
-                <Argument Name="Value">="Ready to submit"</Argument>
-            </Action>
-            <Action Name="SetProperty">
-                <Argument Name="ControlName">txtTotal</Argument>
-                <Argument Name="Property">BackColor</Argument>
-                <Argument Name="Value">=RGB(144,238,144)</Argument>
-            </Action>
-        </Statements>
-    </UserInterfaceMacro>
-</UserInterfaceMacros>
-'@
+# 10. SetProperty actions (using SetValue in legacy format)
+$macros["Macro_SetProperties"] = @"
+$header
+Begin
+    Action ="SetValue"
+    Argument ="[Forms]![Order List]![btnSubmit].[Enabled]"
+    Argument ="True"
+End
+Begin
+    Action ="SetValue"
+    Argument ="[Forms]![Order List]![txtNotes].[Visible]"
+    Argument ="True"
+End
+Begin
+    Comment ="_AXL:<?xml version=\"1.0\" encoding=\"UTF-16\" standalone=\"no\"?>\015\012<UserI"
+        "nterfaceMacro MinimumClientDesignVersion=\"14.0.0000.0000\" xmlns=\"http://schem"
+        "as.microsoft.com/office/accessservices/2009/11/application\"><Statements><Action"
+        " Name=\"SetProperty\"><Argument Name=\"ControlName\">btnSubmit</Argument><Argume"
+        "nt Name=\"Property\">Enabled</Argument><Argument Name=\"Value\">True</Argument>"
+        "</Action><Action Name=\"SetProperty\"><Argument Name=\"ControlName\">txtNotes</A"
+        "rgument><Argument Name=\"Property\">Visible</Argument><Argument Name=\"Value\">T"
+        "rue</Argument></Action></Statements></UserInterfaceMacro>"
+End
+"@
 
 $accessApp = $null
 try {
@@ -302,9 +334,9 @@ try {
             continue
         }
 
-        # Write XML to temp file and load via LoadFromText (acMacro = 4)
+        # Write text to temp file with UTF-16 LE encoding and load
         $tempFile = [System.IO.Path]::GetTempFileName()
-        $macros[$macroName] | Out-File -FilePath $tempFile -Encoding Unicode
+        [System.IO.File]::WriteAllText($tempFile, $macros[$macroName], [System.Text.Encoding]::Unicode)
         try {
             $accessApp.LoadFromText(4, $macroName, $tempFile)
             Write-Host "Created $macroName"

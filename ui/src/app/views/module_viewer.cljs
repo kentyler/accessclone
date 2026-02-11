@@ -106,6 +106,28 @@
           :rows 2}]])]))
 
 ;; ============================================================
+;; IMPORT COMPLETENESS BANNER
+;; ============================================================
+
+(defn import-completeness-banner
+  "Show amber warning when import is incomplete"
+  []
+  (let [completeness (:import-completeness @state/app-state)]
+    (when (and (:has_discovery completeness) (not (:complete completeness)))
+      (let [missing (:missing completeness)]
+        [:div.import-completeness-warning
+         [:div.warning-header
+          [:strong "Import Incomplete"]
+          [:span.warning-counts
+           (str (:imported_count completeness) " of " (:total_source_count completeness) " objects imported")]]
+         [:div.warning-detail
+          "Translation is blocked until all objects are imported. Missing:"
+          [:ul.missing-list
+           (for [[type-key names] missing]
+             ^{:key (name type-key)}
+             [:li [:strong (name type-key)] (str ": " (clojure.string/join ", " names))])]]]))))
+
+;; ============================================================
 ;; TOOLBAR
 ;; ============================================================
 
@@ -146,6 +168,7 @@
          [:div.loading-spinner "Loading module..."]
          [:<>
           [info-panel]
+          [import-completeness-banner]
           [:div.module-split-view
            [vba-panel]
            [cljs-panel]]])])))

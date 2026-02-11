@@ -11,7 +11,7 @@
 (declare load-tables! load-queries! load-functions! load-sql-functions! load-macros! load-access-databases!
          save-ui-state! load-forms! load-reports! filename->display-name
          save-chat-transcript! add-chat-message! set-chat-input! send-chat-message!
-         maybe-auto-analyze!)
+         maybe-auto-analyze! load-import-completeness!)
 
 ;; Application state atom
 (defonce app-state
@@ -534,6 +534,7 @@
          {:module-id (:id module)
           :module-info module
           :loading? true})
+  (load-import-completeness!)
   (go
     (let [response (<! (http/get (str api-base "/api/modules/" (js/encodeURIComponent (:name module)))
                                  {:headers (db-headers)}))]
@@ -561,7 +562,18 @@
      :queries (mapv :name (:queries objects))
      :forms   (mapv :name (:forms objects))
      :reports (mapv :name (:reports objects))
-     :modules (mapv :name (:modules objects))}))
+     :modules (mapv :name (:modules objects))
+     :macros  (mapv :name (:macros objects))}))
+
+(defn load-import-completeness!
+  "Load import completeness status for the current database."
+  []
+  (when-let [db-id (:database_id (:current-database @app-state))]
+    (go
+      (let [response (<! (http/get (str api-base "/api/access-import/import-completeness")
+                                   {:query-params {:database_id db-id}}))]
+        (when (:success response)
+          (swap! app-state assoc :import-completeness (:body response)))))))
 
 (defn translate-module!
   "Send VBA source to LLM for translation to ClojureScript.
@@ -578,7 +590,8 @@
         (let [response (<! (http/post (str api-base "/api/chat/translate")
                                       {:json-params {:vba_source vba-source
                                                      :module_name (:name module-info)
-                                                     :app_objects (get-app-objects)}
+                                                     :app_objects (get-app-objects)
+                                                     :database_id (:database_id (:current-database @app-state))}
                                        :headers (db-headers)}))]
           (swap! app-state assoc-in [:module-viewer :translating?] false)
           (if (:success response)
@@ -591,8 +604,18 @@
                 (add-chat-message! "assistant" (str "Here is the ClojureScript translation:\n\n" cljs-source))
                 (set-chat-input! "Please review this translation for issues.")
                 (send-chat-message!)))
-            (log-error! (str "Translation failed: " (get-in response [:body :error] "Unknown error"))
-                        "translate-module")))))))
+            ;; Handle blocked translation (incomplete import)
+            (let [missing (get-in response [:body :missing])
+                  error-msg (get-in response [:body :error] "Unknown error")]
+              (if missing
+                (let [parts (keep (fn [[type-key names]]
+                                    (when (seq names)
+                                      (str (name type-key) ": " (str/join ", " names))))
+                                  missing)]
+                  (set-error! (str "Translation blocked — import these objects first: "
+                                   (str/join "; " parts))))
+                (log-error! (str "Translation failed: " error-msg)
+                            "translate-module")))))))))
 
 (defn save-module-cljs!
   "Save the ClojureScript translation to the database"
@@ -639,6 +662,7 @@
          {:macro-id (:id macro)
           :macro-info macro
           :loading? true})
+  (load-import-completeness!)
   (go
     (let [response (<! (http/get (str api-base "/api/macros/" (js/encodeURIComponent (:name macro)))
                                  {:headers (db-headers)}))]
@@ -1080,7 +1104,8 @@
                                        (:name macro-info))
                               {:macro_name (:name macro-info)
                                :macro_xml (:macro-xml macro-info)
-                               :cljs_source (:cljs-source macro-info)})
+                               :cljs_source (:cljs-source macro-info)
+                               :app_objects (get-app-objects)})
               ;; Send full conversation history for context
               history (vec (:chat-messages @app-state))
               response (<! (http/post (str api-base "/api/chat")

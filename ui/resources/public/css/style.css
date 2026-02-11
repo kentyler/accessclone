@@ -3523,3 +3523,40 @@ body {
   font-style: italic;
   font-size: 0.8em;
 }
+
+/* Import completeness warning banner */
+.import-completeness-warning {
+  background: #fffbeb;
+  border: 1px solid #fed7aa;
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin: 0 0 8px 0;
+  font-size: 0.85rem;
+}
+
+.import-completeness-warning .warning-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+  color: #92400e;
+}
+
+.import-completeness-warning .warning-counts {
+  font-size: 0.8rem;
+  color: #b45309;
+}
+
+.import-completeness-warning .warning-detail {
+  color: #78350f;
+  font-size: 0.8rem;
+}
+
+.import-completeness-warning .missing-list {
+  margin: 4px 0 0 16px;
+  padding: 0;
+}
+
+.import-completeness-warning .missing-list li {
+  margin: 2px 0;
+}

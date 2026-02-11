@@ -69,12 +69,22 @@ This is AccessClone, a platform for converting MS Access databases to web applic
 - Shows function signature (arguments, return type)
 - All editing done via AI chat
 
+### Macro Viewer (ui/src/app/views/macro_viewer.cljs)
+- Left panel: Raw macro definition (SaveAsText format, read-only)
+- Right panel: ClojureScript translation (initially empty, populated via chat)
+- Info panel: Name, version, imported date, status dropdown
+- Auto-analyze fires on first open, LLM describes structure/purpose
+- Macros stored in `shared.macros` table with append-only versioning
+
+### Access Import — AutoExec Warning
+**IMPORTANT**: Before opening any Access database via COM automation (import scripts, export scripts, diagnose script), check if it has an AutoExec macro. If so, the user must rename it to "xAutoExec" first — otherwise it will fire on open, potentially showing a login dialog or running startup code that hangs the PowerShell process indefinitely.
+
 ### State Management
 State is split across three modules that share a single Reagent atom (`app-state`):
 
 **Core state** (`ui/src/app/state.cljs`):
 - Shared helpers, loading/error, database selection, tabs, UI persistence, chat, config
-- `load-databases!` / `switch-database!` reload all 5 object types: tables, queries, functions, forms, reports
+- `load-databases!` / `switch-database!` reload all 7 object types: tables, queries, functions, forms, reports, modules, macros
 - Records use keyword keys internally, converted to strings for API
 
 **Form state** (`ui/src/app/state_form.cljs`):
@@ -153,6 +163,7 @@ See `/skills/` directory for conversion and design guidance:
 - `conversion-queries.md` - Query/view export from Access
 - `conversion-forms.md` - Form export from Access (critical transformations documented)
 - `conversion-vba.md` - VBA to PostgreSQL function conversion
+- `conversion-macros.md` - Macro import, format details, and translation strategy
 - `database-patterns.md` - PostgreSQL function patterns
 - `install.md` - Installation and setup guide
 

@@ -80,7 +80,8 @@
     :else (str (.toFixed (/ bytes (* 1024 1024)) 1) " MB")))
 
 (defn access-database-list
-  "Browse input + list of Access database files found by scanning"
+  "Browse input + list of Access database files found by scanning.
+   Multi-select: clicking toggles a database in/out of selected-paths."
   []
   (let [browse-path (r/atom "")
         submit-browse! (fn []
@@ -90,7 +91,8 @@
     (fn []
       (let [databases (sort-by #(clojure.string/lower-case (or (:name %) ""))
                                (get-in @state/app-state [:objects :access_databases] []))
-            selected-path (:loaded-path @access-db-viewer/viewer-state)]
+            {:keys [selected-paths active-path]} @access-db-viewer/viewer-state
+            selected-set (set selected-paths)]
         [:div
          [:div.browse-row
           [:input.browse-input
@@ -112,12 +114,18 @@
           (if (empty? databases)
             [:li.empty-list "Paste a path above to find databases."]
             (for [db databases]
-              ^{:key (:path db)}
-              [:li.object-item
-               {:class (when (= (:path db) selected-path) "active")
-                :on-click #(access-db-viewer/load-access-database-contents! (:path db))}
-               [:span.object-name (:name db)]
-               [:span.access-db-detail (format-file-size (:size db))]]))]]))))
+              (let [path (:path db)
+                    selected? (contains? selected-set path)
+                    active? (= path active-path)]
+                ^{:key path}
+                [:li.object-item
+                 {:class (str (when selected? "selected ")
+                              (when active? "active"))
+                  :on-click #(access-db-viewer/toggle-database-selection! path)}
+                 [:span.sidebar-checkbox {:class (when selected? "checked")}
+                  (when selected? "\u2713")]
+                 [:span.object-name (:name db)]
+                 [:span.access-db-detail (format-file-size (:size db))]])))]]))))
 
 (defn collapse-toggle
   "Button to collapse/expand the sidebar"

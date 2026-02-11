@@ -8,7 +8,7 @@
 (def api-base (str (.-protocol js/location) "//" (.-host js/location)))
 
 ;; Forward declarations for functions used before definition
-(declare load-tables! load-queries! load-functions! load-sql-functions! load-access-databases!
+(declare load-tables! load-queries! load-functions! load-sql-functions! load-macros! load-access-databases!
          save-ui-state! load-forms! load-reports! filename->display-name
          save-chat-transcript! add-chat-message! set-chat-input! send-chat-message!
          maybe-auto-analyze!)
@@ -194,7 +194,7 @@
 (defonce pending-ui-state (atom nil))
 
 (defn start-loading-objects! []
-  (reset! pending-loads 6)  ; 6 types: tables, queries, sql-functions, modules, forms, reports
+  (reset! pending-loads 7)  ; 7 types: tables, queries, sql-functions, modules, macros, forms, reports
   (set-loading-objects! true))
 
 (defn object-load-complete! []
@@ -226,6 +226,7 @@
           (load-queries!)
           (load-functions!)
           (load-sql-functions!)
+          (load-macros!)
           (load-forms!)
           (load-reports!))
         (log-error! "Failed to load databases" "load-databases" {:response (:body response)})))))
@@ -255,6 +256,7 @@
           (load-queries!)
           (load-functions!)
           (load-sql-functions!)
+          (load-macros!)
           (load-forms!)
           (load-reports!))
         (log-error! "Failed to switch database" "switch-database" {:response (:body response)})))))
@@ -348,7 +350,7 @@
             (do
               (swap! app-state assoc :chat-messages [])
               ;; Auto-analyze all object types with no transcript
-              (when (#{:reports :forms :sql-functions :tables :queries :modules} (:type tab))
+              (when (#{:reports :forms :sql-functions :tables :queries :modules :macros} (:type tab))
                 (swap! app-state assoc :auto-analyze-pending true)
                 (maybe-auto-analyze!)))))))))
 
@@ -627,6 +629,62 @@
   (swap! app-state assoc-in [:module-viewer :cljs-dirty?] true))
 
 ;; ============================================================
+;; MACRO VIEWER
+;; ============================================================
+
+(defn load-macro-for-viewing!
+  "Load an Access macro for viewing - fetches full XML from API"
+  [macro]
+  (swap! app-state assoc :macro-viewer
+         {:macro-id (:id macro)
+          :macro-info macro
+          :loading? true})
+  (go
+    (let [response (<! (http/get (str api-base "/api/macros/" (js/encodeURIComponent (:name macro)))
+                                 {:headers (db-headers)}))]
+      (if (:success response)
+        (let [data (:body response)]
+          (swap! app-state assoc :macro-viewer
+                 {:macro-id (:id macro)
+                  :macro-info (merge macro
+                                     {:macro-xml (:macro_xml data)
+                                      :cljs-source (:cljs_source data)
+                                      :description (:description data)
+                                      :status (or (:status data) "pending")
+                                      :review-notes (:review_notes data)
+                                      :version (:version data)
+                                      :created-at (:created_at data)})
+                  :loading? false})
+          (maybe-auto-analyze!))
+        (swap! app-state assoc-in [:macro-viewer :loading?] false)))))
+
+(defn save-macro-cljs!
+  "Save the ClojureScript translation for a macro"
+  []
+  (let [macro-info (get-in @app-state [:macro-viewer :macro-info])
+        cljs-source (:cljs-source macro-info)]
+    (when (and (:name macro-info) cljs-source)
+      (go
+        (let [response (<! (http/put (str api-base "/api/macros/" (js/encodeURIComponent (:name macro-info)))
+                                     {:json-params {:macro_xml (:macro-xml macro-info)
+                                                    :cljs_source cljs-source
+                                                    :status (:status macro-info)
+                                                    :review_notes (:review-notes macro-info)}
+                                      :headers (db-headers)}))]
+          (if (:success response)
+            (do
+              (swap! app-state assoc-in [:macro-viewer :cljs-dirty?] false)
+              (swap! app-state assoc-in [:macro-viewer :macro-info :version]
+                     (get-in response [:body :version])))
+            (log-error! "Failed to save macro translation" "save-macro-cljs")))))))
+
+(defn set-macro-status!
+  "Set the translation status for the current macro"
+  [status]
+  (swap! app-state assoc-in [:macro-viewer :macro-info :status] status)
+  (swap! app-state assoc-in [:macro-viewer :cljs-dirty?] true))
+
+;; ============================================================
 ;; UI STATE PERSISTENCE
 ;; ============================================================
 
@@ -855,6 +913,31 @@
           (log-event! "warning" "Could not load SQL functions from API" "load-sql-functions")
           (object-load-complete!))))))
 
+;; Load macros from shared.macros via backend API
+(defn load-macros!
+  "Load Access macros from shared.macros via backend API"
+  []
+  (go
+    (let [response (<! (http/get (str api-base "/api/macros")
+                                 {:headers (db-headers)}))]
+      (if (:success response)
+        (let [macro-names (get-in response [:body :macros] [])
+              details (get-in response [:body :details] [])
+              macros-with-ids (vec (map-indexed
+                                     (fn [idx macro-name]
+                                       (let [detail (nth details idx nil)]
+                                         {:id (inc idx)
+                                          :name macro-name
+                                          :has-macro-xml (:has_macro_xml detail)
+                                          :has-cljs-source (:has_cljs_source detail)
+                                          :description (:description detail)}))
+                                     macro-names))]
+          (swap! app-state assoc-in [:objects :macros] macros-with-ids)
+          (object-load-complete!))
+        (do
+          (log-event! "warning" "Could not load macros from API" "load-macros")
+          (object-load-complete!))))))
+
 ;; Create a new database (schema + shared.databases row)
 (defn create-database!
   "Create a new database via POST /api/databases, add to available-databases on success.
@@ -991,6 +1074,13 @@
                                     :arguments (:arguments func)
                                     :return_type (:return-type func)
                                     :source (:source func)})))
+              ;; Macro context when viewing a macro
+              macro-info (get-in @app-state [:macro-viewer :macro-info])
+              macro-context (when (and (= (:type active-tab) :macros)
+                                       (:name macro-info))
+                              {:macro_name (:name macro-info)
+                               :macro_xml (:macro-xml macro-info)
+                               :cljs_source (:cljs-source macro-info)})
               ;; Send full conversation history for context
               history (vec (:chat-messages @app-state))
               response (<! (http/post (str api-base "/api/chat")
@@ -1000,6 +1090,7 @@
                                                      :form_context form-context
                                                      :report_context report-context
                                                      :module_context module-context
+                                                     :macro_context macro-context
                                                      :sql_function_context sql-fn-context
                                                      :table_context table-context
                                                      :query_context query-context}
@@ -1042,6 +1133,8 @@
                      :queries (some? (get-in @app-state [:query-viewer :query-info]))
                      :modules (and (some? (get-in @app-state [:module-viewer :module-info]))
                                    (not (get-in @app-state [:module-viewer :loading?])))
+                     :macros  (and (some? (get-in @app-state [:macro-viewer :macro-info]))
+                                   (not (get-in @app-state [:macro-viewer :loading?])))
                      false)]
       (when has-def?
         (swap! app-state dissoc :auto-analyze-pending)
@@ -1077,6 +1170,11 @@
                                        "Note any potential issues or complexities for translation to ClojureScript.\n\n"
                                        "Module: " (:name mi) "\n"
                                        (when (:vba-source mi) (str "VBA Source:\n" (:vba-source mi)))))
+                       :macros (let [mi (get-in @app-state [:macro-viewer :macro-info])]
+                                 (str "Briefly describe this Access macro's actions and purpose. "
+                                      "Note any potential issues or complexities for conversion to web application event handlers.\n\n"
+                                      "Macro: " (:name mi) "\n"
+                                      (when (:macro-xml mi) (str "XML Definition:\n" (:macro-xml mi)))))
                        nil)]
           (when prompt
             (set-chat-input! prompt)

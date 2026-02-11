@@ -13,7 +13,8 @@
    {:id :sql-functions  :label "SQL Functions"}
    {:id :forms          :label "Forms"}
    {:id :reports        :label "Reports"}
-   {:id :modules        :label "Modules"}])
+   {:id :modules        :label "Modules"}
+   {:id :macros         :label "Macros"}])
 
 (defn object-type-selector
   "Dropdown to select which type of objects to display"

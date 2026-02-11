@@ -6,6 +6,10 @@ This skill guides the complete conversion of an MS Access database to a PostgreS
 
 Converting an Access database involves multiple phases, each handled by a specialized helper skill. This orchestrator tracks progress and coordinates the workflow.
 
+## AutoExec Warning
+
+**Before opening any Access database via COM automation**, check if it has an AutoExec macro. If it does, rename it to "xAutoExec" first — otherwise the macro will fire on open, potentially showing a login dialog or running startup code that hangs the PowerShell process. Rename it back after conversion is complete.
+
 ## Conversion Phases
 
 | Phase | Skill / Tool | Description |
@@ -16,7 +20,8 @@ Converting an Access database involves multiple phases, each handled by a specia
 | 3. Queries | `conversion-queries.md` | Convert queries to views/functions |
 | 4. Forms | `conversion-forms.md` | Import forms via UI (stored as JSON in PostgreSQL) |
 | 5. VBA | `conversion-vba.md` | Translate VBA to PostgreSQL functions |
-| 6. Wiring | Manual | Connect forms to functions, test |
+| 6. Macros | `conversion-macros.md` | Import macros for viewing, analysis, and translation |
+| 7. Wiring | Manual | Connect forms to functions, test |
 
 ## Starting a Conversion
 
@@ -173,6 +178,20 @@ Outputs:
 - PostgreSQL functions following session-state pattern
 - Event handlers mapped to function calls
 
+### Phase 6: Macros
+
+Delegate to `conversion-macros.md`
+
+Inputs needed:
+- Source database path
+- Target database configured in AccessClone
+- AutoExec renamed to xAutoExec (if present)
+
+Outputs:
+- Macros stored in `shared.macros` with raw XML definitions
+- LLM auto-analysis of each macro's structure and purpose
+- Optional ClojureScript translations (via chat panel)
+
 ## Error Handling
 
 When a phase fails:
@@ -196,6 +215,7 @@ Before marking conversion complete:
 - [ ] All queries converted (or marked for manual review)
 - [ ] All forms exported
 - [ ] All VBA translated (or marked for manual review)
+- [ ] All macros imported and analyzed
 - [ ] Server starts without errors
 - [ ] Can connect to database from UI
 - [ ] At least one form renders correctly
@@ -210,3 +230,4 @@ Before marking conversion complete:
 - `conversion-queries.md` - Phase 3 details
 - `conversion-forms.md` - Phase 4 details
 - `conversion-vba.md` - Phase 5 details
+- `conversion-macros.md` - Phase 6 details

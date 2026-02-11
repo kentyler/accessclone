@@ -2951,6 +2951,117 @@ body {
   margin-left: auto;
 }
 
+/* Sidebar multi-select checkbox */
+.sidebar-checkbox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--gray-300);
+  border-radius: 2px;
+  font-size: 0.625rem;
+  flex-shrink: 0;
+  background: white;
+  color: transparent;
+}
+
+.sidebar-checkbox.checked {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+}
+
+.object-item.selected {
+  background: #eff6ff;
+}
+
+.object-item.selected.active {
+  background: var(--primary);
+  color: white;
+}
+
+.object-item.selected.active .sidebar-checkbox.checked {
+  background: white;
+  border-color: white;
+  color: var(--primary);
+}
+
+.object-item.selected.active .access-db-detail {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Source Databases List (header component) */
+.source-db-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.source-db-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--gray-500);
+  margin-bottom: 2px;
+}
+
+.source-db-item {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  border: 1px solid transparent;
+}
+
+.source-db-item:hover {
+  background: var(--gray-50);
+}
+
+.source-db-item.active {
+  font-weight: 600;
+  border-color: var(--primary);
+  background: #eff6ff;
+}
+
+.source-db-indicator {
+  font-size: 0.75rem;
+  color: var(--primary);
+  width: 12px;
+  flex-shrink: 0;
+}
+
+.source-db-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.source-db-size {
+  font-size: 0.75rem;
+  color: var(--gray-500);
+  white-space: nowrap;
+}
+
+.source-db-remove {
+  background: none;
+  border: none;
+  color: var(--gray-500);
+  cursor: pointer;
+  font-size: 0.875rem;
+  padding: 0 0.25rem;
+  margin-left: auto;
+  line-height: 1;
+  border-radius: 2px;
+}
+
+.source-db-remove:hover {
+  color: var(--error);
+  background: #fee2e2;
+}
+
 /* Access Database Viewer */
 .access-database-viewer {
   display: flex;
@@ -2971,8 +3082,14 @@ body {
 
 .viewer-header-top {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
 }
 
 .viewer-header h2 {
@@ -3032,6 +3149,174 @@ body {
   border: 1px solid var(--gray-200);
   border-radius: 4px;
   font-size: 0.875rem;
+}
+
+/* Import Phase Tracker */
+.import-phase-tracker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0;
+}
+
+.phase-step {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.625rem;
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  background: white;
+  transition: all 0.15s;
+}
+
+.phase-step:hover {
+  border-color: var(--primary);
+  background: #f8faff;
+}
+
+.phase-step.active {
+  border-color: var(--primary);
+  background: #eff6ff;
+  font-weight: 500;
+}
+
+.phase-step.complete {
+  border-color: var(--success);
+  background: #f0fdf4;
+}
+
+.phase-step.complete .phase-indicator {
+  color: var(--success);
+}
+
+.phase-step.blocked {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.phase-indicator {
+  font-size: 0.75rem;
+  width: 1rem;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.phase-info {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.phase-label {
+  white-space: nowrap;
+}
+
+.phase-count {
+  font-size: 0.6875rem;
+  color: var(--gray-500);
+  background: var(--gray-100);
+  padding: 0 0.375rem;
+  border-radius: 3px;
+}
+
+.phase-step.complete .phase-count {
+  color: var(--success);
+  background: #dcfce7;
+}
+
+.phase-sub-types {
+  display: flex;
+  gap: 0.25rem;
+  margin-left: 0.5rem;
+  padding-left: 0.5rem;
+  border-left: 1px solid var(--gray-200);
+}
+
+.phase-sub-types button {
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--gray-200);
+  border-radius: 4px;
+  background: white;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.phase-sub-types button.active {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+
+.phase-sub-types button:hover:not(.active) {
+  border-color: var(--primary);
+}
+
+/* Dependency Warning */
+.dependency-warning {
+  background: #fffbeb;
+  border: 1px solid #fbbf24;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.8125rem;
+  color: #92400e;
+}
+
+/* Next Step Suggestion */
+.next-step-suggestion {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  margin-top: 0.75rem;
+  font-size: 0.8125rem;
+  color: #166534;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.next-step-suggestion:hover {
+  background: #dcfce7;
+}
+
+/* Import All Progress */
+.import-all-progress {
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.8125rem;
+  color: #1e40af;
+}
+
+.import-all-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.import-all-failed {
+  color: #dc2626;
+}
+
+.import-all-running {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.import-all-current {
+  font-weight: 500;
+}
+
+.import-all-btn {
+  margin-right: 0.5rem;
 }
 
 /* Access Toolbar */

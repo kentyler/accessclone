@@ -607,9 +607,13 @@
       (if (and (:success response) (get-in response [:body :formData]))
         ;; Step 2: Convert JSON to AccessClone form definition
         (let [form-data (get-in response [:body :formData])
+              import-log-id (get-in response [:body :import_log_id])
               form-def (convert-access-form form-data)
-              ;; Step 3: Save to target database via forms API
-              save-response (<! (http/put (str api-base "/api/forms/" form-name)
+              ;; Step 3: Save to target database via forms API (with import source marker)
+              save-url (str api-base "/api/forms/" form-name
+                            "?source=import"
+                            (when import-log-id (str "&import_log_id=" import-log-id)))
+              save-response (<! (http/put save-url
                                          {:json-params form-def
                                           :headers {"X-Database-ID" target-database-id}}))]
           (if (:success save-response)
@@ -633,9 +637,13 @@
       (if (and (:success response) (get-in response [:body :reportData]))
         ;; Step 2: Convert JSON to AccessClone report definition
         (let [report-data (get-in response [:body :reportData])
+              import-log-id (get-in response [:body :import_log_id])
               report-def (convert-access-report report-data)
-              ;; Step 3: Save to target database via reports API
-              save-response (<! (http/put (str api-base "/api/reports/" report-name)
+              ;; Step 3: Save to target database via reports API (with import source marker)
+              save-url (str api-base "/api/reports/" report-name
+                            "?source=import"
+                            (when import-log-id (str "&import_log_id=" import-log-id)))
+              save-response (<! (http/put save-url
                                          {:json-params report-def
                                           :headers {"X-Database-ID" target-database-id}}))]
           (if (:success save-response)

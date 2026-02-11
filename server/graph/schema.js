@@ -188,6 +188,28 @@ CREATE TABLE IF NOT EXISTS shared.source_discovery (
 );
 
 -- ============================================================
+-- Import Issues - persistent issue registry for imported objects
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.import_issues (
+    id SERIAL PRIMARY KEY,
+    import_log_id INTEGER REFERENCES shared.import_log(id) ON DELETE CASCADE,
+    database_id VARCHAR(100) NOT NULL,
+    object_name VARCHAR(255) NOT NULL,
+    object_type VARCHAR(50) NOT NULL,
+    severity VARCHAR(20) NOT NULL DEFAULT 'error',
+    category VARCHAR(50),
+    location TEXT,
+    message TEXT NOT NULL,
+    suggestion TEXT,
+    resolved BOOLEAN NOT NULL DEFAULT false,
+    resolved_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_import_issues_db ON shared.import_issues(database_id);
+CREATE INDEX IF NOT EXISTS idx_import_issues_unresolved ON shared.import_issues(database_id, resolved) WHERE resolved = false;
+CREATE INDEX IF NOT EXISTS idx_import_log_db ON shared.import_log(target_database_id);
+
+-- ============================================================
 -- Chat Transcripts - persistent chat history per object
 -- ============================================================
 CREATE TABLE IF NOT EXISTS shared.chat_transcripts (

@@ -281,18 +281,19 @@
   (r/atom {:loading? false
            :error nil
            :loaded-path nil    ;; Track which db path is currently loaded
-           :object-type :tables ;; :tables, :queries, :forms, :reports, :modules
+           :object-type :tables ;; :tables, :queries, :forms, :reports, :modules, :macros
            :forms []
            :reports []
            :tables []
            :queries []
            :modules []
+           :macros []
            :selected #{}        ;; Set of selected item names for import
            :target-database-id nil ;; Target database to import into
            :target-existing {}   ;; {:forms #{"Form1"} :tables #{"tbl1"} ...}
            :import-log []       ;; Recent import history
            :importing? false    ;; True while import is in progress
-           :access-db-cache {}  ;; {path {:forms [] :reports [] :tables [] :queries [] :modules []}}
+           :access-db-cache {}  ;; {path {:forms [] :reports [] :tables [] :queries [] :modules [] :macros []}}
            }))
 
 (defn save-import-state!
@@ -356,6 +357,7 @@
           (swap! viewer-state assoc-in [:target-existing :queries]
                  (set (concat view-names func-names)))))
       (fetch-existing-names! headers "/api/modules" :modules :modules identity)
+      (fetch-existing-names! headers "/api/macros" :macros :macros identity)
       (fetch-existing-names! headers "/api/reports" :reports :reports identity))))
 
 (defn load-import-history!
@@ -394,6 +396,7 @@
          :tables (:tables cached)
          :queries (:queries cached)
          :modules (:modules cached)
+         :macros (:macros cached)
          :selected #{}))
 
 (defn- fetch-and-cache-contents!
@@ -408,7 +411,8 @@
                         :reports (or (:reports body) [])
                         :tables (or (:tables body) [])
                         :queries (or (:queries body) [])
-                        :modules (or (:modules body) [])}]
+                        :modules (or (:modules body) [])
+                        :macros (or (:macros body) [])}]
           (swap! viewer-state assoc-in [:access-db-cache db-path] contents)
           (swap! viewer-state assoc
                  :loading? false
@@ -417,6 +421,7 @@
                  :tables (:tables contents)
                  :queries (:queries contents)
                  :modules (:modules contents)
+                 :macros (:macros contents)
                  :selected #{}))
         (swap! viewer-state assoc
                :loading? false
@@ -530,6 +535,30 @@
                               {:error (get-in response [:body :error])})
             false)))))
 
+(defn import-macro!
+  "Import a single macro: get XML definition from Access, save to target database"
+  [access-db-path macro-name target-database-id]
+  (go
+    ;; Step 1: Get XML definition from Access via PowerShell
+    (let [response (<! (http/post (str api-base "/api/access-import/export-macro")
+                                  {:json-params {:databasePath access-db-path
+                                                 :macroName macro-name
+                                                 :targetDatabaseId target-database-id}}))]
+      (if (and (:success response) (get-in response [:body :macroData]))
+        ;; Step 2: Save macro XML to target database via macros API
+        (let [macro-data (get-in response [:body :macroData])
+              save-response (<! (http/put (str api-base "/api/macros/" macro-name)
+                                         {:json-params {:macro_xml (:definition macro-data)}
+                                          :headers {"X-Database-ID" target-database-id}}))]
+          (if (:success save-response)
+            true
+            (do (state/log-event! "error" (str "Failed to save macro: " macro-name) "import-macro"
+                                  {:error (get-in save-response [:body :error])})
+                false)))
+        (do (state/log-event! "error" (str "Failed to export macro: " macro-name) "import-macro"
+                              {:error (get-in response [:body :error])})
+            false)))))
+
 (defn import-table!
   "Import a single table: server-side pipeline extracts structure + data from Access and creates PG table"
   [access-db-path table-name target-database-id]
@@ -570,6 +599,7 @@
           :forms   (<! (import-form! access-db-path item-name target-database-id))
           :reports (<! (import-report! access-db-path item-name target-database-id))
           :modules (<! (import-module! access-db-path item-name target-database-id))
+          :macros  (<! (import-macro! access-db-path item-name target-database-id))
           :tables  (<! (import-table! access-db-path item-name target-database-id))
           :queries (<! (import-query! access-db-path item-name target-database-id))
           nil)
@@ -583,7 +613,8 @@
       (state/load-sql-functions!)
       (state/load-forms!)
       (state/load-reports!)
-      (state/load-functions!))))
+      (state/load-functions!)
+      (state/load-macros!))))
 
 (defn object-type-dropdown []
   (let [obj-type (:object-type @viewer-state)]
@@ -599,7 +630,8 @@
       [:option {:value "queries"} "Queries"]
       [:option {:value "forms"} "Forms"]
       [:option {:value "reports"} "Reports"]
-      [:option {:value "modules"} "Modules"]]]))
+      [:option {:value "modules"} "Modules"]
+      [:option {:value "macros"} "Macros"]]]))
 
 (defn get-item-name
   "Extract name from item - handles both string items and object items"

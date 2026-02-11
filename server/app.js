@@ -20,6 +20,7 @@ const chatRoutes = require('./routes/chat');
 const formsRoutes = require('./routes/forms');
 const reportsRoutes = require('./routes/reports');
 const modulesRoutes = require('./routes/modules');
+const macrosRoutes = require('./routes/macros');
 const configRoutes = require('./routes/config');
 const lintRoutes = require('./routes/lint');
 const graphRoutes = require('./routes/graph');
@@ -101,6 +102,7 @@ function createApp({
   app.use('/api/forms', formsRoutes(pool));
   app.use('/api/reports', reportsRoutes(pool));
   app.use('/api/modules', modulesRoutes(pool));
+  app.use('/api/macros', macrosRoutes(pool));
   app.use('/api/config', configRoutes(settingsDir, pool));
   app.use('/api/lint', lintRoutes(pool, secrets));
   app.use('/api/graph', graphRoutes(pool));

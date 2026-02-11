@@ -248,6 +248,17 @@ module.exports = function(pool) {
         console.error('Error listing modules:', err.message);
       }
 
+      // Get macros
+      let macros = [];
+      try {
+        const macrosScript = path.join(scriptsDir, 'list_macros.ps1');
+        const macrosOutput = await runPowerShell(macrosScript, ['-DatabasePath', dbPath]);
+        macros = macrosOutput ? JSON.parse(macrosOutput) : [];
+        if (!Array.isArray(macros)) macros = [macros]; // Handle single item
+      } catch (err) {
+        console.error('Error listing macros:', err.message);
+      }
+
       res.json({
         path: dbPath,
         name: path.basename(dbPath),
@@ -255,7 +266,8 @@ module.exports = function(pool) {
         reports: reports,
         tables: tables,
         queries: queries,
-        modules: modules
+        modules: modules,
+        macros: macros
       });
     } catch (err) {
       console.error('Error getting database details:', err);
@@ -411,6 +423,55 @@ module.exports = function(pool) {
       logError(pool, 'POST /api/access-import/export-module', 'Failed to export module', err, { details: { databasePath, moduleName, targetDatabaseId } });
       await logImport('error', err.message);
       res.status(500).json({ error: err.message || 'Failed to export module' });
+    }
+  });
+
+  /**
+   * POST /api/access-import/export-macro
+   * Export a macro from Access (raw XML definition)
+   * The frontend saves the XML via /api/macros
+   */
+  router.post('/export-macro', async (req, res) => {
+    const { databasePath, macroName, targetDatabaseId } = req.body;
+
+    const logImport = makeLogImport(pool, databasePath, macroName, 'macro', targetDatabaseId);
+
+    try {
+      if (!databasePath || !macroName) {
+        await logImport('error', 'databasePath and macroName required');
+        return res.status(400).json({ error: 'databasePath and macroName required' });
+      }
+
+      const scriptsDir = path.join(__dirname, '..', '..', 'scripts', 'access');
+      const exportScript = path.join(scriptsDir, 'export_macro.ps1');
+
+      // Run PowerShell - it outputs JSON to stdout
+      const jsonOutput = await runPowerShell(exportScript, [
+        '-DatabasePath', databasePath,
+        '-MacroName', macroName
+      ]);
+
+      // Remove BOM if present, then extract JSON object from output
+      const cleanOutput = jsonOutput.replace(/^\uFEFF/, '').trim();
+      const jsonStart = cleanOutput.indexOf('{');
+      if (jsonStart === -1) {
+        throw new Error('No JSON object found in PowerShell output');
+      }
+      const macroData = JSON.parse(cleanOutput.substring(jsonStart));
+
+      // Log success
+      await logImport('success', null, { hasDefinition: !!macroData.definition });
+
+      // Return raw JSON to frontend
+      res.json({
+        success: true,
+        macroData: macroData
+      });
+    } catch (err) {
+      console.error('Error exporting macro:', err);
+      logError(pool, 'POST /api/access-import/export-macro', 'Failed to export macro', err, { details: { databasePath, macroName, targetDatabaseId } });
+      await logImport('error', err.message);
+      res.status(500).json({ error: err.message || 'Failed to export macro' });
     }
   });
 

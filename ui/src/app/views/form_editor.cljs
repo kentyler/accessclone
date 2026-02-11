@@ -9,6 +9,7 @@
             [app.views.table-viewer :as table-viewer]
             [app.views.query-viewer :as query-viewer]
             [app.views.module-viewer :as module-viewer]
+            [app.views.macro-viewer :as macro-viewer]
             [app.views.sql-function-viewer :as sql-fn-viewer]
             [app.views.report-editor :as report-editor]))
 
@@ -174,5 +175,6 @@
       :queries [query-viewer/query-viewer]
       :sql-functions [sql-fn-viewer/sql-function-viewer]
       :modules [module-viewer/module-viewer]
+      :macros [macro-viewer/macro-viewer]
       [:div.no-editor
        [:p "Select an object to edit"]])))

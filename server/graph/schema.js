@@ -122,6 +122,28 @@ ALTER TABLE shared.modules ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL 
 ALTER TABLE shared.modules ADD COLUMN IF NOT EXISTS review_notes TEXT;
 
 -- ============================================================
+-- Macros - Access macro XML storage with optional ClojureScript translation
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.macros (
+    id SERIAL PRIMARY KEY,
+    database_id VARCHAR(100) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    macro_xml TEXT,              -- Raw XML from Access SaveAsText
+    cljs_source TEXT,            -- Optional ClojureScript translation
+    description TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    review_notes TEXT,
+    version INT NOT NULL DEFAULT 1,
+    is_current BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+
+    UNIQUE(database_id, name, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_macros_database ON shared.macros(database_id);
+CREATE INDEX IF NOT EXISTS idx_macros_current ON shared.macros(database_id, name) WHERE is_current = true;
+
+-- ============================================================
 -- Events - application event log
 -- ============================================================
 CREATE TABLE IF NOT EXISTS shared.events (

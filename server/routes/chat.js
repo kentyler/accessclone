@@ -300,7 +300,7 @@ module.exports = function(pool, secrets) {
    * Send a message to the LLM and get a response
    */
   router.post('/', async (req, res) => {
-    const { message, history, database_id, form_context, report_context, module_context, sql_function_context, table_context, query_context } = req.body;
+    const { message, history, database_id, form_context, report_context, module_context, macro_context, sql_function_context, table_context, query_context } = req.body;
 
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
@@ -446,6 +446,19 @@ When the user asks you to make changes, use the update_translation tool to apply
         sqlFunctionContext += `\n\nThis function was imported from a Microsoft Access query and converted to PostgreSQL. Help the user understand it, identify issues, or suggest improvements.`;
       }
 
+      // Macro context (when viewing an Access macro)
+      let macroContext = '';
+      if (macro_context?.macro_name) {
+        macroContext = `\n\nThe user is viewing an Access macro "${macro_context.macro_name}".`;
+        if (macro_context.macro_xml) {
+          macroContext += `\n\nMacro XML definition:\n${macro_context.macro_xml}`;
+        }
+        if (macro_context.cljs_source) {
+          macroContext += `\n\nCurrent ClojureScript translation:\n${macro_context.cljs_source}`;
+        }
+        macroContext += `\n\nThis is a Microsoft Access macro exported as XML. Help the user understand the macro's actions, conditions, and flow. If asked, translate the macro logic to ClojureScript event handlers that work with the AccessClone framework.`;
+      }
+
       // Combine all available tools
       const availableTools = [
         ...(form_context?.record_source ? tools : []),
@@ -463,9 +476,9 @@ When the user asks you to make changes, use the update_translation tool to apply
         },
         body: JSON.stringify({
           model: 'claude-sonnet-4-20250514',
-          max_tokens: (module_context?.module_name || sql_function_context?.function_name || query_context?.query_name) ? 4096 : 1024,
+          max_tokens: (module_context?.module_name || macro_context?.macro_name || sql_function_context?.function_name || query_context?.query_name) ? 4096 : 1024,
           tools: availableTools,
-          system: `You are a helpful assistant for a database application called AccessClone. You help users understand their data, create forms, write queries, and work with their databases. ${dbContext}${tableContext}${queryContext}${formContext}${reportContext}${moduleContext}${sqlFunctionContext}${graphContext}
+          system: `You are a helpful assistant for a database application called AccessClone. You help users understand their data, create forms, write queries, and work with their databases. ${dbContext}${tableContext}${queryContext}${formContext}${reportContext}${moduleContext}${macroContext}${sqlFunctionContext}${graphContext}
 
 Keep responses concise and helpful. When discussing code or SQL, use markdown code blocks.`,
           messages: [

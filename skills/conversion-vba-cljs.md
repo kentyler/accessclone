@@ -2,6 +2,16 @@
 
 Translating Access VBA modules to ClojureScript for the AccessClone application. AccessClone runs locally as an Electron app with a local Express backend — file system access and local paths are valid, but must route through backend API endpoints. The VBA source is stored in `shared.modules` and the ClojureScript translation lives alongside it.
 
+## Prerequisites: Import All Objects First
+
+**Do NOT begin translation until ALL objects from the Access database have been imported.** This is a hard rule, not a suggestion. VBA modules reference queries, forms, tables, and other modules. If the LLM cannot see the actual definitions, it will guess at the logic and produce incorrect, insecure code.
+
+The check is simple: compare the discovery scan (what `list_tables.ps1`, `list_queries.ps1`, `list_forms.ps1`, `list_reports.ps1`, `list_modules.ps1`, `list_macros.ps1` found in the Access database) against what exists in the target database (`shared.forms`, `shared.reports`, `shared.modules`, `shared.macros`, plus schema tables/views). If any objects from the source have not been imported into the target, translation should be blocked.
+
+This avoids the complexity of dependency chain analysis — no need to figure out which specific queries a module calls. Just require everything to be present before any translation begins.
+
+**Planned**: The app should enforce this automatically — check import completeness before allowing translation in the chat panel, and show a clear message listing what's missing.
+
 ## AccessClone Architecture (for translation context)
 
 - **UI**: Reagent (React wrapper) with a single `app-state` atom

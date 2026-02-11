@@ -7,6 +7,7 @@ Phase 6 of the conversion process. Imports Access macros into AccessClone for vi
 - Access database accessible via COM automation
 - Target database configured in AccessClone
 - **AutoExec macro renamed to xAutoExec** (see below)
+- **All objects from the Access database imported first** — every table, query, form, report, and module found during discovery must be imported into the target database before any macro translation is attempted. This is the same rule that applies to VBA module translation. Simple check: compare discovery scan against target — if anything is missing, block translation.
 
 ## AutoExec Warning
 

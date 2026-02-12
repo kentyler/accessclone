@@ -163,30 +163,49 @@ module.exports = function(pool) {
       query += ` LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`;
       params.push(limit, offset);
 
-      const result = await pool.query(query, params);
+      // Use a transaction with SET LOCAL so views referencing
+      // shared.form_control_state can read the session_id
+      const sessionId = req.headers['x-session-id'];
+      const client = await pool.connect();
+      let result, totalCount;
+      try {
+        await client.query('BEGIN');
+        if (sessionId) {
+          await client.query('SET LOCAL app.session_id = $1', [sessionId]);
+        }
 
-      // Get total count (with same filter)
-      let countQuery = `SELECT COUNT(*) FROM "${source}"`;
-      const countParams = [];
-      if (req.query.filter) {
-        try {
-          const filter = JSON.parse(req.query.filter);
-          const conditions = [];
-          let ci = 1;
-          for (const [col, val] of Object.entries(filter)) {
-            if (NAME_RE.test(col)) {
-              conditions.push(`"${col}" = $${ci}`);
-              countParams.push(val);
-              ci++;
+        result = await client.query(query, params);
+
+        // Get total count (with same filter)
+        let countQuery = `SELECT COUNT(*) FROM "${source}"`;
+        const countParams = [];
+        if (req.query.filter) {
+          try {
+            const filter = JSON.parse(req.query.filter);
+            const conditions = [];
+            let ci = 1;
+            for (const [col, val] of Object.entries(filter)) {
+              if (NAME_RE.test(col)) {
+                conditions.push(`"${col}" = $${ci}`);
+                countParams.push(val);
+                ci++;
+              }
             }
-          }
-          if (conditions.length > 0) {
-            countQuery += ` WHERE ${conditions.join(' AND ')}`;
-          }
-        } catch (e) {}
+            if (conditions.length > 0) {
+              countQuery += ` WHERE ${conditions.join(' AND ')}`;
+            }
+          } catch (e) {}
+        }
+        const countResult = await client.query(countQuery, countParams);
+        totalCount = parseInt(countResult.rows[0].count);
+
+        await client.query('COMMIT');
+      } catch (txErr) {
+        await client.query('ROLLBACK');
+        throw txErr;
+      } finally {
+        client.release();
       }
-      const countResult = await pool.query(countQuery, countParams);
-      const totalCount = parseInt(countResult.rows[0].count);
 
       res.json({
         data: result.rows,

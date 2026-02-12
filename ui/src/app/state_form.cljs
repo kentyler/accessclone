@@ -3,7 +3,7 @@
   (:require [cljs-http.client :as http]
             [cljs.core.async :refer [go <!]]
             [clojure.string :as str]
-            [app.state :as state :refer [app-state api-base db-headers
+            [app.state :as state :refer [app-state api-base db-headers session-id
                                          set-loading! set-error! log-error! log-event!
                                          build-data-query-params record->api-map detect-pk-field
                                          pk-value-for-record parse-access-filter
@@ -307,6 +307,57 @@
       (call-session-function! function-name {:on-complete on-complete}))))
 
 ;; ============================================================
+;; FORM STATE SYNC (shared.form_control_state)
+;; ============================================================
+
+(defn- build-synced-controls
+  "Scan all controls in a form definition for the 'state' tag.
+   Returns a set of lowercase control names that participate in state sync."
+  [definition]
+  (let [sections (keep #(get definition %) [:header :detail :footer])]
+    (into #{}
+          (comp (mapcat :controls)
+                (filter #(= "state" (str/lower-case (or (:tag %) ""))))
+                (map #(str/lower-case (or (:name %) "")))
+                (remove str/blank?))
+          sections)))
+
+(defn- sync-form-state!
+  "Upsert control values to shared.form_control_state.
+   controls-map is {\"control_name\" \"value\", ...}."
+  [form-name controls-map]
+  (when (and (seq controls-map) (not (str/blank? form-name)))
+    (go
+      (let [response (<! (http/put (str api-base "/api/form-state")
+                                   {:json-params {:sessionId session-id
+                                                  :formName (str/lower-case form-name)
+                                                  :controls controls-map}}))]
+        (when-not (:success response)
+          (log-event! "warning" "Failed to sync form state" "sync-form-state"
+                      {:form form-name :error (get-in response [:body :error])}))))))
+
+(defn- collect-synced-values
+  "Given a record and a set of synced control names, return a map of
+   {control-name value-string} for the API."
+  [record synced-controls]
+  (reduce-kv
+    (fn [m k v]
+      (let [field-name (str/lower-case (if (keyword? k) (name k) (str k)))]
+        (if (contains? synced-controls field-name)
+          (assoc m field-name (when (some? v) (str v)))
+          m)))
+    {} record))
+
+(defn- sync-current-record-state!
+  "Sync all tagged control values from the current record to state table."
+  []
+  (let [synced (get-in @app-state [:form-editor :synced-controls])
+        form-name (get-in @app-state [:form-editor :current :name])
+        record (get-in @app-state [:form-editor :current-record])]
+    (when (and (seq synced) record form-name)
+      (sync-form-state! form-name (collect-synced-values record synced)))))
+
+;; ============================================================
 ;; VIEW MODE & RECORD OPERATIONS
 ;; ============================================================
 
@@ -341,7 +392,9 @@
           (swap! app-state assoc-in [:form-editor :record-position] {:current 1 :total total})
           (swap! app-state assoc-in [:form-editor :record-dirty?] false)
           (when (seq data)
-            (swap! app-state assoc-in [:form-editor :current-record] (first data)))
+            (swap! app-state assoc-in [:form-editor :current-record] (first data))
+            ;; Sync initial record state for tagged controls
+            (sync-current-record-state!))
           (fire-form-event! :on-load))
         (log-error! "Failed to load form records" "load-form-records" {:response (:body response)})))))
 
@@ -372,7 +425,13 @@
 
 (defn update-record-field! [field-name value]
   (swap! app-state assoc-in [:form-editor :current-record (keyword field-name)] value)
-  (swap! app-state assoc-in [:form-editor :record-dirty?] true))
+  (swap! app-state assoc-in [:form-editor :record-dirty?] true)
+  ;; If this field is tagged for state sync, upsert immediately
+  (let [synced (get-in @app-state [:form-editor :synced-controls])
+        form-name (get-in @app-state [:form-editor :current :name])
+        field-lc (str/lower-case (if (keyword? field-name) (name field-name) (str field-name)))]
+    (when (and (seq synced) (contains? synced field-lc) form-name)
+      (sync-form-state! form-name {field-lc (when (some? value) (str value))}))))
 
 (defn navigate-to-record!
   "Navigate to a specific record by position (1-indexed)"
@@ -387,6 +446,8 @@
       (swap! app-state assoc-in [:form-editor :record-position] {:current pos :total total})
       (swap! app-state assoc-in [:form-editor :current-record] (nth records (dec pos)))
       (swap! app-state assoc-in [:form-editor :record-dirty?] false)
+      ;; Sync tagged control values to state table
+      (sync-current-record-state!)
       ;; Fire on-current event after navigating to new record
       (fire-form-event! :on-current))))
 
@@ -794,7 +855,8 @@
           :dirty? false
           :original definition
           :current definition
-          :selected-control nil})
+          :selected-control nil
+          :synced-controls (build-synced-controls definition)})
   (maybe-auto-analyze!)
   (set-view-mode! :view))
 

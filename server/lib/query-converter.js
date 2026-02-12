@@ -163,34 +163,82 @@ function applyFunctionTranslations(sql) {
 }
 
 // ============================================================
-// TempVars extraction
+// Form state subquery builder
 // ============================================================
 
 /**
- * Convert TempVars references to function parameters.
- * Returns { sql, params: [{name, pgName}] }
+ * Build a subquery that reads a control value from the form_control_state table.
+ * All three reference types (Forms!f!x, Form!x, TempVars!x) normalize to this.
+ *
+ * @param {string} formName - Sanitized form name (or '_tempvars' for TempVars)
+ * @param {string} controlName - Sanitized control name
+ * @returns {string} PostgreSQL subquery
  */
-function extractTempVars(sql) {
-  const params = [];
-  const seen = new Set();
+function formStateSubquery(formName, controlName) {
+  return `(SELECT value FROM shared.form_control_state ` +
+    `WHERE session_id = current_setting('app.session_id', true) ` +
+    `AND form_name = '${formName}' ` +
+    `AND control_name = '${controlName}')`;
+}
 
-  const addParam = (varName) => {
-    const pgName = 'p_' + varName.toLowerCase().replace(/\s+/g, '_');
-    if (!seen.has(pgName)) {
-      seen.add(pgName);
-      params.push({ name: varName, pgName });
-    }
-    return pgName;
-  };
+// ============================================================
+// TempVars and Form reference translation
+// ============================================================
 
+/**
+ * Replace TempVars references with subqueries against form_control_state.
+ * TempVars use the reserved form_name '_tempvars'.
+ * Returns { sql } (no params — queries stay as views).
+ */
+function translateTempVars(sql) {
   // [TempVars]![varName]
-  sql = sql.replace(/\[TempVars\]!\[(\w+)\]/gi, (_, v) => addParam(v));
+  sql = sql.replace(/\[TempVars\]!\[(\w+)\]/gi, (_, v) =>
+    formStateSubquery('_tempvars', v.toLowerCase()));
   // TempVars("varName")
-  sql = sql.replace(/TempVars\("(\w+)"\)/gi, (_, v) => addParam(v));
+  sql = sql.replace(/TempVars\("(\w+)"\)/gi, (_, v) =>
+    formStateSubquery('_tempvars', v.toLowerCase()));
   // TempVars!varName
-  sql = sql.replace(/TempVars!(\w+)/gi, (_, v) => addParam(v));
+  sql = sql.replace(/TempVars!(\w+)/gi, (_, v) =>
+    formStateSubquery('_tempvars', v.toLowerCase()));
 
-  return { sql, params };
+  return sql;
+}
+
+/**
+ * Replace Forms!formName!controlName references with subqueries.
+ * Must run BEFORE bracket removal and double-quote conversion.
+ *
+ * Handles:
+ *   [Forms]![formName]![controlName]
+ *   Forms![formName]![controlName]
+ *   Forms!formName!controlName
+ *   Forms!formName.controlName
+ */
+function translateFormRefs(sql) {
+  // [Forms]![formName]![controlName]
+  sql = sql.replace(/\[Forms\]!\[([^\]]+)\]!\[([^\]]+)\]/gi, (_, form, ctrl) =>
+    formStateSubquery(sanitizeName(form), sanitizeName(ctrl)));
+
+  // Forms![formName]![controlName]
+  sql = sql.replace(/Forms!\[([^\]]+)\]!\[([^\]]+)\]/gi, (_, form, ctrl) =>
+    formStateSubquery(sanitizeName(form), sanitizeName(ctrl)));
+
+  // Forms!formName!controlName (bare identifiers)
+  sql = sql.replace(/Forms!([\w]+)!([\w]+)/gi, (_, form, ctrl) =>
+    formStateSubquery(sanitizeName(form), sanitizeName(ctrl)));
+
+  // Forms!formName.controlName (dot notation variant)
+  sql = sql.replace(/Forms!([\w]+)\.([\w]+)/gi, (_, form, ctrl) =>
+    formStateSubquery(sanitizeName(form), sanitizeName(ctrl)));
+
+  return sql;
+}
+
+// Legacy wrapper — kept for backward compatibility with tests.
+// Now returns empty params since TempVars are handled via subquery.
+function extractTempVars(sql) {
+  sql = translateTempVars(sql);
+  return { sql, params: [] };
 }
 
 // ============================================================
@@ -228,6 +276,11 @@ function applySyntaxTranslations(sql) {
   // & (string concat) → ||
   sql = sql.replace(/\s*&\s*/g, ' || ');
 
+  // TempVars and Form references → state table subqueries
+  // Must run BEFORE double-quote conversion and bracket removal
+  sql = translateTempVars(sql);
+  sql = translateFormRefs(sql);
+
   // Convert Access double-quoted string literals to single quotes BEFORE bracket removal.
   sql = sql.replace(/"([^"]*?)"/g, (match, inner) => {
     if (/^[a-zA-Z_]\w*$/.test(inner)) return `'${inner}'`;
@@ -245,9 +298,6 @@ function applySyntaxTranslations(sql) {
     if (inner.match(/^p_/)) return match;
     return `"${sanitizeName(inner)}"`;
   });
-
-  // Access bang notation: Forms!FormName.ControlName → just field
-  sql = sql.replace(/Forms!\[?[\w]+\]?\.?\[?(\w+)\]?/gi, (_, field) => `"${field}"`);
 
   // Append LIMIT if we found TOP N
   if (topN) {
@@ -286,9 +336,12 @@ function addSchemaPrefix(sql, schemaName) {
 
   // Match table references after FROM, JOIN, INTO, UPDATE, TABLE keywords.
   // Allows optional leading parens for Access-style joins: FROM (TableA INNER JOIN TableB ...)
+  // Captures optional .qualified part to skip already schema-qualified names (e.g. shared.form_control_state)
   sql = sql.replace(
-    /\b(FROM|JOIN|INTO|UPDATE|TABLE)(\s+\(*\s*)("?[a-zA-Z_][\w]*"?)(\s+(?:AS\s+)?[a-zA-Z_]\w*)?/gi,
-    (match, keyword, gap, tableName, aliasClause) => {
+    /\b(FROM|JOIN|INTO|UPDATE|TABLE)(\s+\(*\s*)("?[a-zA-Z_][\w]*"?)(\.[a-zA-Z_][\w."]*)?(\s+(?:AS\s+)?[a-zA-Z_]\w*)?/gi,
+    (match, keyword, gap, tableName, qualifiedPart, aliasClause) => {
+      // Already schema-qualified (has .something after the name) — leave it alone
+      if (qualifiedPart) return match;
       const sanitized = sanitizeName(tableName.replace(/"/g, ''));
       if (reserved.has(sanitized)) return match;
       const hasAlias = isRealAlias(aliasClause);
@@ -637,15 +690,11 @@ function convertAccessQuery(queryData, schemaName, columnTypes) {
 
   let sql = originalSql.trim().replace(/;\s*$/, '');
 
-  // Step 1: Extract TempVars
-  const tempVarResult = extractTempVars(sql);
-  sql = tempVarResult.sql;
-
-  // Resolve parameters and types
-  const uniqueParams = resolveParams(parameters, tempVarResult.params, columnTypes, sql);
-
-  // Strip PARAMETERS declaration
+  // Strip PARAMETERS declaration before any translation
   sql = sql.replace(/^PARAMETERS\s+[^;]+;\s*/i, '');
+
+  // Resolve DAO-declared parameters (excluding TempVar declarations, which become subqueries)
+  const uniqueParams = resolveParams(parameters, [], columnTypes, sql);
 
   // Step 2: Function translations
   try { sql = applyFunctionTranslations(sql); }
@@ -731,4 +780,7 @@ function convertAccessExpression(expr) {
   return result;
 }
 
-module.exports = { convertAccessQuery, convertAccessExpression, sanitizeName };
+module.exports = {
+  convertAccessQuery, convertAccessExpression, sanitizeName,
+  formStateSubquery, translateTempVars, translateFormRefs
+};

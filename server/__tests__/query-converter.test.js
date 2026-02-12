@@ -214,9 +214,9 @@ describe('syntax translations', () => {
     expect(ddl(r)).not.toContain('&');
   });
 
-  test('square brackets → double-quoted identifiers', () => {
+  test('square brackets → double-quoted identifiers (sanitized)', () => {
     const r = convert('SELECT [First Name] FROM tbl');
-    expect(ddl(r)).toContain('"First Name"');
+    expect(ddl(r)).toContain('"first_name"');
     expect(ddl(r)).not.toContain('[');
   });
 
@@ -231,48 +231,53 @@ describe('syntax translations', () => {
 // TempVars extraction
 // ============================================================
 
-describe('TempVars', () => {
-  test('[TempVars]![var] → function parameter', () => {
+describe('TempVars → state table subquery', () => {
+  const subqueryFragment = 'SELECT value FROM shared.form_control_state';
+
+  test('[TempVars]![var] → subquery (view, not function)', () => {
     const r = convert('SELECT Id FROM recipe WHERE Id=[TempVars]![recipe_id]');
-    expect(r.pgObjectType).toBe('function');
-    expect(ddl(r)).toContain('p_recipe_id');
+    expect(r.pgObjectType).toBe('view');
+    expect(ddl(r)).toContain(subqueryFragment);
+    expect(ddl(r)).toContain("form_name = '_tempvars'");
+    expect(ddl(r)).toContain("control_name = 'recipe_id'");
   });
 
-  test('TempVars("var") → function parameter', () => {
+  test('TempVars("var") → subquery', () => {
     const r = convert('SELECT Id FROM recipe WHERE Id=TempVars("recipe_id")');
-    expect(r.pgObjectType).toBe('function');
-    expect(ddl(r)).toContain('p_recipe_id');
+    expect(r.pgObjectType).toBe('view');
+    expect(ddl(r)).toContain(subqueryFragment);
+    expect(ddl(r)).toContain("control_name = 'recipe_id'");
   });
 
-  test('TempVars!var → function parameter', () => {
+  test('TempVars!var → subquery', () => {
     const r = convert('SELECT Id FROM recipe WHERE Id=TempVars!recipe_id');
-    expect(r.pgObjectType).toBe('function');
-    expect(ddl(r)).toContain('p_recipe_id');
+    expect(r.pgObjectType).toBe('view');
+    expect(ddl(r)).toContain(subqueryFragment);
+    expect(ddl(r)).toContain("control_name = 'recipe_id'");
   });
 
-  test('TempVar type resolved from columnTypes', () => {
-    const r = convert(
-      'SELECT Id FROM recipe WHERE Id=[TempVars]![recipe_id]',
-      { columnTypes: { id: 'integer' } }
-    );
-    expect(ddl(r)).toContain('p_recipe_id integer');
-  });
-
-  test('TempVar defaults to text when no columnTypes', () => {
+  test('subquery uses current_setting for session scoping', () => {
     const r = convert('SELECT Id FROM recipe WHERE Id=[TempVars]![recipe_id]');
-    expect(ddl(r)).toContain('p_recipe_id text');
+    expect(ddl(r)).toContain("current_setting('app.session_id', true)");
   });
 
-  test('multiple TempVars deduplicated', () => {
+  test('multiple TempVars both converted to subqueries', () => {
+    const r = convert(
+      'SELECT Id FROM recipe WHERE Id=[TempVars]![recipe_id] AND name=[TempVars]![recipe_name]'
+    );
+    expect(ddl(r)).toContain("control_name = 'recipe_id'");
+    expect(ddl(r)).toContain("control_name = 'recipe_name'");
+    // Both are subqueries, query stays a view
+    expect(r.pgObjectType).toBe('view');
+  });
+
+  test('duplicate TempVars both appear as subqueries in WHERE', () => {
     const r = convert(
       'SELECT Id FROM recipe WHERE Id=[TempVars]![recipe_id] AND Id2=[TempVars]![recipe_id]'
     );
-    // Should have exactly one parameter, not two
-    const paramMatch = ddl(r).match(/p_recipe_id/g);
-    // The parameter list should have it once, but WHERE clause has it twice
-    const funcSig = ddl(r).split('$$')[0];
-    const sigOccurrences = (funcSig.match(/p_recipe_id/g) || []).length;
-    expect(sigOccurrences).toBe(1); // once in the parameter list
+    // Each occurrence gets its own subquery
+    const matches = ddl(r).match(/control_name = 'recipe_id'/g);
+    expect(matches.length).toBe(2);
   });
 });
 
@@ -287,11 +292,11 @@ describe('query type routing', () => {
     expect(ddl(r)).toContain('CREATE OR REPLACE VIEW');
   });
 
-  test('SELECT with TempVars → FUNCTION returning TABLE', () => {
+  test('SELECT with TempVars → VIEW with subquery (not function)', () => {
     const r = convert('SELECT Id, Name FROM recipe WHERE Id=[TempVars]![rid]');
-    expect(r.pgObjectType).toBe('function');
-    expect(ddl(r)).toContain('CREATE OR REPLACE FUNCTION');
-    expect(ddl(r)).toContain('RETURNS TABLE');
+    expect(r.pgObjectType).toBe('view');
+    expect(ddl(r)).toContain('CREATE OR REPLACE VIEW');
+    expect(ddl(r)).toContain('shared.form_control_state');
   });
 
   test('UPDATE → plpgsql FUNCTION returning integer', () => {
@@ -355,22 +360,28 @@ describe('query type routing', () => {
 // ============================================================
 
 describe('schema prefixing', () => {
-  test('adds schema to FROM table', () => {
+  test('adds schema to FROM table (quoted with alias)', () => {
     const r = convert('SELECT Id FROM recipe');
-    expect(ddl(r)).toContain('FROM myschema.recipe');
+    expect(ddl(r)).toContain('FROM myschema."recipe" recipe');
   });
 
-  test('adds schema to JOIN table', () => {
+  test('adds schema to JOIN table (quoted, preserves alias)', () => {
     const r = convert('SELECT r.Id FROM recipe r JOIN ingredient i ON r.Id = i.recipe_id');
-    expect(ddl(r)).toContain('JOIN myschema.ingredient');
+    expect(ddl(r)).toContain('myschema."recipe" r');
+    expect(ddl(r)).toContain('JOIN myschema."ingredient" i');
   });
 
   test('does not double-prefix already-qualified tables', () => {
-    // This tests that we don't get myschema.myschema.recipe
     const r = convert('SELECT Id FROM recipe', { schema: 'app' });
     const s = ddl(r);
-    expect(s).toContain('FROM app.recipe');
+    expect(s).toContain('FROM app."recipe"');
     expect(s).not.toContain('app.app.');
+  });
+
+  test('does not mangle shared.form_control_state in subqueries', () => {
+    const r = convert('SELECT Id FROM recipe WHERE Id=[TempVars]![rid]');
+    expect(ddl(r)).toContain('shared.form_control_state');
+    expect(ddl(r)).not.toContain('myschema."shared"');
   });
 });
 
@@ -378,12 +389,13 @@ describe('schema prefixing', () => {
 // Calculated column extraction
 // ============================================================
 
-describe('calculated column extraction', () => {
-  test('extracts aliased expression into function', () => {
+describe('calculated column extraction (disabled — inline in views)', () => {
+  test('expressions stay inline (no extraction)', () => {
     const r = convert('SELECT COALESCE(Name, \'unknown\') AS display_name FROM tbl');
-    expect(r.extractedFunctions.length).toBeGreaterThan(0);
-    expect(r.extractedFunctions[0].name).toContain('calc_display_name');
-    expect(r.extractedFunctions[0].sql).toContain('LANGUAGE SQL IMMUTABLE');
+    expect(r.extractedFunctions).toHaveLength(0);
+    // Expression stays in the view SQL
+    expect(ddl(r)).toContain('COALESCE');
+    expect(ddl(r)).toContain('display_name');
   });
 
   test('does not extract simple column AS alias', () => {
@@ -402,20 +414,23 @@ describe('calculated column extraction', () => {
 // ============================================================
 
 describe('return columns for parameterized SELECT', () => {
-  test('generates RETURNS TABLE with column names', () => {
+  test('generates RETURNS TABLE with column names (declared params)', () => {
     const r = convert(
-      'SELECT recipe.Id, recipe.Name FROM recipe WHERE Id=[TempVars]![rid]'
+      'SELECT recipe.Id, recipe.Name FROM recipe WHERE Id=[rid]',
+      { parameters: [{ name: 'rid', type: 'Long' }] }
     );
+    expect(r.pgObjectType).toBe('function');
     expect(ddl(r)).toContain('RETURNS TABLE(');
     expect(ddl(r)).toMatch(/"id" text/);
     expect(ddl(r)).toMatch(/"name" text/);
   });
 
-  test('falls back to SETOF record for complex expressions', () => {
-    // An expression without AS alias that can't be parsed as a column
+  test('falls back to SETOF record for complex expressions (declared params)', () => {
     const r = convert(
-      'SELECT 1 + 2 FROM recipe WHERE Id=[TempVars]![rid]'
+      'SELECT 1 + 2 FROM recipe WHERE Id=[rid]',
+      { parameters: [{ name: 'rid', type: 'Long' }] }
     );
+    expect(r.pgObjectType).toBe('function');
     expect(ddl(r)).toContain('RETURNS SETOF record');
     expect(r.warnings.some(w => w.includes('SETOF record'))).toBe(true);
   });
@@ -431,6 +446,79 @@ describe('PARAMETERS declaration', () => {
     const s = ddl(r);
     expect(s).not.toContain('PARAMETERS');
     expect(s).toContain('SELECT');
+  });
+});
+
+// ============================================================
+// Form references → state table subquery
+// ============================================================
+
+describe('Form references → state table subquery', () => {
+  const subqueryFragment = 'SELECT value FROM shared.form_control_state';
+
+  test('[Forms]![formName]![controlName] → subquery', () => {
+    const r = convert(
+      'SELECT Id FROM orders WHERE CategoryID = [Forms]![frmProducts]![cboCategory]'
+    );
+    expect(r.pgObjectType).toBe('view');
+    expect(ddl(r)).toContain(subqueryFragment);
+    expect(ddl(r)).toContain("form_name = 'frmproducts'");
+    expect(ddl(r)).toContain("control_name = 'cbocategory'");
+  });
+
+  test('Forms![formName]![controlName] → subquery', () => {
+    const r = convert(
+      'SELECT Id FROM orders WHERE CategoryID = Forms![frmProducts]![cboCategory]'
+    );
+    expect(ddl(r)).toContain(subqueryFragment);
+    expect(ddl(r)).toContain("form_name = 'frmproducts'");
+    expect(ddl(r)).toContain("control_name = 'cbocategory'");
+  });
+
+  test('Forms!formName!controlName (bare) → subquery', () => {
+    const r = convert(
+      'SELECT Id FROM orders WHERE CategoryID = Forms!frmProducts!cboCategory'
+    );
+    expect(ddl(r)).toContain(subqueryFragment);
+    expect(ddl(r)).toContain("form_name = 'frmproducts'");
+    expect(ddl(r)).toContain("control_name = 'cbocategory'");
+  });
+
+  test('Forms!formName.controlName (dot notation) → subquery', () => {
+    const r = convert(
+      'SELECT Id FROM orders WHERE CategoryID = Forms!frmProducts.cboCategory'
+    );
+    expect(ddl(r)).toContain(subqueryFragment);
+    expect(ddl(r)).toContain("form_name = 'frmproducts'");
+    expect(ddl(r)).toContain("control_name = 'cbocategory'");
+  });
+
+  test('form names with spaces are sanitized', () => {
+    const r = convert(
+      'SELECT Id FROM orders WHERE x = [Forms]![Product Entry Form]![txtQty]'
+    );
+    expect(ddl(r)).toContain("form_name = 'product_entry_form'");
+    expect(ddl(r)).toContain("control_name = 'txtqty'");
+  });
+
+  test('mixed TempVars and Form refs in same query', () => {
+    const r = convert(
+      'SELECT Id FROM orders WHERE CategoryID = [Forms]![frmProducts]![cboCategory] AND Status = [TempVars]![currentStatus]'
+    );
+    expect(r.pgObjectType).toBe('view');
+    expect(ddl(r)).toContain("form_name = 'frmproducts'");
+    expect(ddl(r)).toContain("form_name = '_tempvars'");
+    expect(ddl(r)).toContain("control_name = 'currentstatus'");
+  });
+
+  test('form refs do not interfere with schema prefixing', () => {
+    const r = convert(
+      'SELECT Id FROM orders WHERE x = [Forms]![frmTest]![ctrl1]'
+    );
+    // The main table should be prefixed, the subquery should use shared. intact
+    expect(ddl(r)).toContain('myschema."orders"');
+    expect(ddl(r)).toContain('shared.form_control_state');
+    expect(ddl(r)).not.toContain('myschema."shared"');
   });
 });
 

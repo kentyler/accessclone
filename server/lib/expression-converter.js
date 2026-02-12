@@ -7,7 +7,7 @@
  * This module only processes expressions that require database access.
  */
 
-const { sanitizeName } = require('./query-converter');
+const { sanitizeName, formStateSubquery, translateTempVars, translateFormRefs } = require('./query-converter');
 const { quoteIdent } = require('./access-types');
 
 // Domain functions that require database access
@@ -359,18 +359,48 @@ function translateAccessFunctions(sql) {
 // ============================================================
 
 /**
+ * Translate Form!controlName (self-reference within the current form) to
+ * Forms!formName!controlName so it maps to the same state table subquery.
+ * Must run BEFORE translateFormRefs to avoid double-matching.
+ *
+ * @param {string} sql - Expression text
+ * @param {string} formName - Sanitized current form name
+ * @returns {string}
+ */
+function translateFormSelfRefs(sql, formName) {
+  if (!formName) return sql;
+  // [Form]![controlName]
+  sql = sql.replace(/\[Form\]!\[([^\]]+)\]/gi, (_, ctrl) =>
+    formStateSubquery(formName, sanitizeName(ctrl)));
+  // Form![controlName]
+  sql = sql.replace(/\bForm!\[([^\]]+)\]/gi, (_, ctrl) =>
+    formStateSubquery(formName, sanitizeName(ctrl)));
+  // Form!controlName (bare)
+  sql = sql.replace(/\bForm!([\w]+)/gi, (_, ctrl) =>
+    formStateSubquery(formName, sanitizeName(ctrl)));
+  return sql;
+}
+
+/**
  * Translate an Access control-source expression containing domain functions
  * into a PostgreSQL function body.
  *
  * @param {string} expression - Access expression (e.g. "=IIf(Not IsNull([id]),DLookUp(...))")
  * @param {string} schemaName - Target database schema
  * @param {Map|Object} columnTypes - Map of columnName → pgType for the record source table
+ * @param {string} [formName] - Sanitized current form name (for Form!x self-references)
  * @returns {{ sql: string, params: Array<{name: string, pgName: string, pgType: string}>, returnType: string }}
  */
-function translateExpression(expression, schemaName, columnTypes) {
+function translateExpression(expression, schemaName, columnTypes, formName) {
   // Strip leading =
   let expr = expression.trim();
   if (expr.startsWith('=')) expr = expr.substring(1);
+
+  // Phase 0: Translate Form!/Forms!/TempVars references to state table subqueries
+  // Must run BEFORE [field] collection so they don't become function parameters
+  expr = translateTempVars(expr);
+  expr = translateFormSelfRefs(expr, formName);
+  expr = translateFormRefs(expr);
 
   // Collect field references that become function parameters
   const paramRefs = new Set();
@@ -544,7 +574,7 @@ async function processDefinitionExpressions(pool, definition, objectName, schema
       const functionName = `${pgObjectName}_calc_${ctrlName}`;
 
       try {
-        const { sql, params, returnType } = translateExpression(controlSource, schemaName, columnTypes);
+        const { sql, params, returnType } = translateExpression(controlSource, schemaName, columnTypes, pgObjectName);
         const ddl = buildFunctionDDL(functionName, schemaName, sql, params, returnType);
 
         // Create the function in the database
@@ -580,5 +610,6 @@ module.exports = {
   translateCriteria,
   translateDomainFunction,
   translateAccessFunctions,
+  translateFormSelfRefs,
   sanitizeName
 };

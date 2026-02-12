@@ -108,10 +108,14 @@
 (defn clear-error! []
   (swap! app-state assoc :error nil))
 
+;; Stable session ID for form state sync (generated once on app init)
+(defonce session-id (str (random-uuid)))
+
 ;; Helper to get current database headers for API calls
 (defn db-headers []
-  (when-let [db-id (:database_id (:current-database @app-state))]
-    {"X-Database-ID" db-id}))
+  (cond-> {"X-Session-ID" session-id}
+    (some? (:database_id (:current-database @app-state)))
+    (assoc "X-Database-ID" (:database_id (:current-database @app-state)))))
 
 ;; ============================================================
 ;; SHARED HELPERS (used by form/report modules)

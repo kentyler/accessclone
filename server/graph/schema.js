@@ -221,6 +221,19 @@ CREATE TABLE IF NOT EXISTS shared.chat_transcripts (
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(database_id, object_type, object_name)
 );
+
+-- ============================================================
+-- Form Control State - live form control values for query subqueries
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.form_control_state (
+    session_id TEXT NOT NULL,
+    form_name TEXT NOT NULL,
+    control_name TEXT NOT NULL,
+    value TEXT,
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (session_id, form_name, control_name)
+);
+CREATE INDEX IF NOT EXISTS idx_form_control_state_session ON shared.form_control_state(session_id);
 `;
 
 /**

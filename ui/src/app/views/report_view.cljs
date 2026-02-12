@@ -39,7 +39,7 @@
   "Render a single control read-only, resolving field values from record."
   [ctrl record expr-context]
   (let [field (ru/resolve-control-field ctrl)
-        value (ru/resolve-field-value field record expr-context)
+        value (ru/resolve-field-value field record expr-context ctrl)
         text (or (when (and field (some? value) (not= value ""))
                    (str value))
                  (ru/display-text ctrl))

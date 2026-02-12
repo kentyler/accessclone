@@ -222,6 +222,36 @@ function createRouter(pool) {
         } catch (lintErr) {
           console.error('Error running post-import lint for report:', lintErr.message);
         }
+
+        // Create PostgreSQL functions for domain-function expressions (DLookUp, DCount, etc.)
+        try {
+          const { processDefinitionExpressions } = require('../lib/expression-converter');
+          const reportDef = JSON.parse(content);
+          const dbResult2 = await pool.query(
+            'SELECT schema_name FROM shared.databases WHERE database_id = $1', [databaseId]
+          );
+          if (dbResult2.rows.length > 0) {
+            const schemaName = dbResult2.rows[0].schema_name;
+            const { definition: updatedDef, functions, warnings } = await processDefinitionExpressions(
+              pool, reportDef, reportName, schemaName, 'report'
+            );
+            if (functions.length > 0) {
+              const updatedContent = JSON.stringify(updatedDef);
+              await pool.query(
+                `UPDATE shared.reports SET definition = $1
+                 WHERE database_id = $2 AND name = $3 AND is_current = true`,
+                [updatedContent, databaseId, reportName]
+              );
+              console.log(`Created ${functions.length} computed functions for report ${reportName}`);
+            }
+            for (const w of warnings) {
+              console.warn(`Report ${reportName} expression warning: ${w}`);
+            }
+          }
+        } catch (exprErr) {
+          console.error('Error processing domain expressions for report:', exprErr.message);
+          logEvent(pool, 'warning', 'PUT /api/reports/:name', 'Domain expression processing failed', { databaseId, details: { error: exprErr.message } });
+        }
       }
 
       console.log(`Saved report: ${reportName} v${newVersion} (database: ${databaseId})`);

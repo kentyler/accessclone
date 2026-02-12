@@ -207,6 +207,37 @@ function createRouter(pool) {
         } catch (lintErr) {
           console.error('Error running post-import lint for form:', lintErr.message);
         }
+
+        // Create PostgreSQL functions for domain-function expressions (DLookUp, DCount, etc.)
+        try {
+          const { hasDomainFunctions, processDefinitionExpressions } = require('../lib/expression-converter');
+          const formDef = JSON.parse(content);
+          const dbResult2 = await pool.query(
+            'SELECT schema_name FROM shared.databases WHERE database_id = $1', [databaseId]
+          );
+          if (dbResult2.rows.length > 0) {
+            const schemaName = dbResult2.rows[0].schema_name;
+            const { definition: updatedDef, functions, warnings } = await processDefinitionExpressions(
+              pool, formDef, formName, schemaName, 'form'
+            );
+            if (functions.length > 0) {
+              // Re-save the definition with computed-function annotations
+              const updatedContent = JSON.stringify(updatedDef);
+              await pool.query(
+                `UPDATE shared.forms SET definition = $1
+                 WHERE database_id = $2 AND name = $3 AND is_current = true`,
+                [updatedContent, databaseId, formName]
+              );
+              console.log(`Created ${functions.length} computed functions for form ${formName}`);
+            }
+            for (const w of warnings) {
+              console.warn(`Form ${formName} expression warning: ${w}`);
+            }
+          }
+        } catch (exprErr) {
+          console.error('Error processing domain expressions for form:', exprErr.message);
+          logEvent(pool, 'warning', 'PUT /api/forms/:name', 'Domain expression processing failed', { databaseId, details: { error: exprErr.message } });
+        }
       }
 
       console.log(`Saved form: ${formName} v${newVersion} (database: ${databaseId})`);

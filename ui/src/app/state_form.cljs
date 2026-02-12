@@ -214,15 +214,37 @@
           (load-form-for-editing! target-form))
       (log-event! "warning" (str "Navigate target form not found: " navigate-to) "handle-session-navigate"))))
 
+(defn- collect-computed-specs
+  "Scan a form definition for controls with :computed-function and build
+   the computed column spec array for the data API."
+  [form-def]
+  (let [sections (keep #(get form-def %) ["header" :header "detail" :detail "footer" :footer])]
+    (->> sections
+         (mapcat #(get % :controls (get % "controls" [])))
+         (keep (fn [ctrl]
+                 (when-let [fn-name (or (get ctrl :computed-function)
+                                        (get ctrl "computed-function"))]
+                   {:fn fn-name
+                    :params (or (get ctrl :computed-params)
+                                (get ctrl "computed-params") [])
+                    :alias (or (get ctrl :computed-alias)
+                               (get ctrl "computed-alias")
+                               (str "_calc_" (or (:name ctrl) (:id ctrl))))})))
+         vec)))
+
 (defn- refresh-form-data!
   "Re-fetch records for the current form and update state. Returns channel."
   []
-  (let [record-source (get-in @app-state [:form-editor :current :record-source])]
+  (let [form-def (get-in @app-state [:form-editor :current])
+        record-source (get form-def :record-source)]
     (when record-source
       (go
-        (let [query-params (build-data-query-params
-                             (get-in @app-state [:form-editor :current :order-by])
-                             (get-in @app-state [:form-editor :current :filter]))
+        (let [computed (collect-computed-specs form-def)
+              query-params (cond-> (build-data-query-params
+                                     (get form-def :order-by)
+                                     (get form-def :filter))
+                             (seq computed)
+                             (assoc :computed (.stringify js/JSON (clj->js computed))))
               data-resp (<! (http/get (str api-base "/api/data/" record-source)
                                       {:query-params query-params
                                        :headers (db-headers)}))]
@@ -302,9 +324,13 @@
   "Fetch records from API for form view mode."
   [record-source]
   (go
-    (let [query-params (build-data-query-params
-                         (get-in @app-state [:form-editor :current :order-by])
-                         (get-in @app-state [:form-editor :current :filter]))
+    (let [form-def (get-in @app-state [:form-editor :current])
+          computed (collect-computed-specs form-def)
+          query-params (cond-> (build-data-query-params
+                                 (get form-def :order-by)
+                                 (get form-def :filter))
+                         (seq computed)
+                         (assoc :computed (.stringify js/JSON (clj->js computed))))
           response (<! (http/get (str api-base "/api/data/" record-source)
                                  {:query-params query-params
                                   :headers (db-headers)}))]

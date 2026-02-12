@@ -10,7 +10,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs').promises;
 const { clearSchemaCache } = require('./data');
-const { convertAccessQuery, sanitizeName } = require('../lib/query-converter');
+const { convertAccessQuery, convertAccessExpression, sanitizeName } = require('../lib/query-converter');
 const { resolveType, quoteIdent } = require('../lib/access-types');
 
 /**
@@ -56,12 +56,16 @@ async function runPowerShell(scriptPath, args = []) {
     let stdout = '';
     let stderr = '';
 
+    // Use setEncoding to avoid garbling UTF-8 chars split across chunks
+    ps.stdout.setEncoding('utf8');
+    ps.stderr.setEncoding('utf8');
+
     ps.stdout.on('data', (data) => {
-      stdout += data.toString();
+      stdout += data;
     });
 
     ps.stderr.on('data', (data) => {
-      stderr += data.toString();
+      stderr += data;
     });
 
     ps.on('close', (code) => {
@@ -512,7 +516,7 @@ module.exports = function(pool) {
    * create PostgreSQL table, insert rows, create indexes — all server-side.
    */
   router.post('/import-table', async (req, res) => {
-    const { databasePath, tableName, targetDatabaseId } = req.body;
+    const { databasePath, tableName, targetDatabaseId, force } = req.body;
 
     const logImport = makeLogImport(pool, databasePath, tableName, 'table', targetDatabaseId);
 
@@ -546,7 +550,13 @@ module.exports = function(pool) {
       if (jsonStart === -1) {
         throw new Error('No JSON object found in PowerShell output');
       }
-      const tableData = JSON.parse(cleanOutput.substring(jsonStart));
+      let tableData;
+      try {
+        tableData = JSON.parse(cleanOutput.substring(jsonStart));
+      } catch (jsonErr) {
+        const snippet = cleanOutput.substring(jsonStart).substring(Math.max(0, jsonErr.message.match(/position (\d+)/)?.[1] - 50 || 0), (jsonErr.message.match(/position (\d+)/)?.[1] || 0) + 50);
+        throw new Error(`Invalid JSON from export_table.ps1: ${jsonErr.message}. Near: ${snippet}`);
+      }
 
       const fields = tableData.fields || [];
       const indexes = tableData.indexes || [];
@@ -576,6 +586,11 @@ module.exports = function(pool) {
           case 12: return { type: 'Long Text' };
           case 15: return { type: 'Short Text', maxLength: 38 };
           case 16: return { type: 'Number', fieldSize: 'Long Integer' };
+          case 18: {
+            // Calculated — use resultType for the PG type
+            const rt = field.resultType || 10;
+            return mapAccessType({ ...field, type: rt, isAutoNumber: false });
+          }
           default: return { type: 'Short Text', maxLength: 255 };
         }
       }
@@ -592,7 +607,9 @@ module.exports = function(pool) {
           pgType,
           required: f.required,
           isAutoNumber: f.isAutoNumber,
-          defaultValue: f.defaultValue
+          defaultValue: f.defaultValue,
+          isCalculated: !!f.isCalculated,
+          expression: f.expression || null
         };
       });
 
@@ -600,14 +617,16 @@ module.exports = function(pool) {
       const pkIndex = indexes.find(idx => idx.primary);
       const pkFieldNames = pkIndex ? pkIndex.fields.map(f => sanitizeName(f)) : [];
 
-      // 4. Check table doesn't already exist
+      // 4. Check table doesn't already exist (unless force re-import)
       const existsResult = await pool.query(
         `SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2`,
         [schemaName, pgTableName]
       );
       if (existsResult.rows.length > 0) {
-        await logImport('error', `Table "${pgTableName}" already exists in target database`);
-        return res.status(409).json({ error: `Table "${pgTableName}" already exists in target database` });
+        if (!force) {
+          await logImport('error', `Table "${pgTableName}" already exists in target database`);
+          return res.status(409).json({ error: `Table "${pgTableName}" already exists in target database` });
+        }
       }
 
       // 5. BEGIN transaction
@@ -615,15 +634,32 @@ module.exports = function(pool) {
       try {
         await client.query('BEGIN');
 
+        // Drop existing table if force re-import
+        if (force && existsResult.rows.length > 0) {
+          await client.query(`DROP TABLE IF EXISTS ${schemaName}.${quoteIdent(pgTableName)} CASCADE`);
+        }
+
         // 6. CREATE TABLE
+        const calculatedWarnings = [];
         const colDefs = columnInfo.map(col => {
           let def = `${quoteIdent(col.pgName)} `;
-          if (col.isAutoNumber) {
+          if (col.isCalculated && col.expression) {
+            try {
+              const pgExpr = convertAccessExpression(col.expression);
+              def += `${col.pgType} GENERATED ALWAYS AS (${pgExpr}) STORED`;
+            } catch (exprErr) {
+              calculatedWarnings.push(`Column "${col.originalName}": expression conversion failed (${exprErr.message}), created as nullable ${col.pgType} instead`);
+              def += col.pgType;
+            }
+          } else if (col.isCalculated && !col.expression) {
+            calculatedWarnings.push(`Column "${col.originalName}": no expression extracted from Access, created as nullable ${col.pgType} instead`);
+            def += col.pgType;
+          } else if (col.isAutoNumber) {
             def += 'integer GENERATED BY DEFAULT AS IDENTITY';
           } else {
             def += col.pgType;
           }
-          if (col.required && !col.isAutoNumber) {
+          if (col.required && !col.isAutoNumber && !col.isCalculated) {
             def += ' NOT NULL';
           }
           return def;
@@ -637,7 +673,9 @@ module.exports = function(pool) {
         await client.query(createSQL);
 
         // 7. Batch INSERT rows (500 per statement)
-        const hasIdentity = columnInfo.some(c => c.isAutoNumber);
+        // Exclude generated (calculated) columns — PG computes their values
+        const insertableColumns = columnInfo.filter(c => !c.isCalculated);
+        const hasIdentity = insertableColumns.some(c => c.isAutoNumber);
         const BATCH_SIZE = 500;
 
         for (let i = 0; i < rows.length; i += BATCH_SIZE) {
@@ -650,7 +688,7 @@ module.exports = function(pool) {
 
           for (const row of batch) {
             const placeholders = [];
-            for (const col of columnInfo) {
+            for (const col of insertableColumns) {
               const val = row[col.originalName];
               placeholders.push(`$${paramIdx++}`);
               params.push(val === undefined ? null : val);
@@ -658,7 +696,7 @@ module.exports = function(pool) {
             valueClauses.push(`(${placeholders.join(', ')})`);
           }
 
-          const colNames = columnInfo.map(c => quoteIdent(c.pgName)).join(', ');
+          const colNames = insertableColumns.map(c => quoteIdent(c.pgName)).join(', ');
           const overriding = hasIdentity ? ' OVERRIDING SYSTEM VALUE' : '';
           const insertSQL = `INSERT INTO ${quoteIdent(schemaName)}.${quoteIdent(pgTableName)} (${colNames})${overriding}\nVALUES ${valueClauses.join(',\n')}`;
           await client.query(insertSQL, params);
@@ -681,13 +719,13 @@ module.exports = function(pool) {
           }
         }
 
-        // 9. Create non-PK indexes
+        // 9. Create non-PK indexes (prefix with table name to avoid cross-table collisions)
         for (const idx of indexes) {
           if (idx.primary) continue;
           const idxColNames = idx.fields.map(f => quoteIdent(sanitizeName(f))).join(', ');
-          const idxName = sanitizeName(idx.name);
+          const idxName = `${pgTableName}_${sanitizeName(idx.name)}`;
           const uniqueStr = idx.unique ? 'UNIQUE ' : '';
-          const createIdxSQL = `CREATE ${uniqueStr}INDEX ${quoteIdent(idxName)} ON ${quoteIdent(schemaName)}.${quoteIdent(pgTableName)} (${idxColNames})`;
+          const createIdxSQL = `CREATE ${uniqueStr}INDEX IF NOT EXISTS ${quoteIdent(idxName)} ON ${quoteIdent(schemaName)}.${quoteIdent(pgTableName)} (${idxColNames})`;
           await client.query(createIdxSQL);
         }
 
@@ -705,10 +743,13 @@ module.exports = function(pool) {
 
       // 12. Log success
       const skippedNames = (tableData.skippedColumns || []).map(c => c.name);
+      const calculatedCols = columnInfo.filter(c => c.isCalculated);
       const logId = await logImport('success', null, {
         fieldCount: fields.length,
         rowCount: rows.length,
-        skippedColumns: skippedNames.length > 0 ? skippedNames : undefined
+        skippedColumns: skippedNames.length > 0 ? skippedNames : undefined,
+        calculatedColumns: calculatedCols.length > 0 ? calculatedCols.map(c => c.originalName) : undefined,
+        calculatedWarnings: calculatedWarnings.length > 0 ? calculatedWarnings : undefined
       });
 
       // 13. Create issues for skipped columns
@@ -726,15 +767,32 @@ module.exports = function(pool) {
         }
       }
 
+      // 14. Create issues for calculated column warnings
+      if (logId && calculatedWarnings.length > 0) {
+        try {
+          for (const warning of calculatedWarnings) {
+            await pool.query(`
+              INSERT INTO shared.import_issues
+                (import_log_id, database_id, object_name, object_type, severity, category, message)
+              VALUES ($1, $2, $3, 'table', 'warning', 'calculated-column', $4)
+            `, [logId, targetDatabaseId, tableName, warning]);
+          }
+        } catch (issueErr) {
+          console.error('Error creating import issues for calculated columns:', issueErr);
+        }
+      }
+
       res.json({
         success: true,
         tableName: pgTableName,
         fieldCount: fields.length,
         rowCount: rows.length,
-        skippedColumns: skippedNames
+        skippedColumns: skippedNames,
+        calculatedColumns: calculatedCols.map(c => c.originalName),
+        calculatedWarnings
       });
     } catch (err) {
-      console.error('Error importing table:', err);
+      console.error(`Error importing table "${tableName}":`, err);
       logError(pool, 'POST /api/access-import/import-table', 'Failed to import table', err, {
         details: { databasePath, tableName, targetDatabaseId }
       });
@@ -749,7 +807,7 @@ module.exports = function(pool) {
    * convert to PostgreSQL view or function, execute DDL.
    */
   router.post('/import-query', async (req, res) => {
-    const { databasePath, queryName, targetDatabaseId } = req.body;
+    const { databasePath, queryName, targetDatabaseId, force } = req.body;
 
     const logImport = makeLogImport(pool, databasePath, queryName, 'query', targetDatabaseId);
 
@@ -800,31 +858,38 @@ module.exports = function(pool) {
       // 4. Convert Access SQL → PostgreSQL
       const result = convertAccessQuery(queryData, schemaName, columnTypes);
 
+      // Surface parameter extraction warning from PowerShell
+      if (queryData.paramWarning) {
+        result.warnings.push(queryData.paramWarning);
+      }
+
       if (result.statements.length === 0) {
         await logImport('error', 'No SQL statements generated', { warnings: result.warnings });
         return res.status(400).json({ error: 'No SQL statements generated', warnings: result.warnings });
       }
 
-      // 4. Check name conflicts (views + functions)
+      // 4. Check name conflicts (views + functions) — skip when force re-importing
       const pgName = result.pgObjectName;
-      if (result.pgObjectType === 'view') {
-        const existsResult = await pool.query(
-          `SELECT 1 FROM information_schema.views WHERE table_schema = $1 AND table_name = $2`,
-          [schemaName, pgName]
-        );
-        if (existsResult.rows.length > 0) {
-          await logImport('error', `View "${pgName}" already exists in target database`);
-          return res.status(409).json({ error: `View "${pgName}" already exists in target database` });
+      if (!force) {
+        if (result.pgObjectType === 'view') {
+          const existsResult = await pool.query(
+            `SELECT 1 FROM information_schema.views WHERE table_schema = $1 AND table_name = $2`,
+            [schemaName, pgName]
+          );
+          if (existsResult.rows.length > 0) {
+            await logImport('error', `View "${pgName}" already exists in target database`);
+            return res.status(409).json({ error: `View "${pgName}" already exists in target database` });
+          }
         }
-      }
-      if (result.pgObjectType === 'function') {
-        const existsResult = await pool.query(
-          `SELECT 1 FROM information_schema.routines WHERE routine_schema = $1 AND routine_name = $2`,
-          [schemaName, pgName]
-        );
-        if (existsResult.rows.length > 0) {
-          await logImport('error', `Function "${pgName}" already exists in target database`);
-          return res.status(409).json({ error: `Function "${pgName}" already exists in target database` });
+        if (result.pgObjectType === 'function') {
+          const existsResult = await pool.query(
+            `SELECT 1 FROM information_schema.routines WHERE routine_schema = $1 AND routine_name = $2`,
+            [schemaName, pgName]
+          );
+          if (existsResult.rows.length > 0) {
+            await logImport('error', `Function "${pgName}" already exists in target database`);
+            return res.status(409).json({ error: `Function "${pgName}" already exists in target database` });
+          }
         }
       }
 
@@ -882,7 +947,7 @@ module.exports = function(pool) {
         originalType: queryData.queryType
       });
     } catch (err) {
-      console.error('Error importing query:', err);
+      console.error(`Error importing query "${queryName}":`, err);
       logError(pool, 'POST /api/access-import/import-query', 'Failed to import query', err, {
         details: { databasePath, queryName, targetDatabaseId }
       });

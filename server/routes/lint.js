@@ -359,7 +359,16 @@ function getControlField(control) {
   if (cs && typeof cs === 'string' && cs.startsWith('=')) {
     return null; // Expression — skip field validation
   }
-  return cs || control.field || null;
+  let field = cs || control.field || null;
+  // Expressions can also end up in .field from older imports
+  if (field && typeof field === 'string' && field.startsWith('=')) {
+    return null;
+  }
+  // Strip Access table qualifier (e.g. "ingredient.ingredient" → "ingredient")
+  if (field && typeof field === 'string' && field.includes('.')) {
+    field = field.substring(field.indexOf('.') + 1);
+  }
+  return field;
 }
 
 /**

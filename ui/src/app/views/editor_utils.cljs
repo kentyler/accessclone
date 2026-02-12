@@ -50,18 +50,26 @@
 (defn resolve-field-value
   "Look up a field's value from a record.
    If field starts with '=', evaluates it as an Access expression.
-   Optional expr-context provides :group-records and :all-records for aggregates."
+   Optional expr-context provides :group-records and :all-records for aggregates.
+   Optional ctrl, if provided, checks for :computed-function (server-side domain functions)."
   ([field record]
-   (resolve-field-value field record nil))
+   (resolve-field-value field record nil nil))
   ([field record expr-context]
+   (resolve-field-value field record expr-context nil))
+  ([field record expr-context ctrl]
    (when field
-     (if (expr/expression? field)
-       (expr/evaluate-expression
-         (subs field 1)
-         (merge {:record record} expr-context))
-       (or (get record (keyword field))
-           (get record field)
-           "")))))
+     ;; If this control has a server-side computed function, read the pre-computed alias
+     (if-let [alias (when ctrl (get ctrl :computed-alias))]
+       (or (get record (keyword alias))
+           (get record alias)
+           "")
+       (if (expr/expression? field)
+         (expr/evaluate-expression
+           (subs field 1)
+           (merge {:record record} expr-context))
+         (or (get record (keyword field))
+             (get record field)
+             ""))))))
 
 (defn display-text
   "Get display text from a control, checking common text keys"

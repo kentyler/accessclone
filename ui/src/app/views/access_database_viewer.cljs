@@ -42,29 +42,44 @@
    2 :vertical
    3 :both})
 
+(defn- apply-control-source
+  "Map Access controlSource to :field or :control-source as appropriate."
+  [base ctrl]
+  (if-let [cs (:controlSource ctrl)]
+    (cond
+      ;; Expression (e.g. "=IIf(...)") — computed value, not a field binding
+      (and (string? cs) (clojure.string/starts-with? cs "="))
+      (assoc base :control-source cs)
+      ;; Table-qualified field (e.g. "ingredient.ingredient" → "ingredient")
+      (and (string? cs) (clojure.string/includes? cs "."))
+      (assoc base :field (subs cs (inc (clojure.string/index-of cs "."))))
+      ;; Simple field binding
+      :else (assoc base :field cs))
+    base))
+
 (defn- control-base
   "Build base control map with geometry, font, colors, data binding, caption."
   [ctrl]
-  (cond-> {:type (keyword (:type ctrl))
-           :name (:name ctrl)
-           :x (twips->px (:left ctrl))
-           :y (twips->px (:top ctrl))
-           :width (twips->px (:width ctrl))
-           :height (twips->px (:height ctrl))}
-    (:fontName ctrl)      (assoc :font-name (:fontName ctrl))
-    (:fontSize ctrl)      (assoc :font-size (:fontSize ctrl))
-    (:fontBold ctrl)      (assoc :font-bold true)
-    (:fontItalic ctrl)    (assoc :font-italic true)
-    (:fontUnderline ctrl) (assoc :font-underline true)
-    (:foreColor ctrl)     (assoc :fore-color (access-color->hex (:foreColor ctrl)))
-    (:backColor ctrl)     (assoc :back-color (access-color->hex (:backColor ctrl)))
-    (:borderColor ctrl)   (assoc :border-color (access-color->hex (:borderColor ctrl)))
-    (:controlSource ctrl) (assoc :field (:controlSource ctrl))
-    (:caption ctrl)       (assoc :text (:caption ctrl))
-    (:format ctrl)        (assoc :format (:format ctrl))
-    (:tooltip ctrl)       (assoc :tooltip (:tooltip ctrl))
-    (:tag ctrl)           (assoc :tag (:tag ctrl))
-    (false? (:visible ctrl)) (assoc :visible false)))
+  (-> (cond-> {:type (keyword (:type ctrl))
+               :name (:name ctrl)
+               :x (twips->px (:left ctrl))
+               :y (twips->px (:top ctrl))
+               :width (twips->px (:width ctrl))
+               :height (twips->px (:height ctrl))}
+        (:fontName ctrl)      (assoc :font-name (:fontName ctrl))
+        (:fontSize ctrl)      (assoc :font-size (:fontSize ctrl))
+        (:fontBold ctrl)      (assoc :font-bold true)
+        (:fontItalic ctrl)    (assoc :font-italic true)
+        (:fontUnderline ctrl) (assoc :font-underline true)
+        (:foreColor ctrl)     (assoc :fore-color (access-color->hex (:foreColor ctrl)))
+        (:backColor ctrl)     (assoc :back-color (access-color->hex (:backColor ctrl)))
+        (:borderColor ctrl)   (assoc :border-color (access-color->hex (:borderColor ctrl)))
+        (:caption ctrl)       (assoc :text (:caption ctrl))
+        (:format ctrl)        (assoc :format (:format ctrl))
+        (:tooltip ctrl)       (assoc :tooltip (:tooltip ctrl))
+        (:tag ctrl)           (assoc :tag (:tag ctrl))
+        (false? (:visible ctrl)) (assoc :visible false))
+      (apply-control-source ctrl)))
 
 (defn- apply-form-control-props
   "Apply form-specific properties to a base control map."
@@ -618,12 +633,14 @@
                                           :headers {"X-Database-ID" target-database-id}}))]
           (if (:success save-response)
             true
-            (do (state/log-event! "error" (str "Failed to save form: " form-name) "import-form"
-                                  {:error (get-in save-response [:body :error])})
-                false)))
-        (do (state/log-event! "error" (str "Failed to export form: " form-name) "import-form"
-                              {:error (get-in response [:body :error])})
-            false)))))
+            (let [err (or (get-in save-response [:body :error]) "Unknown error")]
+              (state/log-event! "error" (str "Failed to save form: " form-name) "import-form"
+                                {:error err})
+              {:error err})))
+        (let [err (or (get-in response [:body :error]) "Unknown error")]
+          (state/log-event! "error" (str "Failed to export form: " form-name) "import-form"
+                            {:error err})
+          {:error err})))))
 
 (defn import-report!
   "Import a single report: get JSON from Access, convert, save to target database"
@@ -648,12 +665,14 @@
                                           :headers {"X-Database-ID" target-database-id}}))]
           (if (:success save-response)
             true
-            (do (state/log-event! "error" (str "Failed to save report: " report-name) "import-report"
-                                  {:error (get-in save-response [:body :error])})
-                false)))
-        (do (state/log-event! "error" (str "Failed to export report: " report-name) "import-report"
-                              {:error (get-in response [:body :error])})
-            false)))))
+            (let [err (or (get-in save-response [:body :error]) "Unknown error")]
+              (state/log-event! "error" (str "Failed to save report: " report-name) "import-report"
+                                {:error err})
+              {:error err})))
+        (let [err (or (get-in response [:body :error]) "Unknown error")]
+          (state/log-event! "error" (str "Failed to export report: " report-name) "import-report"
+                            {:error err})
+          {:error err})))))
 
 (defn import-module!
   "Import a single module: get VBA source from Access, save to target database"
@@ -672,12 +691,14 @@
                                           :headers {"X-Database-ID" target-database-id}}))]
           (if (:success save-response)
             true
-            (do (state/log-event! "error" (str "Failed to save module: " module-name) "import-module"
-                                  {:error (get-in save-response [:body :error])})
-                false)))
-        (do (state/log-event! "error" (str "Failed to export module: " module-name) "import-module"
-                              {:error (get-in response [:body :error])})
-            false)))))
+            (let [err (or (get-in save-response [:body :error]) "Unknown error")]
+              (state/log-event! "error" (str "Failed to save module: " module-name) "import-module"
+                                {:error err})
+              {:error err})))
+        (let [err (or (get-in response [:body :error]) "Unknown error")]
+          (state/log-event! "error" (str "Failed to export module: " module-name) "import-module"
+                            {:error err})
+          {:error err})))))
 
 (defn import-macro!
   "Import a single macro: get XML definition from Access, save to target database"
@@ -696,40 +717,46 @@
                                           :headers {"X-Database-ID" target-database-id}}))]
           (if (:success save-response)
             true
-            (do (state/log-event! "error" (str "Failed to save macro: " macro-name) "import-macro"
-                                  {:error (get-in save-response [:body :error])})
-                false)))
-        (do (state/log-event! "error" (str "Failed to export macro: " macro-name) "import-macro"
-                              {:error (get-in response [:body :error])})
-            false)))))
+            (let [err (or (get-in save-response [:body :error]) "Unknown error")]
+              (state/log-event! "error" (str "Failed to save macro: " macro-name) "import-macro"
+                                {:error err})
+              {:error err})))
+        (let [err (or (get-in response [:body :error]) "Unknown error")]
+          (state/log-event! "error" (str "Failed to export macro: " macro-name) "import-macro"
+                            {:error err})
+          {:error err})))))
 
 (defn import-table!
   "Import a single table: server-side pipeline extracts structure + data from Access and creates PG table"
-  [access-db-path table-name target-database-id]
+  [access-db-path table-name target-database-id & [{:keys [force?]}]]
   (go
     (let [response (<! (http/post (str api-base "/api/access-import/import-table")
-                                  {:json-params {:databasePath access-db-path
-                                                 :tableName table-name
-                                                 :targetDatabaseId target-database-id}}))]
+                                  {:json-params (cond-> {:databasePath access-db-path
+                                                         :tableName table-name
+                                                         :targetDatabaseId target-database-id}
+                                                  force? (assoc :force true))}))]
       (if (and (:success response) (get-in response [:body :success]))
         true
-        (do (state/log-event! "error" (str "Failed to import table: " table-name) "import-table"
-                              {:error (get-in response [:body :error])})
-            false)))))
+        (let [err (or (get-in response [:body :error]) "Unknown error")]
+          (state/log-event! "error" (str "Failed to import table: " table-name) "import-table"
+                            {:error err})
+          {:error err})))))
 
 (defn import-query!
   "Import a single query: server-side pipeline extracts SQL from Access, converts to PG view/function"
-  [access-db-path query-name target-database-id]
+  [access-db-path query-name target-database-id & [{:keys [force?]}]]
   (go
     (let [response (<! (http/post (str api-base "/api/access-import/import-query")
-                                  {:json-params {:databasePath access-db-path
-                                                 :queryName query-name
-                                                 :targetDatabaseId target-database-id}}))]
+                                  {:json-params (cond-> {:databasePath access-db-path
+                                                         :queryName query-name
+                                                         :targetDatabaseId target-database-id}
+                                                  force? (assoc :force true))}))]
       (if (and (:success response) (get-in response [:body :success]))
         true
-        (do (state/log-event! "error" (str "Failed to import query: " query-name) "import-query"
-                              {:error (get-in response [:body :error])})
-            false)))))
+        (let [err (or (get-in response [:body :error]) "Unknown error")]
+          (state/log-event! "error" (str "Failed to import query: " query-name) "import-query"
+                            {:error err})
+          {:error err})))))
 
 (defn import-selected!
   "Import selected forms/reports/modules/tables to the current AccessClone database"
@@ -793,11 +820,28 @@
             []
             paths)))
 
+(defn- all-source-objects
+  "Return [path name] tuples of ALL source objects for a given type,
+   across all selected databases. Each name only appears once (first path wins)."
+  [obj-type]
+  (let [paths (:selected-paths @viewer-state)
+        cache (:access-db-cache @viewer-state)
+        seen (atom #{})]
+    (reduce (fn [acc p]
+              (let [items (get (get cache p) obj-type [])
+                    names (map get-item-name items)
+                    fresh (remove #(contains? @seen (sanitize-name %)) names)]
+                (swap! seen into (map sanitize-name fresh))
+                (into acc (map (fn [n] [p n]) fresh))))
+            []
+            paths)))
+
 (defn import-all!
   "Import all objects across all phases from all selected databases with smart retry loop.
    Processes in dependency order: tables → queries → forms → reports → macros → modules.
-   Within each phase, retries failed objects until no more progress is made."
-  [target-database-id]
+   Within each phase, retries failed objects until no more progress is made.
+   When force? is true, re-imports ALL objects regardless of existing status."
+  [target-database-id & [{:keys [force?]}]]
   (swap! viewer-state assoc
          :import-all-active? true
          :importing? true
@@ -809,7 +853,8 @@
       (doseq [{:keys [phase label types]} import-phases]
         ;; Collect all not-yet-imported objects: [obj-type path name] tuples
         (let [phase-items (atom (vec (mapcat (fn [t]
-                                               (map (fn [[p n]] [t p n]) (not-yet-imported t)))
+                                               (map (fn [[p n]] [t p n])
+                                                    (if force? (all-source-objects t) (not-yet-imported t))))
                                              types)))]
           (when (seq @phase-items)
             (swap! viewer-state assoc-in [:import-all-status :phase] phase)
@@ -822,19 +867,20 @@
                 (doseq [[obj-type db-path obj-name] remaining]
                   (swap! viewer-state assoc-in [:import-all-status :current] obj-name)
                   (let [import-fn (import-fn-for-type obj-type)
-                        result (<! (import-fn db-path obj-name target-database-id))]
-                    (if result
+                        result (<! (import-fn db-path obj-name target-database-id (when force? {:force? true})))]
+                    (if (true? result)
                       (do (swap! imported-this-pass inc)
                           (swap! total-imported inc)
                           (swap! viewer-state assoc-in [:import-all-status :imported] @total-imported))
-                      (swap! still-pending conj [obj-type db-path obj-name]))))
+                      (swap! still-pending conj [obj-type db-path obj-name
+                                                 (if (map? result) (:error result) "Unknown error")]))))
                 (reset! phase-items @still-pending)
                 ;; Continue if we made progress and still have pending items
                 (when (and (seq @phase-items) (pos? @imported-this-pass))
                   (recur (inc pass)))))
             ;; Record any remaining as failed
-            (doseq [[obj-type _ obj-name] @phase-items]
-              (swap! total-failed conj {:type obj-type :name obj-name}))
+            (doseq [[obj-type _ obj-name err] @phase-items]
+              (swap! total-failed conj {:type obj-type :name obj-name :error err}))
             ;; Refresh target-existing after this phase (await completion)
             (<! (load-target-existing-async! target-database-id)))))
       ;; Compute total — aggregate across all selected databases
@@ -1133,15 +1179,23 @@
          (if (= phase :done)
            ;; Summary
            [:div.import-all-summary
-            [:strong (str "Import complete: " imported " imported")]
+            [:div {:style {:display "flex" :align-items "center" :gap "8px"}}
+             [:strong (str "Import complete: " imported " imported")]
+             (when (seq failed)
+               [:span.import-all-failed (str ", " (count failed) " failed")])
+             [:button.btn-link
+              {:on-click #(swap! viewer-state assoc :import-all-status nil)}
+              "Dismiss"]]
             (when (seq failed)
-              [:span.import-all-failed
-               (str ", " (count failed) " failed: "
-                    (str/join ", " (map #(str (name (:type %)) " " (:name %)) failed)))])
-            [:button.btn-link
-             {:on-click #(swap! viewer-state assoc :import-all-status nil)
-              :style {:margin-left "8px"}}
-             "Dismiss"]]
+              [:div.import-all-failed-details
+               {:style {:max-height "200px" :overflow-y "auto" :margin-top "6px"
+                        :font-size "12px" :line-height "1.5"}}
+               (for [{:keys [type name error]} failed]
+                 ^{:key (str (clojure.core/name type) "-" name)}
+                 [:div {:style {:padding "2px 0"}}
+                  [:span {:style {:font-weight "500"}} (str (clojure.core/name type) " " name)]
+                  (when error
+                    [:span {:style {:color "#999" :margin-left "6px"}} (str "— " error)])])])]
            ;; In progress
            [:div.import-all-running
             [:span.importing-indicator "Importing... "]
@@ -1212,12 +1266,18 @@
      [source-databases-list]
      [:div.header-actions
       (let [{:keys [target-database-id importing?]} @viewer-state
-            total-remaining (reduce + (map #(count (not-yet-imported %))
-                                           [:tables :queries :forms :reports :modules :macros]))]
-        (when (and target-database-id (pos? total-remaining) (not importing?) (not error))
-          [:button.btn-primary.import-all-btn
-           {:on-click #(import-all! target-database-id)}
-           (str "Import All (" total-remaining ")")]))
+            all-types [:tables :queries :forms :reports :modules :macros]
+            total-remaining (reduce + (map #(count (not-yet-imported %)) all-types))
+            total-all (reduce + (map #(count (all-source-objects %)) all-types))]
+        [:<>
+         (when (and target-database-id (pos? total-remaining) (not importing?) (not error))
+           [:button.btn-primary.import-all-btn
+            {:on-click #(import-all! target-database-id)}
+            (str "Import All (" total-remaining ")")])
+         (when (and target-database-id (pos? total-all) (not importing?) (not error))
+           [:button.btn-secondary.reimport-all-btn
+            {:on-click #(import-all! target-database-id {:force? true})}
+            (str "Re-import All (" total-all ")")])])
       [target-database-selector]]]]
    [:div.viewer-body
     [:div.viewer-main

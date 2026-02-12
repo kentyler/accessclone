@@ -10,8 +10,9 @@ param(
     [string]$TableName
 )
 
-# Types to skip: OLE (11), Binary (17), Calculated (18), Attachment (19)
-$skipTypes = @(11, 17, 18, 19)
+# Types to skip: OLE (11), Binary (17), Attachment (19)
+# Note: Calculated (18) is now handled — extracted as PG generated columns
+$skipTypes = @(11, 17, 19)
 
 # Remove lock file if exists
 $lockFile = $DatabasePath -replace '\.accdb$', '.laccdb'
@@ -59,8 +60,28 @@ try {
             }
         } catch {}
 
+        # For calculated columns (type 18), extract expression and result type
+        if ($typeCode -eq 18) {
+            $fieldInfo.isCalculated = $true
+            try {
+                $fieldInfo.expression = $field.Expression
+            } catch {
+                $fieldInfo.expression = $null
+            }
+            # Get the result type from the calculated field's ResultType property
+            try {
+                $fieldInfo.resultType = [int]$field.Properties.Item("ResultType").Value
+            } catch {
+                $fieldInfo.resultType = 10  # Default to text if can't determine
+            }
+        }
+
         $fields += $fieldInfo
-        $includedFieldNames += $field.Name
+        # Don't add calculated fields to $includedFieldNames — their values are
+        # computed by PG and can't be INSERT'd into a GENERATED column.
+        if ($typeCode -ne 18) {
+            $includedFieldNames += $field.Name
+        }
     }
 
     # Extract indexes
@@ -89,17 +110,27 @@ try {
                 $val = $rs.Fields.Item($fname).Value
                 $fType = $rs.Fields.Item($fname).Type
 
-                if ($null -eq $val) {
+                if ($null -eq $val -or $val -is [System.DBNull]) {
                     $row[$fname] = $null
                 } elseif ($fType -eq 1) {
                     # Yes/No -> boolean
                     $row[$fname] = [bool]$val
                 } elseif ($fType -eq 8) {
                     # Date/Time -> ISO 8601
-                    $row[$fname] = ([datetime]$val).ToString("yyyy-MM-ddTHH:mm:ss")
+                    try {
+                        $row[$fname] = ([datetime]$val).ToString("yyyy-MM-ddTHH:mm:ss")
+                    } catch {
+                        $row[$fname] = $null
+                    }
                 } elseif ($fType -eq 15) {
                     # GUID -> string
                     $row[$fname] = $val.ToString()
+                } elseif ($fType -eq 10 -or $fType -eq 12) {
+                    # Text/Memo -> force string, sanitize control chars that break JSON
+                    $str = [string]$val
+                    # Remove NUL and other control chars (keep tab 0x09, newline 0x0A, CR 0x0D)
+                    $str = $str -replace '[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', ''
+                    $row[$fname] = $str
                 } else {
                     $row[$fname] = $val
                 }

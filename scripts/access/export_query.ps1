@@ -40,29 +40,35 @@ try {
     # Extract SQL
     $sql = $queryDef.SQL
 
-    # Extract parameters
+    # Extract parameters — may fail if SQL uses VBA functions like Nz()
     $parameters = @()
-    foreach ($param in $queryDef.Parameters) {
-        # DAO parameter Type codes:
-        # 1=Boolean, 2=Byte, 3=Integer, 4=Long, 5=Currency,
-        # 6=Single, 7=Double, 8=Date, 10=Text, 12=Memo
-        $paramType = switch ([int]$param.Type) {
-            1 { "Boolean" }
-            2 { "Byte" }
-            3 { "Integer" }
-            4 { "Long" }
-            5 { "Currency" }
-            6 { "Single" }
-            7 { "Double" }
-            8 { "Date" }
-            10 { "Text" }
-            12 { "Memo" }
-            default { "Text" }
+    $paramWarning = $null
+    try {
+        foreach ($param in $queryDef.Parameters) {
+            # DAO parameter Type codes:
+            # 1=Boolean, 2=Byte, 3=Integer, 4=Long, 5=Currency,
+            # 6=Single, 7=Double, 8=Date, 10=Text, 12=Memo
+            $paramType = switch ([int]$param.Type) {
+                1 { "Boolean" }
+                2 { "Byte" }
+                3 { "Integer" }
+                4 { "Long" }
+                5 { "Currency" }
+                6 { "Single" }
+                7 { "Double" }
+                8 { "Date" }
+                10 { "Text" }
+                12 { "Memo" }
+                default { "Text" }
+            }
+            $parameters += @{
+                name = $param.Name
+                type = $paramType
+            }
         }
-        $parameters += @{
-            name = $param.Name
-            type = $paramType
-        }
+    }
+    catch {
+        $paramWarning = "Could not extract parameters: $($_.Exception.Message)"
     }
 
     $result = @{
@@ -71,6 +77,9 @@ try {
         queryTypeCode = $typeCode
         sql = $sql
         parameters = $parameters
+    }
+    if ($paramWarning) {
+        $result.paramWarning = $paramWarning
     }
 
     $result | ConvertTo-Json -Depth 10 -Compress

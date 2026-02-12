@@ -389,7 +389,7 @@
   [ctrl current-record on-change & [{:keys [auto-focus? allow-edits? all-controls]}]]
   (let [ctrl-type (:type ctrl)
         field (fu/resolve-control-field ctrl)
-        value (fu/resolve-field-value field current-record)
+        value (fu/resolve-field-value field current-record nil ctrl)
         renderer (get control-renderers ctrl-type render-default)
         base-style (fu/control-style ctrl)
         cf-style (expr/apply-conditional-formatting ctrl current-record nil)

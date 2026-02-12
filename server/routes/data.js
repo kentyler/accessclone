@@ -100,7 +100,39 @@ module.exports = function(pool) {
         return res.status(400).json({ error: 'Invalid source name' });
       }
 
-      let query = `SELECT * FROM "${source}"`;
+      // Parse computed columns (server-side domain function results)
+      let computedCols = [];
+      if (req.query.computed) {
+        try {
+          const parsed = JSON.parse(req.query.computed);
+          if (Array.isArray(parsed)) {
+            for (const spec of parsed) {
+              // Validate all names to prevent SQL injection
+              if (spec.fn && NAME_RE.test(spec.fn) &&
+                  spec.alias && NAME_RE.test(spec.alias) &&
+                  Array.isArray(spec.params) && spec.params.every(p => NAME_RE.test(p))) {
+                computedCols.push(spec);
+              }
+            }
+          }
+        } catch (e) {
+          // Invalid computed JSON, ignore
+        }
+      }
+
+      // Build SELECT clause — add computed function calls if any
+      let selectClause;
+      if (computedCols.length > 0) {
+        const fnCalls = computedCols.map(spec => {
+          const args = spec.params.map(p => `t.${quoteIdent(p)}`).join(', ');
+          return `${quoteIdent(spec.fn)}(${args}) AS ${quoteIdent(spec.alias)}`;
+        });
+        selectClause = `SELECT t.*${fnCalls.length ? ', ' + fnCalls.join(', ') : ''} FROM "${source}" t`;
+      } else {
+        selectClause = `SELECT * FROM "${source}"`;
+      }
+
+      let query = selectClause;
       const params = [];
       let paramIdx = 1;
 

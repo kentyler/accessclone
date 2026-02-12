@@ -240,10 +240,10 @@ function applySyntaxTranslations(sql) {
     return `LIKE '${pgPattern}'`;
   });
 
-  // Remove square brackets → quoted identifiers
+  // Remove square brackets → quoted identifiers (sanitized to match PG import names)
   sql = sql.replace(/\[([^\]]+)\]/g, (match, inner) => {
     if (inner.match(/^p_/)) return match;
-    return `"${inner}"`;
+    return `"${sanitizeName(inner)}"`;
   });
 
   // Access bang notation: Forms!FormName.ControlName → just field
@@ -262,15 +262,60 @@ function applySyntaxTranslations(sql) {
 // ============================================================
 
 function addSchemaPrefix(sql, schemaName) {
-  return sql.replace(
-    /\b(FROM|JOIN|INTO|UPDATE|TABLE)\s+("?[a-zA-Z_][\w]*"?)(?!\s*\.)/gi,
-    (match, keyword, tableName) => {
-      const lower = tableName.replace(/"/g, '').toLowerCase();
-      const reserved = new Set(['select', 'where', 'set', 'values', 'as', 'on', 'and', 'or', 'not', 'in', 'exists', 'null', 'true', 'false']);
-      if (reserved.has(lower)) return match;
-      return `${keyword} ${schemaName}.${tableName}`;
+  const reserved = new Set([
+    'select', 'where', 'set', 'values', 'as', 'on', 'and', 'or', 'not', 'in',
+    'exists', 'null', 'true', 'false', 'inner', 'left', 'right', 'outer',
+    'cross', 'full', 'group', 'order', 'having', 'limit', 'union', 'case',
+    'when', 'then', 'else', 'end', 'between', 'like', 'is', 'distinct'
+  ]);
+
+  function prefixOne(tableName, hasAlias) {
+    const sanitized = sanitizeName(tableName.replace(/"/g, ''));
+    if (reserved.has(sanitized)) return tableName;
+    // Add alias so that SELECT/WHERE refs like TableName.Column still resolve
+    const prefix = `${schemaName}."${sanitized}"`;
+    return hasAlias ? prefix : `${prefix} ${sanitized}`;
+  }
+
+  // Check if a word following a table name is a real alias (not a SQL keyword)
+  function isRealAlias(aliasClause) {
+    if (!aliasClause || !aliasClause.trim()) return false;
+    const word = aliasClause.trim().replace(/^AS\s+/i, '').toLowerCase();
+    return word.length > 0 && !reserved.has(word);
+  }
+
+  // Match table references after FROM, JOIN, INTO, UPDATE, TABLE keywords.
+  // Allows optional leading parens for Access-style joins: FROM (TableA INNER JOIN TableB ...)
+  sql = sql.replace(
+    /\b(FROM|JOIN|INTO|UPDATE|TABLE)(\s+\(*\s*)("?[a-zA-Z_][\w]*"?)(\s+(?:AS\s+)?[a-zA-Z_]\w*)?/gi,
+    (match, keyword, gap, tableName, aliasClause) => {
+      const sanitized = sanitizeName(tableName.replace(/"/g, ''));
+      if (reserved.has(sanitized)) return match;
+      const hasAlias = isRealAlias(aliasClause);
+      return `${keyword}${gap}${prefixOne(tableName, hasAlias)}${aliasClause || ''}`;
     }
   );
+
+  // Handle comma-separated tables: ..., tableName [AS alias]
+  // Only match commas that follow a schema-prefixed table (to avoid matching SELECT commas)
+  sql = sql.replace(
+    new RegExp(
+      '(' + escapeRegex(schemaName) + '\\."\\w+"' +  // already-prefixed table
+      '(?:\\s+\\w+)?' +                                // optional alias
+      ')\\s*,\\s*' +                                   // comma
+      '("?[a-zA-Z_][\\w]*"?)' +                       // next table name
+      '(\\s+(?:AS\\s+)?[a-zA-Z_]\\w*)?',              // optional alias for next table
+      'gi'
+    ),
+    (match, before, tableName, aliasClause) => {
+      const sanitized = sanitizeName(tableName.replace(/"/g, ''));
+      if (reserved.has(sanitized)) return match;
+      const hasAlias = isRealAlias(aliasClause);
+      return `${before}, ${prefixOne(tableName, hasAlias)}${aliasClause || ''}`;
+    }
+  );
+
+  return sql;
 }
 
 // ============================================================
@@ -346,77 +391,11 @@ function findFromClause(sql, startIdx) {
 // ============================================================
 
 function extractCalculatedColumns(sql, schemaName, queryName) {
-  const extractedFunctions = [];
-
-  if (!/^\s*SELECT\b/i.test(sql)) {
-    return { modifiedSql: sql, extractedFunctions };
-  }
-
-  const selectMatch = sql.match(/^\s*SELECT\s+(DISTINCT\s+)?/i);
-  if (!selectMatch) return { modifiedSql: sql, extractedFunctions };
-
-  const afterSelect = selectMatch.index + selectMatch[0].length;
-  const fromIdx = findFromClause(sql, afterSelect);
-  if (fromIdx === -1) return { modifiedSql: sql, extractedFunctions };
-
-  const selectList = sql.substring(afterSelect, fromIdx).trim();
-  const afterFrom = sql.substring(fromIdx);
-  const items = parseSelectList(selectList);
-  const sanitizedQueryName = sanitizeName(queryName);
-
-  const newItems = items.map(item => {
-    const asMatch = item.match(/^(.+?)\s+AS\s+("?[\w\s]+"?)\s*$/i);
-    if (!asMatch) return item;
-
-    const expr = asMatch[1].trim();
-    const alias = asMatch[2].trim().replace(/"/g, '');
-
-    // Skip simple field references
-    if (/^"?[\w]+"?$/.test(expr)) return item;
-    if (/^"?[\w]+"?\."?[\w]+"?$/.test(expr)) return item;
-
-    const funcName = `${sanitizedQueryName}_calc_${sanitizeName(alias)}`;
-
-    // Determine return type heuristically
-    let returnType = 'text';
-    if (/\b(COUNT|SUM|AVG)\b/i.test(expr)) returnType = 'numeric';
-    else if (/\b(FLOOR|ROUND|SIGN|ABS|LENGTH|POSITION)\b/i.test(expr)) returnType = 'integer';
-    else if (/::integer\b/i.test(expr)) returnType = 'integer';
-    else if (/::bigint\b/i.test(expr)) returnType = 'bigint';
-    else if (/::numeric/i.test(expr)) returnType = 'numeric';
-    else if (/::double precision/i.test(expr)) returnType = 'double precision';
-    else if (/::date\b/i.test(expr)) returnType = 'date';
-    else if (/::timestamp\b/i.test(expr)) returnType = 'timestamp';
-    else if (/::boolean\b/i.test(expr)) returnType = 'boolean';
-
-    // Find referenced column names
-    const referencedCols = [];
-    const colRefs = expr.match(/"[\w\s]+"/g) || [];
-    colRefs.forEach(ref => {
-      const colName = ref.replace(/"/g, '');
-      if (!referencedCols.find(c => c.name === colName)) {
-        referencedCols.push({ name: colName, pgName: sanitizeName(colName), type: 'text' });
-      }
-    });
-
-    let funcExpr = expr;
-    const funcParams = referencedCols.map(col => {
-      funcExpr = funcExpr.replace(new RegExp(`"${escapeRegex(col.name)}"`, 'g'), `p_${col.pgName}`);
-      return `p_${col.pgName} text`;
-    });
-
-    extractedFunctions.push({
-      name: funcName,
-      sql: `CREATE OR REPLACE FUNCTION ${schemaName}.${funcName}(${funcParams.join(', ')}) RETURNS ${returnType} AS $$\n  SELECT ${funcExpr}\n$$ LANGUAGE SQL IMMUTABLE`,
-      returnType
-    });
-
-    const callArgs = referencedCols.map(col => `"${col.name}"`).join(', ');
-    return `${schemaName}.${funcName}(${callArgs}) AS "${alias}"`;
-  });
-
-  const modifiedSql = sql.substring(0, afterSelect) + newItems.join(', ') + ' ' + afterFrom;
-  return { modifiedSql, extractedFunctions };
+  // Pass through — calculated column expressions (e.g. [Price] * [Qty] AS Total)
+  // stay inline in the view/function. PG resolves column types from the underlying
+  // tables, which avoids the type-mismatch and phantom-table bugs that the old
+  // function-extraction approach caused.
+  return { modifiedSql: sql, extractedFunctions: [] };
 }
 
 // ============================================================
@@ -740,4 +719,16 @@ function convertAccessQuery(queryData, schemaName, columnTypes) {
   return { statements, pgObjectName: pgName, pgObjectType, warnings, extractedFunctions };
 }
 
-module.exports = { convertAccessQuery, sanitizeName };
+/**
+ * Convert a standalone Access expression (e.g. from a calculated column)
+ * to PostgreSQL syntax. Applies function + syntax translations without
+ * schema-prefix or DDL logic.
+ */
+function convertAccessExpression(expr) {
+  let result = expr;
+  result = applyFunctionTranslations(result);
+  result = applySyntaxTranslations(result);
+  return result;
+}
+
+module.exports = { convertAccessQuery, convertAccessExpression, sanitizeName };

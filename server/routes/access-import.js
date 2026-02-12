@@ -449,6 +449,239 @@ module.exports = function(pool) {
   });
 
   /**
+   * POST /api/access-import/export-forms-batch
+   * Export multiple forms from Access in a single COM session
+   */
+  router.post('/export-forms-batch', async (req, res) => {
+    const { databasePath, objectNames, targetDatabaseId } = req.body;
+
+    try {
+      if (!databasePath || !objectNames || !Array.isArray(objectNames) || objectNames.length === 0) {
+        return res.status(400).json({ error: 'databasePath and objectNames[] required' });
+      }
+
+      const scriptsDir = path.join(__dirname, '..', '..', 'scripts', 'access');
+      const exportScript = path.join(scriptsDir, 'export_forms_batch.ps1');
+
+      const jsonOutput = await runPowerShell(exportScript, [
+        '-DatabasePath', databasePath,
+        '-FormNames', objectNames.join(',')
+      ]);
+
+      const cleanOutput = jsonOutput.replace(/^\uFEFF/, '').trim();
+      const jsonStart = cleanOutput.indexOf('{');
+      if (jsonStart === -1) {
+        throw new Error('No JSON object found in PowerShell output');
+      }
+      const batchData = JSON.parse(cleanOutput.substring(jsonStart));
+
+      // Log each successful export
+      for (const [formName, formData] of Object.entries(batchData.objects || {})) {
+        const logImport = makeLogImport(pool, databasePath, formName, 'form', targetDatabaseId);
+        await logImport('success', null, { controls: formData.controls ? formData.controls.length : 0 });
+      }
+
+      // Log each error
+      for (const err of (batchData.errors || [])) {
+        const logImport = makeLogImport(pool, databasePath, err.name, 'form', targetDatabaseId);
+        await logImport('error', err.error);
+      }
+
+      res.json({
+        success: true,
+        objects: batchData.objects || {},
+        errors: batchData.errors || []
+      });
+    } catch (err) {
+      console.error('Error in batch form export:', err);
+      logError(pool, 'POST /api/access-import/export-forms-batch', 'Failed to batch export forms', err, {
+        details: { databasePath, objectNames, targetDatabaseId }
+      });
+      res.status(500).json({ error: err.message || 'Failed to batch export forms' });
+    }
+  });
+
+  /**
+   * POST /api/access-import/export-reports-batch
+   * Export multiple reports from Access in a single COM session
+   */
+  router.post('/export-reports-batch', async (req, res) => {
+    const { databasePath, objectNames, targetDatabaseId } = req.body;
+
+    try {
+      if (!databasePath || !objectNames || !Array.isArray(objectNames) || objectNames.length === 0) {
+        return res.status(400).json({ error: 'databasePath and objectNames[] required' });
+      }
+
+      const scriptsDir = path.join(__dirname, '..', '..', 'scripts', 'access');
+      const exportScript = path.join(scriptsDir, 'export_reports_batch.ps1');
+
+      const jsonOutput = await runPowerShell(exportScript, [
+        '-DatabasePath', databasePath,
+        '-ReportNames', objectNames.join(',')
+      ]);
+
+      const cleanOutput = jsonOutput.replace(/^\uFEFF/, '').trim();
+      const jsonStart = cleanOutput.indexOf('{');
+      if (jsonStart === -1) {
+        throw new Error('No JSON object found in PowerShell output');
+      }
+      const batchData = JSON.parse(cleanOutput.substring(jsonStart));
+
+      for (const [reportName, reportData] of Object.entries(batchData.objects || {})) {
+        const logImport = makeLogImport(pool, databasePath, reportName, 'report', targetDatabaseId);
+        const sectionCount = reportData.sections ? reportData.sections.length : 0;
+        await logImport('success', null, { sections: sectionCount });
+      }
+
+      for (const err of (batchData.errors || [])) {
+        const logImport = makeLogImport(pool, databasePath, err.name, 'report', targetDatabaseId);
+        await logImport('error', err.error);
+      }
+
+      res.json({
+        success: true,
+        objects: batchData.objects || {},
+        errors: batchData.errors || []
+      });
+    } catch (err) {
+      console.error('Error in batch report export:', err);
+      logError(pool, 'POST /api/access-import/export-reports-batch', 'Failed to batch export reports', err, {
+        details: { databasePath, objectNames, targetDatabaseId }
+      });
+      res.status(500).json({ error: err.message || 'Failed to batch export reports' });
+    }
+  });
+
+  /**
+   * POST /api/access-import/export-modules-batch
+   * Export multiple VBA modules from Access in a single COM session
+   */
+  router.post('/export-modules-batch', async (req, res) => {
+    const { databasePath, objectNames, targetDatabaseId } = req.body;
+
+    try {
+      if (!databasePath || !objectNames || !Array.isArray(objectNames) || objectNames.length === 0) {
+        return res.status(400).json({ error: 'databasePath and objectNames[] required' });
+      }
+
+      const scriptsDir = path.join(__dirname, '..', '..', 'scripts', 'access');
+      const exportScript = path.join(scriptsDir, 'export_modules_batch.ps1');
+
+      const jsonOutput = await runPowerShell(exportScript, [
+        '-DatabasePath', databasePath,
+        '-ModuleNames', objectNames.join(',')
+      ]);
+
+      const cleanOutput = jsonOutput.replace(/^\uFEFF/, '').trim();
+      const jsonStart = cleanOutput.indexOf('{');
+      if (jsonStart === -1) {
+        throw new Error('No JSON object found in PowerShell output');
+      }
+      const batchData = JSON.parse(cleanOutput.substring(jsonStart));
+
+      for (const [moduleName, moduleData] of Object.entries(batchData.objects || {})) {
+        const logImport = makeLogImport(pool, databasePath, moduleName, 'module', targetDatabaseId);
+        const moduleLogId = await logImport('success', null, { lineCount: moduleData.lineCount || 0 });
+
+        // Create issue for untranslated VBA
+        if (moduleLogId && targetDatabaseId) {
+          try {
+            await pool.query(`
+              INSERT INTO shared.import_issues
+                (import_log_id, database_id, object_name, object_type, severity, category, message)
+              VALUES ($1, $2, $3, 'module', 'warning', 'untranslated-vba', $4)
+            `, [moduleLogId, targetDatabaseId, moduleName, 'VBA module needs translation to ClojureScript']);
+          } catch (issueErr) {
+            console.error('Error creating import issue for module:', issueErr);
+          }
+        }
+      }
+
+      for (const err of (batchData.errors || [])) {
+        const logImport = makeLogImport(pool, databasePath, err.name, 'module', targetDatabaseId);
+        await logImport('error', err.error);
+      }
+
+      res.json({
+        success: true,
+        objects: batchData.objects || {},
+        errors: batchData.errors || []
+      });
+    } catch (err) {
+      console.error('Error in batch module export:', err);
+      logError(pool, 'POST /api/access-import/export-modules-batch', 'Failed to batch export modules', err, {
+        details: { databasePath, objectNames, targetDatabaseId }
+      });
+      res.status(500).json({ error: err.message || 'Failed to batch export modules' });
+    }
+  });
+
+  /**
+   * POST /api/access-import/export-macros-batch
+   * Export multiple macros from Access in a single COM session
+   */
+  router.post('/export-macros-batch', async (req, res) => {
+    const { databasePath, objectNames, targetDatabaseId } = req.body;
+
+    try {
+      if (!databasePath || !objectNames || !Array.isArray(objectNames) || objectNames.length === 0) {
+        return res.status(400).json({ error: 'databasePath and objectNames[] required' });
+      }
+
+      const scriptsDir = path.join(__dirname, '..', '..', 'scripts', 'access');
+      const exportScript = path.join(scriptsDir, 'export_macros_batch.ps1');
+
+      const jsonOutput = await runPowerShell(exportScript, [
+        '-DatabasePath', databasePath,
+        '-MacroNames', objectNames.join(',')
+      ]);
+
+      const cleanOutput = jsonOutput.replace(/^\uFEFF/, '').trim();
+      const jsonStart = cleanOutput.indexOf('{');
+      if (jsonStart === -1) {
+        throw new Error('No JSON object found in PowerShell output');
+      }
+      const batchData = JSON.parse(cleanOutput.substring(jsonStart));
+
+      for (const [macroName, macroData] of Object.entries(batchData.objects || {})) {
+        const logImport = makeLogImport(pool, databasePath, macroName, 'macro', targetDatabaseId);
+        const macroLogId = await logImport('success', null, { hasDefinition: !!macroData.definition });
+
+        // Create issue for untranslated macro
+        if (macroLogId && targetDatabaseId) {
+          try {
+            await pool.query(`
+              INSERT INTO shared.import_issues
+                (import_log_id, database_id, object_name, object_type, severity, category, message)
+              VALUES ($1, $2, $3, 'macro', 'warning', 'untranslated-macro', $4)
+            `, [macroLogId, targetDatabaseId, macroName, 'Access macro needs translation to ClojureScript']);
+          } catch (issueErr) {
+            console.error('Error creating import issue for macro:', issueErr);
+          }
+        }
+      }
+
+      for (const err of (batchData.errors || [])) {
+        const logImport = makeLogImport(pool, databasePath, err.name, 'macro', targetDatabaseId);
+        await logImport('error', err.error);
+      }
+
+      res.json({
+        success: true,
+        objects: batchData.objects || {},
+        errors: batchData.errors || []
+      });
+    } catch (err) {
+      console.error('Error in batch macro export:', err);
+      logError(pool, 'POST /api/access-import/export-macros-batch', 'Failed to batch export macros', err, {
+        details: { databasePath, objectNames, targetDatabaseId }
+      });
+      res.status(500).json({ error: err.message || 'Failed to batch export macros' });
+    }
+  });
+
+  /**
    * POST /api/access-import/export-macro
    * Export a macro from Access (raw XML definition)
    * The frontend saves the XML via /api/macros
@@ -631,6 +864,7 @@ module.exports = function(pool) {
 
       // 5. BEGIN transaction
       const client = await pool.connect();
+      const calculatedWarnings = [];
       try {
         await client.query('BEGIN');
 
@@ -640,7 +874,6 @@ module.exports = function(pool) {
         }
 
         // 6. CREATE TABLE
-        const calculatedWarnings = [];
         const colDefs = columnInfo.map(col => {
           let def = `${quoteIdent(col.pgName)} `;
           if (col.isCalculated && col.expression) {
@@ -855,8 +1088,21 @@ module.exports = function(pool) {
         columnTypes[row.column_name] = row.data_type;
       }
 
+      // 3b. Load control-column mapping for form ref resolution
+      const mappingResult = await pool.query(
+        `SELECT form_name, control_name, table_name, column_name
+         FROM shared.control_column_map WHERE database_id = $1`,
+        [targetDatabaseId]
+      );
+      const controlMapping = {};
+      for (const row of mappingResult.rows) {
+        controlMapping[`${row.form_name}.${row.control_name}`] = {
+          table: row.table_name, column: row.column_name
+        };
+      }
+
       // 4. Convert Access SQL → PostgreSQL
-      const result = convertAccessQuery(queryData, schemaName, columnTypes);
+      const result = convertAccessQuery(queryData, schemaName, columnTypes, controlMapping);
 
       // Surface parameter extraction warning from PowerShell
       if (queryData.paramWarning) {
@@ -908,6 +1154,14 @@ module.exports = function(pool) {
         await client.query('COMMIT');
       } catch (txErr) {
         await client.query('ROLLBACK');
+        // Log the failing SQL for diagnosis
+        console.error(`[QUERY ${queryName}] Failed SQL statements:`);
+        for (const stmt of result.statements) {
+          console.error(stmt.substring(0, 500));
+        }
+        if (queryData.sql) {
+          console.error(`[QUERY ${queryName}] Original Access SQL: ${queryData.sql.substring(0, 300)}`);
+        }
         throw txErr;
       } finally {
         client.release();
@@ -1139,6 +1393,90 @@ module.exports = function(pool) {
       console.error('Error fetching import history:', err);
       logError(pool, 'GET /api/access-import/history', 'Failed to fetch import history', err);
       res.status(500).json({ error: 'Failed to fetch import history' });
+    }
+  });
+
+  /**
+   * POST /api/access-import/tag-state-controls
+   * Auto-tag controls that are referenced by converted queries.
+   * Sets tag="state" on controls whose (table, column) appear in referencedEntries.
+   */
+  router.post('/tag-state-controls', async (req, res) => {
+    try {
+      const { targetDatabaseId, referencedEntries } = req.body;
+      if (!targetDatabaseId || !referencedEntries || !Array.isArray(referencedEntries) || referencedEntries.length === 0) {
+        return res.json({ tagged: 0 });
+      }
+
+      // Look up which controls map to the referenced table.column pairs
+      const conditions = referencedEntries.map((_, i) =>
+        `(table_name = $${i * 2 + 2} AND column_name = $${i * 2 + 3})`
+      );
+      const params = [targetDatabaseId];
+      for (const entry of referencedEntries) {
+        params.push(entry.tableName, entry.columnName);
+      }
+
+      const mappingResult = await pool.query(
+        `SELECT DISTINCT form_name, control_name
+         FROM shared.control_column_map
+         WHERE database_id = $1 AND (${conditions.join(' OR ')})`,
+        params
+      );
+
+      if (mappingResult.rows.length === 0) {
+        return res.json({ tagged: 0 });
+      }
+
+      // Group by form name
+      const byForm = {};
+      for (const row of mappingResult.rows) {
+        if (!byForm[row.form_name]) byForm[row.form_name] = new Set();
+        byForm[row.form_name].add(row.control_name);
+      }
+
+      let taggedCount = 0;
+      for (const [formName, controlNames] of Object.entries(byForm)) {
+        // Load current form definition
+        const formResult = await pool.query(
+          `SELECT definition FROM shared.forms
+           WHERE database_id = $1 AND name = $2 AND is_current = true`,
+          [targetDatabaseId, formName]
+        );
+        if (formResult.rows.length === 0) continue;
+
+        let definition;
+        try { definition = JSON.parse(formResult.rows[0].definition); }
+        catch { continue; }
+
+        let modified = false;
+        // Scan all sections for matching controls
+        for (const [key, section] of Object.entries(definition)) {
+          if (!section || !Array.isArray(section.controls)) continue;
+          for (const ctrl of section.controls) {
+            const ctrlName = sanitizeName(ctrl.name || ctrl.id || '');
+            if (controlNames.has(ctrlName) && ctrl.tag !== 'state') {
+              ctrl.tag = 'state';
+              modified = true;
+              taggedCount++;
+            }
+          }
+        }
+
+        if (modified) {
+          await pool.query(
+            `UPDATE shared.forms SET definition = $1
+             WHERE database_id = $2 AND name = $3 AND is_current = true`,
+            [JSON.stringify(definition), targetDatabaseId, formName]
+          );
+        }
+      }
+
+      res.json({ tagged: taggedCount });
+    } catch (err) {
+      console.error('Error tagging state controls:', err);
+      logError(pool, 'POST /api/access-import/tag-state-controls', 'Failed to tag state controls', err);
+      res.status(500).json({ error: 'Failed to tag state controls' });
     }
   });
 

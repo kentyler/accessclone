@@ -198,6 +198,15 @@ function createRouter(pool) {
         }
       }
 
+      // Populate control-column mapping (outside transaction — non-critical side effect)
+      try {
+        const { populateControlColumnMap } = require('../lib/control-mapping');
+        await populateControlColumnMap(pool, databaseId, reportName, content);
+      } catch (mapErr) {
+        console.error('Error populating control-column map for report:', mapErr.message);
+        logEvent(pool, 'warning', 'PUT /api/reports/:name', 'Control-column map population failed', { databaseId, details: { error: mapErr.message } });
+      }
+
       // Post-import lint: detect issues for imported reports
       if (req.query.source === 'import' && req.query.import_log_id) {
         try {

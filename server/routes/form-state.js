@@ -11,23 +11,23 @@ const { logError } = require('../lib/events');
 module.exports = function(pool) {
   /**
    * PUT /api/form-state
-   * Upsert control values for a form (bulk or single).
+   * Upsert control values keyed by table_name/column_name.
    *
    * Body: {
    *   sessionId: "...",
-   *   formName: "frmproducts",
-   *   controls: { "cbocategories": "5", "cbovendor": "12" }
+   *   entries: [
+   *     { tableName: "products", columnName: "categoryid", value: "5" }
+   *   ]
    * }
    */
   router.put('/', async (req, res) => {
     try {
-      const { sessionId, formName, controls } = req.body;
+      const { sessionId, entries } = req.body;
 
-      if (!sessionId || !formName || !controls || typeof controls !== 'object') {
-        return res.status(400).json({ error: 'sessionId, formName, and controls object required' });
+      if (!sessionId || !entries || !Array.isArray(entries)) {
+        return res.status(400).json({ error: 'sessionId and entries array required' });
       }
 
-      const entries = Object.entries(controls);
       if (entries.length === 0) {
         return res.json({ updated: 0 });
       }
@@ -36,16 +36,21 @@ module.exports = function(pool) {
       const values = [];
       const rows = [];
       let idx = 1;
-      for (const [controlName, value] of entries) {
+      for (const entry of entries) {
         rows.push(`($${idx}, $${idx + 1}, $${idx + 2}, $${idx + 3})`);
-        values.push(sessionId, formName.toLowerCase(), controlName.toLowerCase(), value == null ? null : String(value));
+        values.push(
+          sessionId,
+          (entry.tableName || '').toLowerCase(),
+          (entry.columnName || '').toLowerCase(),
+          entry.value == null ? null : String(entry.value)
+        );
         idx += 4;
       }
 
       await pool.query(
-        `INSERT INTO shared.form_control_state (session_id, form_name, control_name, value)
+        `INSERT INTO shared.form_control_state (session_id, table_name, column_name, value)
          VALUES ${rows.join(', ')}
-         ON CONFLICT (session_id, form_name, control_name)
+         ON CONFLICT (session_id, table_name, column_name)
          DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
         values
       );

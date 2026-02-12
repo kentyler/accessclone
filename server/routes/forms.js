@@ -182,6 +182,15 @@ function createRouter(pool) {
         logEvent(pool, 'warning', 'PUT /api/forms/:name', 'Graph population failed after form save', { databaseId, details: { error: graphErr.message } });
       }
 
+      // Populate control-column mapping (outside transaction — non-critical side effect)
+      try {
+        const { populateControlColumnMap } = require('../lib/control-mapping');
+        await populateControlColumnMap(pool, databaseId, formName, content);
+      } catch (mapErr) {
+        console.error('Error populating control-column map for form:', mapErr.message);
+        logEvent(pool, 'warning', 'PUT /api/forms/:name', 'Control-column map population failed', { databaseId, details: { error: mapErr.message } });
+      }
+
       // Post-import lint: detect issues for imported forms
       if (req.query.source === 'import' && req.query.import_log_id) {
         try {

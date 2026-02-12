@@ -8,7 +8,7 @@ function convert(sql, opts = {}) {
     queryTypeCode: opts.queryTypeCode ?? 0,
     sql,
     parameters: opts.parameters || []
-  }, opts.schema || 'myschema', opts.columnTypes);
+  }, opts.schema || 'myschema', opts.columnTypes, opts.controlMapping);
 }
 
 // Helper: get the single DDL statement (skipping aggregate preambles)
@@ -238,22 +238,22 @@ describe('TempVars → state table subquery', () => {
     const r = convert('SELECT Id FROM recipe WHERE Id=[TempVars]![recipe_id]');
     expect(r.pgObjectType).toBe('view');
     expect(ddl(r)).toContain(subqueryFragment);
-    expect(ddl(r)).toContain("form_name = '_tempvars'");
-    expect(ddl(r)).toContain("control_name = 'recipe_id'");
+    expect(ddl(r)).toContain("table_name = '_tempvars'");
+    expect(ddl(r)).toContain("column_name = 'recipe_id'");
   });
 
   test('TempVars("var") → subquery', () => {
     const r = convert('SELECT Id FROM recipe WHERE Id=TempVars("recipe_id")');
     expect(r.pgObjectType).toBe('view');
     expect(ddl(r)).toContain(subqueryFragment);
-    expect(ddl(r)).toContain("control_name = 'recipe_id'");
+    expect(ddl(r)).toContain("column_name = 'recipe_id'");
   });
 
   test('TempVars!var → subquery', () => {
     const r = convert('SELECT Id FROM recipe WHERE Id=TempVars!recipe_id');
     expect(r.pgObjectType).toBe('view');
     expect(ddl(r)).toContain(subqueryFragment);
-    expect(ddl(r)).toContain("control_name = 'recipe_id'");
+    expect(ddl(r)).toContain("column_name = 'recipe_id'");
   });
 
   test('subquery uses current_setting for session scoping', () => {
@@ -265,8 +265,8 @@ describe('TempVars → state table subquery', () => {
     const r = convert(
       'SELECT Id FROM recipe WHERE Id=[TempVars]![recipe_id] AND name=[TempVars]![recipe_name]'
     );
-    expect(ddl(r)).toContain("control_name = 'recipe_id'");
-    expect(ddl(r)).toContain("control_name = 'recipe_name'");
+    expect(ddl(r)).toContain("column_name = 'recipe_id'");
+    expect(ddl(r)).toContain("column_name = 'recipe_name'");
     // Both are subqueries, query stays a view
     expect(r.pgObjectType).toBe('view');
   });
@@ -276,7 +276,7 @@ describe('TempVars → state table subquery', () => {
       'SELECT Id FROM recipe WHERE Id=[TempVars]![recipe_id] AND Id2=[TempVars]![recipe_id]'
     );
     // Each occurrence gets its own subquery
-    const matches = ddl(r).match(/control_name = 'recipe_id'/g);
+    const matches = ddl(r).match(/column_name = 'recipe_id'/g);
     expect(matches.length).toBe(2);
   });
 });
@@ -456,64 +456,157 @@ describe('PARAMETERS declaration', () => {
 describe('Form references → state table subquery', () => {
   const subqueryFragment = 'SELECT value FROM shared.form_control_state';
 
-  test('[Forms]![formName]![controlName] → subquery', () => {
+  // Standard controlMapping for tests: frmProducts has cboCategory bound to products.categoryid
+  const productMapping = {
+    'frmproducts.cbocategory': { table: 'products', column: 'categoryid' },
+    'frmproducts.cboproductcategories': { table: 'products', column: 'categoryid' },
+    'frmproducts.vendorid': { table: 'products', column: 'vendorid' }
+  };
+
+  test('[Forms]![formName]![controlName] → resolved subquery', () => {
     const r = convert(
-      'SELECT Id FROM orders WHERE CategoryID = [Forms]![frmProducts]![cboCategory]'
+      'SELECT Id FROM orders WHERE CategoryID = [Forms]![frmProducts]![cboCategory]',
+      { controlMapping: productMapping }
     );
     expect(r.pgObjectType).toBe('view');
     expect(ddl(r)).toContain(subqueryFragment);
-    expect(ddl(r)).toContain("form_name = 'frmproducts'");
-    expect(ddl(r)).toContain("control_name = 'cbocategory'");
+    expect(ddl(r)).toContain("table_name = 'products'");
+    expect(ddl(r)).toContain("column_name = 'categoryid'");
   });
 
-  test('Forms![formName]![controlName] → subquery', () => {
+  test('Forms![formName]![controlName] → resolved subquery', () => {
     const r = convert(
-      'SELECT Id FROM orders WHERE CategoryID = Forms![frmProducts]![cboCategory]'
+      'SELECT Id FROM orders WHERE CategoryID = Forms![frmProducts]![cboCategory]',
+      { controlMapping: productMapping }
     );
     expect(ddl(r)).toContain(subqueryFragment);
-    expect(ddl(r)).toContain("form_name = 'frmproducts'");
-    expect(ddl(r)).toContain("control_name = 'cbocategory'");
+    expect(ddl(r)).toContain("table_name = 'products'");
+    expect(ddl(r)).toContain("column_name = 'categoryid'");
   });
 
-  test('Forms!formName!controlName (bare) → subquery', () => {
+  test('Forms!formName!controlName (bare) → resolved subquery', () => {
     const r = convert(
-      'SELECT Id FROM orders WHERE CategoryID = Forms!frmProducts!cboCategory'
+      'SELECT Id FROM orders WHERE CategoryID = Forms!frmProducts!cboCategory',
+      { controlMapping: productMapping }
     );
     expect(ddl(r)).toContain(subqueryFragment);
-    expect(ddl(r)).toContain("form_name = 'frmproducts'");
-    expect(ddl(r)).toContain("control_name = 'cbocategory'");
+    expect(ddl(r)).toContain("table_name = 'products'");
+    expect(ddl(r)).toContain("column_name = 'categoryid'");
   });
 
-  test('Forms!formName.controlName (dot notation) → subquery', () => {
+  test('Forms!formName.controlName (dot notation) → resolved subquery', () => {
     const r = convert(
-      'SELECT Id FROM orders WHERE CategoryID = Forms!frmProducts.cboCategory'
+      'SELECT Id FROM orders WHERE CategoryID = Forms!frmProducts.cboCategory',
+      { controlMapping: productMapping }
     );
     expect(ddl(r)).toContain(subqueryFragment);
-    expect(ddl(r)).toContain("form_name = 'frmproducts'");
-    expect(ddl(r)).toContain("control_name = 'cbocategory'");
+    expect(ddl(r)).toContain("table_name = 'products'");
+    expect(ddl(r)).toContain("column_name = 'categoryid'");
   });
 
-  test('form names with spaces are sanitized', () => {
+  test('form names with spaces are sanitized and resolved', () => {
     const r = convert(
-      'SELECT Id FROM orders WHERE x = [Forms]![Product Entry Form]![txtQty]'
+      'SELECT Id FROM orders WHERE x = [Forms]![Product Entry Form]![txtQty]',
+      { controlMapping: { 'product_entry_form.txtqty': { table: 'orders', column: 'quantity' } } }
     );
-    expect(ddl(r)).toContain("form_name = 'product_entry_form'");
-    expect(ddl(r)).toContain("control_name = 'txtqty'");
+    expect(ddl(r)).toContain("table_name = 'orders'");
+    expect(ddl(r)).toContain("column_name = 'quantity'");
   });
 
   test('mixed TempVars and Form refs in same query', () => {
     const r = convert(
-      'SELECT Id FROM orders WHERE CategoryID = [Forms]![frmProducts]![cboCategory] AND Status = [TempVars]![currentStatus]'
+      'SELECT Id FROM orders WHERE CategoryID = [Forms]![frmProducts]![cboCategory] AND Status = [TempVars]![currentStatus]',
+      { controlMapping: productMapping }
     );
     expect(r.pgObjectType).toBe('view');
-    expect(ddl(r)).toContain("form_name = 'frmproducts'");
-    expect(ddl(r)).toContain("form_name = '_tempvars'");
-    expect(ddl(r)).toContain("control_name = 'currentstatus'");
+    expect(ddl(r)).toContain("table_name = 'products'");
+    expect(ddl(r)).toContain("table_name = '_tempvars'");
+    expect(ddl(r)).toContain("column_name = 'currentstatus'");
+  });
+
+  test('[Form]![controlName] → resolved via control-name-only lookup', () => {
+    const r = convert(
+      'SELECT Id FROM products WHERE CategoryID = [Form]![cboProductCategories]',
+      { controlMapping: productMapping }
+    );
+    expect(ddl(r)).toContain(subqueryFragment);
+    expect(ddl(r)).toContain("table_name = 'products'");
+    expect(ddl(r)).toContain("column_name = 'categoryid'");
+  });
+
+  test('Form!controlName (bare) → resolved via control-name-only lookup', () => {
+    const r = convert(
+      'SELECT Id FROM products WHERE CategoryID = Form!cboCategory',
+      { controlMapping: { 'someform.cbocategory': { table: 'categories', column: 'id' } } }
+    );
+    expect(ddl(r)).toContain(subqueryFragment);
+    expect(ddl(r)).toContain("table_name = 'categories'");
+    expect(ddl(r)).toContain("column_name = 'id'");
+  });
+
+  test('[Parent]![controlName] → resolved via control-name-only lookup', () => {
+    const r = convert(
+      'SELECT Id FROM products WHERE VendorID = [Parent]![VendorID]',
+      { controlMapping: productMapping }
+    );
+    expect(ddl(r)).toContain(subqueryFragment);
+    expect(ddl(r)).toContain("table_name = 'products'");
+    expect(ddl(r)).toContain("column_name = 'vendorid'");
+  });
+
+  test('Parent!controlName (bare) → resolved via control-name-only lookup', () => {
+    const r = convert(
+      'SELECT Id FROM products WHERE VendorID = Parent!VendorID',
+      { controlMapping: productMapping }
+    );
+    expect(ddl(r)).toContain(subqueryFragment);
+    expect(ddl(r)).toContain("table_name = 'products'");
+    expect(ddl(r)).toContain("column_name = 'vendorid'");
+  });
+
+  test('unresolved 2-part ref (no mapping) → NULL with comment', () => {
+    const r = convert(
+      'SELECT Id FROM products WHERE CategoryID = [Form]![unknownCtrl]',
+      { controlMapping: {} }
+    );
+    expect(ddl(r)).toContain('NULL /* UNRESOLVED: Form!unknownCtrl */');
+    expect(r.warnings.some(w => w.includes('Unresolved'))).toBe(true);
+  });
+
+  test('unresolved 3-part ref (no mapping) → fallback subquery with warning', () => {
+    const r = convert(
+      'SELECT Id FROM orders WHERE x = [Forms]![frmMissing]![ctrl1]',
+      { controlMapping: {} }
+    );
+    // Falls back to form name as table, control as column
+    expect(ddl(r)).toContain("table_name = 'frmmissing'");
+    expect(ddl(r)).toContain("column_name = 'ctrl1'");
+    expect(r.warnings.some(w => w.includes('Unresolved'))).toBe(true);
+  });
+
+  test('referencedStateEntries populated for resolved refs', () => {
+    const r = convert(
+      'SELECT Id FROM orders WHERE CategoryID = [Forms]![frmProducts]![cboCategory]',
+      { controlMapping: productMapping }
+    );
+    expect(r.referencedStateEntries).toEqual(
+      expect.arrayContaining([{ tableName: 'products', columnName: 'categoryid' }])
+    );
+  });
+
+  test('::text cast added for columns compared with state subquery', () => {
+    const r = convert(
+      'SELECT Id FROM products WHERE CategoryID = [Forms]![frmProducts]![cboCategory]',
+      { controlMapping: productMapping }
+    );
+    // The column being compared should get ::text cast
+    expect(ddl(r)).toMatch(/::text/);
   });
 
   test('form refs do not interfere with schema prefixing', () => {
     const r = convert(
-      'SELECT Id FROM orders WHERE x = [Forms]![frmTest]![ctrl1]'
+      'SELECT Id FROM orders WHERE x = [Forms]![frmTest]![ctrl1]',
+      { controlMapping: { 'frmtest.ctrl1': { table: 'orders', column: 'status' } } }
     );
     // The main table should be prefixed, the subquery should use shared. intact
     expect(ddl(r)).toContain('myschema."orders"');

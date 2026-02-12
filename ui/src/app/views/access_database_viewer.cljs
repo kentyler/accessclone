@@ -320,8 +320,8 @@
 
 (def import-phases
   [{:phase :tables   :label "Tables"          :types [:tables]          :requires []}
-   {:phase :queries  :label "Queries"         :types [:queries]         :requires [:tables]}
-   {:phase :ui       :label "Forms & Reports" :types [:forms :reports]  :requires [:tables :queries]}
+   {:phase :ui       :label "Forms & Reports" :types [:forms :reports]  :requires [:tables]}
+   {:phase :queries  :label "Queries"         :types [:queries]         :requires [:tables :forms :reports]}
    {:phase :macros   :label "Macros"          :types [:macros]          :requires [:tables :queries :forms :reports]}
    {:phase :modules  :label "Modules"         :types [:modules]         :requires [:tables :queries :forms :reports :macros]}])
 
@@ -758,26 +758,163 @@
                             {:error err})
           {:error err})))))
 
+;; ============================================================
+;; Batch Import Functions (single COM session per type)
+;; ============================================================
+
+(def batch-eligible-types #{:forms :reports :modules :macros})
+
+(defn import-forms-batch!
+  "Batch import forms: single COM session export, then convert + save each.
+   Returns {:imported [names] :failed [{:name :error}]}"
+  [access-db-path form-names target-database-id]
+  (go
+    (let [response (<! (http/post (str api-base "/api/access-import/export-forms-batch")
+                                  {:json-params {:databasePath access-db-path
+                                                 :objectNames (vec form-names)
+                                                 :targetDatabaseId target-database-id}}))]
+      (if (and (:success response) (get-in response [:body :objects]))
+        (let [objects (get-in response [:body :objects] {})
+              export-errors (get-in response [:body :errors] [])
+              imported (atom [])
+              failed (atom (vec (map (fn [e] {:name (:name e) :error (:error e)}) export-errors)))]
+          (doseq [[k form-data] objects]
+            (let [form-name (name k)
+                  form-def (convert-access-form form-data)
+                  save-url (str api-base "/api/forms/" form-name "?source=import")
+                  save-response (<! (http/put save-url
+                                             {:json-params form-def
+                                              :headers {"X-Database-ID" target-database-id}}))]
+              (if (:success save-response)
+                (swap! imported conj form-name)
+                (swap! failed conj {:name form-name
+                                    :error (or (get-in save-response [:body :error]) "Save failed")}))))
+          {:imported @imported :failed @failed})
+        (let [err (or (get-in response [:body :error]) "Batch export failed")]
+          {:imported [] :failed (mapv (fn [n] {:name n :error err}) form-names)})))))
+
+(defn import-reports-batch!
+  "Batch import reports: single COM session export, then convert + save each.
+   Returns {:imported [names] :failed [{:name :error}]}"
+  [access-db-path report-names target-database-id]
+  (go
+    (let [response (<! (http/post (str api-base "/api/access-import/export-reports-batch")
+                                  {:json-params {:databasePath access-db-path
+                                                 :objectNames (vec report-names)
+                                                 :targetDatabaseId target-database-id}}))]
+      (if (and (:success response) (get-in response [:body :objects]))
+        (let [objects (get-in response [:body :objects] {})
+              export-errors (get-in response [:body :errors] [])
+              imported (atom [])
+              failed (atom (vec (map (fn [e] {:name (:name e) :error (:error e)}) export-errors)))]
+          (doseq [[k report-data] objects]
+            (let [report-name (name k)
+                  report-def (convert-access-report report-data)
+                  save-url (str api-base "/api/reports/" report-name "?source=import")
+                  save-response (<! (http/put save-url
+                                             {:json-params report-def
+                                              :headers {"X-Database-ID" target-database-id}}))]
+              (if (:success save-response)
+                (swap! imported conj report-name)
+                (swap! failed conj {:name report-name
+                                    :error (or (get-in save-response [:body :error]) "Save failed")}))))
+          {:imported @imported :failed @failed})
+        (let [err (or (get-in response [:body :error]) "Batch export failed")]
+          {:imported [] :failed (mapv (fn [n] {:name n :error err}) report-names)})))))
+
+(defn import-modules-batch!
+  "Batch import modules: single COM session export, then save each.
+   Returns {:imported [names] :failed [{:name :error}]}"
+  [access-db-path module-names target-database-id]
+  (go
+    (let [response (<! (http/post (str api-base "/api/access-import/export-modules-batch")
+                                  {:json-params {:databasePath access-db-path
+                                                 :objectNames (vec module-names)
+                                                 :targetDatabaseId target-database-id}}))]
+      (if (and (:success response) (get-in response [:body :objects]))
+        (let [objects (get-in response [:body :objects] {})
+              export-errors (get-in response [:body :errors] [])
+              imported (atom [])
+              failed (atom (vec (map (fn [e] {:name (:name e) :error (:error e)}) export-errors)))]
+          (doseq [[k module-data] objects]
+            (let [module-name (name k)
+                  save-response (<! (http/put (str api-base "/api/modules/" module-name)
+                                             {:json-params {:vba_source (:code module-data)}
+                                              :headers {"X-Database-ID" target-database-id}}))]
+              (if (:success save-response)
+                (swap! imported conj module-name)
+                (swap! failed conj {:name module-name
+                                    :error (or (get-in save-response [:body :error]) "Save failed")}))))
+          {:imported @imported :failed @failed})
+        (let [err (or (get-in response [:body :error]) "Batch export failed")]
+          {:imported [] :failed (mapv (fn [n] {:name n :error err}) module-names)})))))
+
+(defn import-macros-batch!
+  "Batch import macros: single COM session export, then save each.
+   Returns {:imported [names] :failed [{:name :error}]}"
+  [access-db-path macro-names target-database-id]
+  (go
+    (let [response (<! (http/post (str api-base "/api/access-import/export-macros-batch")
+                                  {:json-params {:databasePath access-db-path
+                                                 :objectNames (vec macro-names)
+                                                 :targetDatabaseId target-database-id}}))]
+      (if (and (:success response) (get-in response [:body :objects]))
+        (let [objects (get-in response [:body :objects] {})
+              export-errors (get-in response [:body :errors] [])
+              imported (atom [])
+              failed (atom (vec (map (fn [e] {:name (:name e) :error (:error e)}) export-errors)))]
+          (doseq [[k macro-data] objects]
+            (let [macro-name (name k)
+                  save-response (<! (http/put (str api-base "/api/macros/" macro-name)
+                                             {:json-params {:macro_xml (:definition macro-data)}
+                                              :headers {"X-Database-ID" target-database-id}}))]
+              (if (:success save-response)
+                (swap! imported conj macro-name)
+                (swap! failed conj {:name macro-name
+                                    :error (or (get-in save-response [:body :error]) "Save failed")}))))
+          {:imported @imported :failed @failed})
+        (let [err (or (get-in response [:body :error]) "Batch export failed")]
+          {:imported [] :failed (mapv (fn [n] {:name n :error err}) macro-names)})))))
+
+(defn- batch-import-fn-for-type
+  "Return the batch import function for a given object type"
+  [obj-type]
+  (case obj-type
+    :forms   import-forms-batch!
+    :reports import-reports-batch!
+    :modules import-modules-batch!
+    :macros  import-macros-batch!
+    nil))
+
 (defn import-selected!
-  "Import selected forms/reports/modules/tables to the current AccessClone database"
+  "Import selected objects to the current AccessClone database.
+   Uses batch import for forms/reports/modules/macros when >1 selected."
   [access-db-path target-database-id]
   (let [obj-type (:object-type @viewer-state)
-        selected (:selected @viewer-state)]
+        selected (vec (:selected @viewer-state))]
     (swap! viewer-state assoc :importing? true)
     (go
-      (doseq [item-name selected]
-        (case obj-type
-          :forms   (<! (import-form! access-db-path item-name target-database-id))
-          :reports (<! (import-report! access-db-path item-name target-database-id))
-          :modules (<! (import-module! access-db-path item-name target-database-id))
-          :macros  (<! (import-macro! access-db-path item-name target-database-id))
-          :tables  (<! (import-table! access-db-path item-name target-database-id))
-          :queries (<! (import-query! access-db-path item-name target-database-id))
-          nil)
-        ;; Refresh history after each import
-        (<! (load-import-history! access-db-path)))
+      (if (and (> (count selected) 1) (contains? batch-eligible-types obj-type))
+        ;; Batch import for forms/reports/modules/macros
+        (let [batch-fn (batch-import-fn-for-type obj-type)
+              result (<! (batch-fn access-db-path selected target-database-id))]
+          (doseq [{:keys [name error]} (:failed result)]
+            (state/log-event! "error" (str "Failed to import " (clojure.core/name obj-type) ": " name)
+                              "import-batch" {:error error})))
+        ;; Individual import (single item, or tables/queries)
+        (doseq [item-name selected]
+          (case obj-type
+            :forms   (<! (import-form! access-db-path item-name target-database-id))
+            :reports (<! (import-report! access-db-path item-name target-database-id))
+            :modules (<! (import-module! access-db-path item-name target-database-id))
+            :macros  (<! (import-macro! access-db-path item-name target-database-id))
+            :tables  (<! (import-table! access-db-path item-name target-database-id))
+            :queries (<! (import-query! access-db-path item-name target-database-id))
+            nil)
+          (<! (load-import-history! access-db-path))))
+      ;; Refresh after completion
+      (<! (load-import-history! access-db-path))
       (swap! viewer-state assoc :importing? false :selected #{})
-      ;; Re-save discovery (in case contents changed) and refresh badges
       (save-source-discovery! target-database-id)
       (load-target-existing! target-database-id)
       (state/load-tables!)
@@ -837,9 +974,9 @@
             paths)))
 
 (defn import-all!
-  "Import all objects across all phases from all selected databases with smart retry loop.
-   Processes in dependency order: tables → queries → forms → reports → macros → modules.
-   Within each phase, retries failed objects until no more progress is made.
+  "Import all objects across all phases from all selected databases.
+   Uses batch import for forms/reports/modules/macros (single COM session per type per db).
+   Uses individual import with retry loop for tables/queries (server-side pipeline).
    When force? is true, re-imports ALL objects regardless of existing status."
   [target-database-id & [{:keys [force?]}]]
   (swap! viewer-state assoc
@@ -855,30 +992,46 @@
         (let [phase-items (atom (vec (mapcat (fn [t]
                                                (map (fn [[p n]] [t p n])
                                                     (if force? (all-source-objects t) (not-yet-imported t))))
-                                             types)))]
+                                             types)))
+              use-batch? (every? batch-eligible-types types)]
           (when (seq @phase-items)
             (swap! viewer-state assoc-in [:import-all-status :phase] phase)
-            ;; Retry loop
-            (loop [pass 1]
-              (let [remaining @phase-items
-                    imported-this-pass (atom 0)
-                    still-pending (atom [])]
-                ;; Try each pending object
-                (doseq [[obj-type db-path obj-name] remaining]
-                  (swap! viewer-state assoc-in [:import-all-status :current] obj-name)
-                  (let [import-fn (import-fn-for-type obj-type)
-                        result (<! (import-fn db-path obj-name target-database-id (when force? {:force? true})))]
-                    (if (true? result)
-                      (do (swap! imported-this-pass inc)
-                          (swap! total-imported inc)
-                          (swap! viewer-state assoc-in [:import-all-status :imported] @total-imported))
-                      (swap! still-pending conj [obj-type db-path obj-name
-                                                 (if (map? result) (:error result) "Unknown error")]))))
-                (reset! phase-items @still-pending)
-                ;; Continue if we made progress and still have pending items
-                (when (and (seq @phase-items) (pos? @imported-this-pass))
-                  (recur (inc pass)))))
-            ;; Record any remaining as failed
+            (if use-batch?
+              ;; Batch mode: group by [obj-type, db-path], one COM session per group
+              (let [groups (group-by (fn [[t p _]] [t p]) @phase-items)]
+                (doseq [[[obj-type db-path] items] groups]
+                  (let [names (mapv (fn [[_ _ n]] n) items)
+                        batch-fn (batch-import-fn-for-type obj-type)]
+                    (swap! viewer-state assoc-in [:import-all-status :current]
+                           (str (count names) " " (clojure.core/name obj-type)))
+                    (let [result (<! (batch-fn db-path names target-database-id))]
+                      (swap! total-imported + (count (:imported result)))
+                      (swap! viewer-state assoc-in [:import-all-status :imported] @total-imported)
+                      (doseq [{:keys [name error]} (:failed result)]
+                        (swap! total-failed conj {:type obj-type :name name :error error})))))
+                ;; Clear phase-items since batch handles all
+                (reset! phase-items []))
+              ;; Individual mode with retry for tables/queries
+              (loop [pass 1]
+                (let [remaining @phase-items
+                      imported-this-pass (atom 0)
+                      still-pending (atom [])]
+                  ;; Try each pending object
+                  (doseq [[obj-type db-path obj-name] remaining]
+                    (swap! viewer-state assoc-in [:import-all-status :current] obj-name)
+                    (let [import-fn (import-fn-for-type obj-type)
+                          result (<! (import-fn db-path obj-name target-database-id (when force? {:force? true})))]
+                      (if (true? result)
+                        (do (swap! imported-this-pass inc)
+                            (swap! total-imported inc)
+                            (swap! viewer-state assoc-in [:import-all-status :imported] @total-imported))
+                        (swap! still-pending conj [obj-type db-path obj-name
+                                                   (if (map? result) (:error result) "Unknown error")]))))
+                  (reset! phase-items @still-pending)
+                  ;; Continue if we made progress and still have pending items
+                  (when (and (seq @phase-items) (pos? @imported-this-pass))
+                    (recur (inc pass))))))
+            ;; Record any remaining as failed (only applies to individual mode)
             (doseq [[obj-type _ obj-name err] @phase-items]
               (swap! total-failed conj {:type obj-type :name obj-name :error err}))
             ;; Refresh target-existing after this phase (await completion)

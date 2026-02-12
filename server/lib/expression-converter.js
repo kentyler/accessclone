@@ -7,7 +7,7 @@
  * This module only processes expressions that require database access.
  */
 
-const { sanitizeName, formStateSubquery, translateTempVars, translateFormRefs } = require('./query-converter');
+const { sanitizeName, formStateSubquery, translateTempVars, translateFormRefs, resolveControlMapping } = require('./query-converter');
 const { quoteIdent } = require('./access-types');
 
 // Domain functions that require database access
@@ -360,24 +360,33 @@ function translateAccessFunctions(sql) {
 
 /**
  * Translate Form!controlName (self-reference within the current form) to
- * Forms!formName!controlName so it maps to the same state table subquery.
+ * state table subquery using controlMapping when available.
  * Must run BEFORE translateFormRefs to avoid double-matching.
  *
  * @param {string} sql - Expression text
  * @param {string} formName - Sanitized current form name
+ * @param {Object} [controlMapping] - {"formname.controlname": {table, column}, ...}
  * @returns {string}
  */
-function translateFormSelfRefs(sql, formName) {
+function translateFormSelfRefs(sql, formName, controlMapping) {
   if (!formName) return sql;
+
+  function resolveCtrl(ctrl) {
+    const cn = sanitizeName(ctrl);
+    if (controlMapping) {
+      const resolved = resolveControlMapping(controlMapping, formName, cn, true);
+      if (resolved) return formStateSubquery(resolved.table, resolved.column);
+    }
+    // Fallback: use formName as table, ctrlName as column
+    return formStateSubquery(formName, cn);
+  }
+
   // [Form]![controlName]
-  sql = sql.replace(/\[Form\]!\[([^\]]+)\]/gi, (_, ctrl) =>
-    formStateSubquery(formName, sanitizeName(ctrl)));
+  sql = sql.replace(/\[Form\]!\[([^\]]+)\]/gi, (_, ctrl) => resolveCtrl(ctrl));
   // Form![controlName]
-  sql = sql.replace(/\bForm!\[([^\]]+)\]/gi, (_, ctrl) =>
-    formStateSubquery(formName, sanitizeName(ctrl)));
+  sql = sql.replace(/\bForm!\[([^\]]+)\]/gi, (_, ctrl) => resolveCtrl(ctrl));
   // Form!controlName (bare)
-  sql = sql.replace(/\bForm!([\w]+)/gi, (_, ctrl) =>
-    formStateSubquery(formName, sanitizeName(ctrl)));
+  sql = sql.replace(/\bForm!([\w]+)/gi, (_, ctrl) => resolveCtrl(ctrl));
   return sql;
 }
 
@@ -389,9 +398,10 @@ function translateFormSelfRefs(sql, formName) {
  * @param {string} schemaName - Target database schema
  * @param {Map|Object} columnTypes - Map of columnName → pgType for the record source table
  * @param {string} [formName] - Sanitized current form name (for Form!x self-references)
+ * @param {Object} [controlMapping] - {"formname.controlname": {table, column}, ...}
  * @returns {{ sql: string, params: Array<{name: string, pgName: string, pgType: string}>, returnType: string }}
  */
-function translateExpression(expression, schemaName, columnTypes, formName) {
+function translateExpression(expression, schemaName, columnTypes, formName, controlMapping) {
   // Strip leading =
   let expr = expression.trim();
   if (expr.startsWith('=')) expr = expr.substring(1);
@@ -399,8 +409,8 @@ function translateExpression(expression, schemaName, columnTypes, formName) {
   // Phase 0: Translate Form!/Forms!/TempVars references to state table subqueries
   // Must run BEFORE [field] collection so they don't become function parameters
   expr = translateTempVars(expr);
-  expr = translateFormSelfRefs(expr, formName);
-  expr = translateFormRefs(expr);
+  expr = translateFormSelfRefs(expr, formName, controlMapping);
+  expr = translateFormRefs(expr, controlMapping);
 
   // Collect field references that become function parameters
   const paramRefs = new Set();

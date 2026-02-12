@@ -167,18 +167,18 @@ function applyFunctionTranslations(sql) {
 // ============================================================
 
 /**
- * Build a subquery that reads a control value from the form_control_state table.
- * All three reference types (Forms!f!x, Form!x, TempVars!x) normalize to this.
+ * Build a subquery that reads a value from the form_control_state table.
+ * Keyed by (session, table_name, column_name) — no form identity needed.
  *
- * @param {string} formName - Sanitized form name (or '_tempvars' for TempVars)
- * @param {string} controlName - Sanitized control name
+ * @param {string} tableName - Resolved table name (or '_tempvars', or form name for unbound)
+ * @param {string} columnName - Resolved column name
  * @returns {string} PostgreSQL subquery
  */
-function formStateSubquery(formName, controlName) {
+function formStateSubquery(tableName, columnName) {
   return `(SELECT value FROM shared.form_control_state ` +
     `WHERE session_id = current_setting('app.session_id', true) ` +
-    `AND form_name = '${formName}' ` +
-    `AND control_name = '${controlName}')`;
+    `AND table_name = '${tableName}' ` +
+    `AND column_name = '${columnName}')`;
 }
 
 // ============================================================
@@ -205,47 +205,91 @@ function translateTempVars(sql) {
 }
 
 /**
- * Replace Forms!formName!controlName references with subqueries.
- * Must run BEFORE bracket removal and double-quote conversion.
+ * Resolve a form reference via controlMapping.
+ * Returns { table, column } or null if not found.
  *
- * Handles:
- *   [Forms]![formName]![controlName]
- *   Forms![formName]![controlName]
- *   Forms!formName!controlName
- *   Forms!formName.controlName
+ * @param {Object} controlMapping - {"formname.controlname": {table, column}, ...}
+ * @param {string} formName - Sanitized form name (for 3-part refs)
+ * @param {string} ctrlName - Sanitized control name
+ * @param {boolean} formSpecific - true for 3-part refs, false for 2-part
  */
-function translateFormRefs(sql) {
-  // [Forms]![formName]![controlName]
-  sql = sql.replace(/\[Forms\]!\[([^\]]+)\]!\[([^\]]+)\]/gi, (_, form, ctrl) =>
-    formStateSubquery(sanitizeName(form), sanitizeName(ctrl)));
+function resolveControlMapping(controlMapping, formName, ctrlName, formSpecific) {
+  if (!controlMapping) return null;
 
-  // Forms![formName]![controlName]
-  sql = sql.replace(/Forms!\[([^\]]+)\]!\[([^\]]+)\]/gi, (_, form, ctrl) =>
-    formStateSubquery(sanitizeName(form), sanitizeName(ctrl)));
+  if (formSpecific && formName) {
+    // 3-part: look up by exact form.control
+    const key = `${formName}.${ctrlName}`;
+    if (controlMapping[key]) return controlMapping[key];
+  }
 
-  // Forms!formName!controlName (bare identifiers)
-  sql = sql.replace(/Forms!([\w]+)!([\w]+)/gi, (_, form, ctrl) =>
-    formStateSubquery(sanitizeName(form), sanitizeName(ctrl)));
-
-  // Forms!formName.controlName (dot notation variant)
-  sql = sql.replace(/Forms!([\w]+)\.([\w]+)/gi, (_, form, ctrl) =>
-    formStateSubquery(sanitizeName(form), sanitizeName(ctrl)));
-
-  return sql;
+  // 2-part or fallback: search for any entry ending in .ctrlName
+  for (const [key, val] of Object.entries(controlMapping)) {
+    if (key.endsWith('.' + ctrlName)) return val;
+  }
+  return null;
 }
 
-// Legacy wrapper — kept for backward compatibility with tests.
-// Now returns empty params since TempVars are handled via subquery.
-function extractTempVars(sql) {
-  sql = translateTempVars(sql);
-  return { sql, params: [] };
+/**
+ * Replace form references with subqueries against form_control_state.
+ * Uses controlMapping to resolve form+control → table+column.
+ * Must run BEFORE bracket removal and double-quote conversion.
+ *
+ * @param {string} sql - SQL with Access form references
+ * @param {Object} controlMapping - {"formname.controlname": {table, column}, ...}
+ * @param {Array} referencedEntries - Collects resolved {tableName, columnName} pairs
+ * @param {Array} warnings - Collects unresolved reference warnings
+ * @returns {string} SQL with form references replaced by subqueries
+ */
+function translateFormRefs(sql, controlMapping, referencedEntries, warnings) {
+  function resolve3part(form, ctrl) {
+    const fn = sanitizeName(form);
+    const cn = sanitizeName(ctrl);
+    const resolved = resolveControlMapping(controlMapping, fn, cn, true);
+    if (resolved) {
+      if (referencedEntries) referencedEntries.push({ tableName: resolved.table, columnName: resolved.column });
+      return formStateSubquery(resolved.table, resolved.column);
+    }
+    // Fallback: use form name as table, control as column
+    if (warnings) warnings.push(`Unresolved form ref: Forms!${form}!${ctrl}`);
+    return formStateSubquery(fn, cn);
+  }
+
+  function resolve2part(ctrl) {
+    const cn = sanitizeName(ctrl);
+    const resolved = resolveControlMapping(controlMapping, null, cn, false);
+    if (resolved) {
+      if (referencedEntries) referencedEntries.push({ tableName: resolved.table, columnName: resolved.column });
+      return formStateSubquery(resolved.table, resolved.column);
+    }
+    // Unresolved: emit NULL with comment
+    if (warnings) warnings.push(`Unresolved form ref: Form!${ctrl}`);
+    return `NULL /* UNRESOLVED: Form!${ctrl} */`;
+  }
+
+  // --- 3-part: [Forms]![formName]![controlName] (explicit form name) ---
+  sql = sql.replace(/\[Forms\]!\[([^\]]+)\]!\[([^\]]+)\]/gi, (_, form, ctrl) => resolve3part(form, ctrl));
+  sql = sql.replace(/Forms!\[([^\]]+)\]!\[([^\]]+)\]/gi, (_, form, ctrl) => resolve3part(form, ctrl));
+  sql = sql.replace(/Forms!([\w]+)!([\w]+)/gi, (_, form, ctrl) => resolve3part(form, ctrl));
+  sql = sql.replace(/Forms!([\w]+)\.([\w]+)/gi, (_, form, ctrl) => resolve3part(form, ctrl));
+
+  // --- 2-part: [Form]![controlName] ---
+  sql = sql.replace(/\[Form\]!\[([^\]]+)\]/gi, (_, ctrl) => resolve2part(ctrl));
+  sql = sql.replace(/\bForm!\[([^\]]+)\]/gi, (_, ctrl) => resolve2part(ctrl));
+  sql = sql.replace(/\bForm!([\w]+)/gi, (_, ctrl) => resolve2part(ctrl));
+
+  // --- 2-part: [Parent]![controlName] ---
+  sql = sql.replace(/\[Parent\]!\[([^\]]+)\]/gi, (_, ctrl) => resolve2part(ctrl));
+  sql = sql.replace(/\bParent!\[([^\]]+)\]/gi, (_, ctrl) => resolve2part(ctrl));
+  sql = sql.replace(/\bParent!([\w]+)/gi, (_, ctrl) => resolve2part(ctrl));
+
+  return sql;
 }
 
 // ============================================================
 // Syntax translations
 // ============================================================
 
-function applySyntaxTranslations(sql) {
+function applySyntaxTranslations(sql, controlMapping, referencedEntries, warnings) {
   // DISTINCTROW → DISTINCT
   sql = sql.replace(/\bDISTINCTROW\b/gi, 'DISTINCT');
 
@@ -279,7 +323,15 @@ function applySyntaxTranslations(sql) {
   // TempVars and Form references → state table subqueries
   // Must run BEFORE double-quote conversion and bracket removal
   sql = translateTempVars(sql);
-  sql = translateFormRefs(sql);
+  sql = translateFormRefs(sql, controlMapping, referencedEntries, warnings);
+
+  // Cast columns compared with state table subqueries to ::text.
+  // The state table value column is text; PG won't implicitly cast integer=text.
+  // Pattern: identifier.identifier)= (SELECT value FROM shared.form_control_state
+  sql = sql.replace(
+    /([\w."]+(?:\.[\w."]+)?)\s*(\)*\s*(?:[<>!]?=|[<>])\s*)\(SELECT value FROM shared\.form_control_state\b/g,
+    '$1::text$2(SELECT value FROM shared.form_control_state'
+  );
 
   // Convert Access double-quoted string literals to single quotes BEFORE bracket removal.
   sql = sql.replace(/"([^"]*?)"/g, (match, inner) => {
@@ -676,9 +728,10 @@ function resolveParams(parameters, tempVarParams, columnTypes, sql) {
  * @param {Object} queryData - { queryName, queryType, queryTypeCode, sql, parameters }
  * @param {string} schemaName - Target PostgreSQL schema
  * @param {Object} [columnTypes] - Optional map of column name → PG data type
- * @returns {Object} { statements[], pgObjectName, pgObjectType, warnings[], extractedFunctions[] }
+ * @param {Object} [controlMapping] - {"formname.controlname": {table, column}, ...}
+ * @returns {Object} { statements[], pgObjectName, pgObjectType, warnings[], extractedFunctions[], referencedStateEntries[] }
  */
-function convertAccessQuery(queryData, schemaName, columnTypes) {
+function convertAccessQuery(queryData, schemaName, columnTypes, controlMapping) {
   const { queryName, queryType, queryTypeCode, sql: originalSql, parameters = [] } = queryData;
   const warnings = [];
   const pgName = sanitizeName(queryName);
@@ -696,12 +749,15 @@ function convertAccessQuery(queryData, schemaName, columnTypes) {
   // Resolve DAO-declared parameters (excluding TempVar declarations, which become subqueries)
   const uniqueParams = resolveParams(parameters, [], columnTypes, sql);
 
+  // Track which state table entries are referenced by form refs
+  const referencedStateEntries = [];
+
   // Step 2: Function translations
   try { sql = applyFunctionTranslations(sql); }
   catch (err) { warnings.push(`Function translation error: ${err.message}`); }
 
-  // Step 3: Syntax translations
-  try { sql = applySyntaxTranslations(sql); }
+  // Step 3: Syntax translations (threads controlMapping for form ref resolution)
+  try { sql = applySyntaxTranslations(sql, controlMapping, referencedStateEntries, warnings); }
   catch (err) { warnings.push(`Syntax translation error: ${err.message}`); }
 
   // Step 4: Schema prefix
@@ -765,7 +821,7 @@ function convertAccessQuery(queryData, schemaName, columnTypes) {
     statements.push(`-- Unsupported query type "${queryType}" (code ${queryTypeCode}):\n-- ${originalSql.replace(/\n/g, '\n-- ')}`);
   }
 
-  return { statements, pgObjectName: pgName, pgObjectType, warnings, extractedFunctions };
+  return { statements, pgObjectName: pgName, pgObjectType, warnings, extractedFunctions, referencedStateEntries };
 }
 
 /**
@@ -782,5 +838,5 @@ function convertAccessExpression(expr) {
 
 module.exports = {
   convertAccessQuery, convertAccessExpression, sanitizeName,
-  formStateSubquery, translateTempVars, translateFormRefs
+  formStateSubquery, resolveControlMapping, translateTempVars, translateFormRefs
 };

@@ -224,16 +224,45 @@ CREATE TABLE IF NOT EXISTS shared.chat_transcripts (
 
 -- ============================================================
 -- Form Control State - live form control values for query subqueries
+-- Keyed by (session, table, column) so queries don't need form identity
 -- ============================================================
 CREATE TABLE IF NOT EXISTS shared.form_control_state (
     session_id TEXT NOT NULL,
-    form_name TEXT NOT NULL,
-    control_name TEXT NOT NULL,
+    table_name TEXT NOT NULL,
+    column_name TEXT NOT NULL,
     value TEXT,
     updated_at TIMESTAMPTZ DEFAULT NOW(),
-    PRIMARY KEY (session_id, form_name, control_name)
+    PRIMARY KEY (session_id, table_name, column_name)
 );
 CREATE INDEX IF NOT EXISTS idx_form_control_state_session ON shared.form_control_state(session_id);
+
+-- Migrate old form_control_state schema (form_name/control_name → table_name/column_name)
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'shared' AND table_name = 'form_control_state' AND column_name = 'form_name'
+  ) THEN
+    TRUNCATE shared.form_control_state;
+    ALTER TABLE shared.form_control_state DROP CONSTRAINT form_control_state_pkey;
+    ALTER TABLE shared.form_control_state RENAME COLUMN form_name TO table_name;
+    ALTER TABLE shared.form_control_state RENAME COLUMN control_name TO column_name;
+    ALTER TABLE shared.form_control_state ADD PRIMARY KEY (session_id, table_name, column_name);
+  END IF;
+END $$;
+
+-- ============================================================
+-- Control Column Map - maps form controls to their underlying table.column
+-- Populated at form/report save time, consumed by query converter
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.control_column_map (
+    database_id VARCHAR(100) NOT NULL,
+    form_name TEXT NOT NULL,
+    control_name TEXT NOT NULL,
+    table_name TEXT NOT NULL,
+    column_name TEXT NOT NULL,
+    PRIMARY KEY (database_id, form_name, control_name)
+);
+CREATE INDEX IF NOT EXISTS idx_ccm_table ON shared.control_column_map(database_id, table_name, column_name);
 `;
 
 /**

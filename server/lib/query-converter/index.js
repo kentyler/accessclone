@@ -10,7 +10,7 @@
 const { sanitizeName } = require('./utils');
 const { formStateSubquery, resolveControlMapping, translateTempVars, translateFormRefs } = require('./form-state');
 const { applyFunctionTranslations } = require('./functions');
-const { applySyntaxTranslations, addSchemaPrefix } = require('./syntax');
+const { applySyntaxTranslations, addSchemaPrefix, addSchemaFunctionPrefix } = require('./syntax');
 const {
   needsCustomAggregates, getAggregateStatements,
   buildSelectView, buildParameterizedSelect, buildPlpgsqlFunction, buildMakeTableFunction,
@@ -55,8 +55,9 @@ function convertAccessQuery(queryData, schemaName, columnTypes, controlMapping) 
   try { sql = applySyntaxTranslations(sql, controlMapping, referencedStateEntries, warnings); }
   catch (err) { warnings.push(`Syntax translation error: ${err.message}`); }
 
-  // Step 4: Schema prefix
+  // Step 4: Schema prefix (tables in FROM/JOIN, then user-defined function calls)
   sql = addSchemaPrefix(sql, schemaName);
+  sql = addSchemaFunctionPrefix(sql, schemaName);
 
   // Custom aggregates
   const statements = [];

@@ -110,7 +110,7 @@ function createApp({
   app.use('/api/config', configRoutes(settingsDir, pool));
   app.use('/api/lint', lintRoutes(pool, secrets));
   app.use('/api/graph', graphRoutes(pool));
-  app.use('/api/access-import', accessImportRoutes(pool));
+  app.use('/api/access-import', accessImportRoutes(pool, secrets));
   app.use('/api/import-issues', importIssuesRoutes(pool));
   app.use('/api/transcripts', transcriptsRoutes(pool));
   app.use('/api/form-state', formStateRoutes(pool));

@@ -83,21 +83,23 @@ function translateFormRefs(sql, controlMapping, referencedEntries, warnings) {
     return `NULL /* UNRESOLVED: Form!${ctrl} */`;
   }
 
-  // --- 3-part: [Forms]![formName]![controlName] (explicit form name) ---
-  sql = sql.replace(/\[Forms\]!\[([^\]]+)\]!\[([^\]]+)\]/gi, (_, form, ctrl) => resolve3part(form, ctrl));
-  sql = sql.replace(/Forms!\[([^\]]+)\]!\[([^\]]+)\]/gi, (_, form, ctrl) => resolve3part(form, ctrl));
-  sql = sql.replace(/Forms!([\w]+)!([\w]+)/gi, (_, form, ctrl) => resolve3part(form, ctrl));
-  sql = sql.replace(/Forms!([\w]+)\.([\w]+)/gi, (_, form, ctrl) => resolve3part(form, ctrl));
+  // --- 3-part: [Forms]![formName]![controlName] (explicit form/report name) ---
+  // Also handles [Reports]![reportName]![controlName] identically
+  sql = sql.replace(/\[(?:Forms|Reports)\]!\[([^\]]+)\]!\[([^\]]+)\]/gi, (_, form, ctrl) => resolve3part(form, ctrl));
+  sql = sql.replace(/(?:Forms|Reports)!\[([^\]]+)\]!\[([^\]]+)\]/gi, (_, form, ctrl) => resolve3part(form, ctrl));
+  sql = sql.replace(/(?:Forms|Reports)!([\w]+)!([\w]+)/gi, (_, form, ctrl) => resolve3part(form, ctrl));
+  sql = sql.replace(/(?:Forms|Reports)!([\w]+)\.([\w]+)/gi, (_, form, ctrl) => resolve3part(form, ctrl));
 
-  // --- 2-part: [Form]![controlName] ---
-  sql = sql.replace(/\[Form\]!\[([^\]]+)\]/gi, (_, ctrl) => resolve2part(ctrl));
-  sql = sql.replace(/\bForm!\[([^\]]+)\]/gi, (_, ctrl) => resolve2part(ctrl));
-  sql = sql.replace(/\bForm!([\w]+)/gi, (_, ctrl) => resolve2part(ctrl));
+  // --- 2-part: [Form]![controlName] or [Report]![controlName] ---
+  sql = sql.replace(/\[(?:Form|Report)\]!\[([^\]]+)\]/gi, (_, ctrl) => resolve2part(ctrl));
+  sql = sql.replace(/\b(?:Form|Report)!\[([^\]]+)\]/gi, (_, ctrl) => resolve2part(ctrl));
+  sql = sql.replace(/\b(?:Form|Report)!([\w]+)/gi, (_, ctrl) => resolve2part(ctrl));
 
-  // --- 2-part: [Parent]![controlName] ---
-  sql = sql.replace(/\[Parent\]!\[([^\]]+)\]/gi, (_, ctrl) => resolve2part(ctrl));
-  sql = sql.replace(/\bParent!\[([^\]]+)\]/gi, (_, ctrl) => resolve2part(ctrl));
-  sql = sql.replace(/\bParent!([\w]+)/gi, (_, ctrl) => resolve2part(ctrl));
+  // --- [Parent] chains (1+ levels): [Parent]![Parent]![controlName] or [Parent].[controlName] ---
+  // Access uses both ! (bang) and . (dot) notation for Parent references
+  sql = sql.replace(/(?:\[Parent\][.!])+\[([^\]]+)\]/gi, (_, ctrl) => resolve2part(ctrl));
+  sql = sql.replace(/(?:\bParent[.!])+\[([^\]]+)\]/gi, (_, ctrl) => resolve2part(ctrl));
+  sql = sql.replace(/(?:\bParent[.!])+([\w]+)/gi, (_, ctrl) => resolve2part(ctrl));
 
   return sql;
 }

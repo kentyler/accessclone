@@ -44,7 +44,7 @@ function applySyntaxTranslations(sql, controlMapping, referencedEntries, warning
   // Cast columns compared with state table subqueries to ::text.
   // The state table value column is text; PG won't implicitly cast integer=text.
   sql = sql.replace(
-    /([\w."]+(?:\.[\w."]+)?)\s*(\)*\s*(?:[<>!]?=|[<>])\s*)\(SELECT value FROM shared\.form_control_state\b/g,
+    /([\w."]+(?:\.[\w."]+)?)\s*(\)*\s*(?:<>|[<>!]?=|[<>])\s*)\(SELECT value FROM shared\.form_control_state\b/g,
     '$1::text$2(SELECT value FROM shared.form_control_state'
   );
 
@@ -100,7 +100,13 @@ function addSchemaPrefix(sql, schemaName) {
   // Match table references after FROM, JOIN, INTO, UPDATE, TABLE keywords.
   sql = sql.replace(
     /\b(FROM|JOIN|INTO|UPDATE|TABLE)(\s+\(*\s*)("?[a-zA-Z_][\w]*"?)(\.[a-zA-Z_][\w."]*)?(\s+(?:AS\s+)?[a-zA-Z_]\w*)?/gi,
-    (match, keyword, gap, tableName, qualifiedPart, aliasClause) => {
+    (match, keyword, gap, tableName, qualifiedPart, aliasClause, offset) => {
+      // Skip FROM inside EXTRACT(field FROM expr), SUBSTRING(str FROM pos), TRIM(... FROM ...)
+      if (/^from$/i.test(keyword)) {
+        const before = sql.substring(Math.max(0, offset - 60), offset);
+        if (/\bEXTRACT\s*\(\s*\w+\s+$/i.test(before)) return match;
+        if (/\b(?:SUBSTRING|OVERLAY|TRIM)\s*\([^)]*$/i.test(before)) return match;
+      }
       // Already schema-qualified (has .something after the name) — leave it alone
       if (qualifiedPart) return match;
       const sanitized = sanitizeName(tableName.replace(/"/g, ''));
@@ -131,4 +137,74 @@ function addSchemaPrefix(sql, schemaName) {
   return sql;
 }
 
-module.exports = { applySyntaxTranslations, addSchemaPrefix };
+// PostgreSQL built-in / standard SQL functions that must NOT be schema-prefixed.
+// Includes functions emitted by our FUNCTION_MAP translations + standard SQL.
+const PG_BUILTINS = new Set([
+  // Standard SQL aggregates
+  'count', 'sum', 'avg', 'min', 'max', 'array_agg', 'string_agg', 'bool_and', 'bool_or',
+  // String
+  'length', 'substring', 'left', 'right', 'upper', 'lower', 'trim', 'ltrim', 'rtrim',
+  'position', 'replace', 'reverse', 'repeat', 'ascii', 'chr', 'initcap', 'concat',
+  'concat_ws', 'overlay', 'translate', 'encode', 'decode', 'md5', 'format',
+  'regexp_replace', 'regexp_match', 'regexp_matches', 'split_part', 'btrim',
+  // Numeric
+  'floor', 'trunc', 'abs', 'round', 'sign', 'sqrt', 'ln', 'exp', 'ceil', 'ceiling',
+  'mod', 'power', 'random', 'log', 'pi', 'degrees', 'radians', 'div', 'greatest', 'least',
+  // Date/Time
+  'extract', 'make_date', 'make_time', 'make_timestamp', 'make_interval',
+  'date_part', 'date_trunc', 'age',
+  'to_char', 'to_date', 'to_timestamp', 'to_number',
+  'now', 'clock_timestamp', 'statement_timestamp', 'timeofday',
+  // Type/cast/null
+  'coalesce', 'nullif', 'cast',
+  // Conditional
+  'case',
+  // JSON
+  'json_agg', 'jsonb_agg', 'json_build_object', 'jsonb_build_object',
+  'json_extract_path', 'json_extract_path_text', 'row_to_json', 'to_json', 'to_jsonb',
+  'jsonb_set', 'jsonb_insert', 'jsonb_pretty',
+  // Window
+  'row_number', 'rank', 'dense_rank', 'lag', 'lead', 'first_value', 'last_value', 'ntile',
+  'percent_rank', 'cume_dist', 'nth_value',
+  // Array
+  'array_length', 'unnest', 'array_to_string', 'array_cat', 'array_append', 'array_remove',
+  // PG specific
+  'current_setting', 'set_config', 'pg_typeof', 'generate_series', 'exists',
+  // Our custom aggregates
+  'first_agg', 'last_agg',
+]);
+
+/**
+ * Schema-prefix user-defined function calls.
+ * Any function call not recognized as a PG builtin or SQL keyword gets
+ * the target schema prefix so VBA stub/translated functions resolve.
+ */
+function addSchemaFunctionPrefix(sql, schemaName) {
+  const SQL_KEYWORDS = new Set([
+    'select', 'from', 'where', 'set', 'values', 'as', 'on', 'and', 'or', 'not', 'in',
+    'join', 'inner', 'left', 'right', 'outer', 'cross', 'full', 'having',
+    'group', 'order', 'by', 'union', 'except', 'intersect',
+    'insert', 'update', 'delete', 'into', 'table', 'view', 'function',
+    'create', 'alter', 'drop', 'replace',
+    'begin', 'end', 'return', 'returns', 'declare', 'if', 'then', 'else',
+    'when', 'between', 'like', 'ilike', 'similar', 'is', 'null',
+    'true', 'false', 'distinct', 'all', 'any', 'some', 'over', 'partition',
+    'limit', 'offset', 'fetch', 'for', 'with', 'recursive',
+    'interval', 'language', 'stable', 'immutable', 'volatile',
+    'security', 'definer', 'invoker',
+  ]);
+
+  // Match function calls: word followed by (
+  // Negative lookbehind prevents double-qualifying "schema"."func"( patterns
+  return sql.replace(
+    /(?<![."\w])([a-zA-Z_]\w*)\s*\(/g,
+    (match, funcName) => {
+      const lower = funcName.toLowerCase();
+      if (PG_BUILTINS.has(lower)) return match;
+      if (SQL_KEYWORDS.has(lower)) return match;
+      return `"${schemaName}"."${lower}"(`;
+    }
+  );
+}
+
+module.exports = { applySyntaxTranslations, addSchemaPrefix, addSchemaFunctionPrefix };

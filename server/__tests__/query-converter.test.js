@@ -383,6 +383,16 @@ describe('schema prefixing', () => {
     expect(ddl(r)).toContain('shared.form_control_state');
     expect(ddl(r)).not.toContain('myschema."shared"');
   });
+
+  test('does not schema-prefix FROM inside EXTRACT(YEAR FROM ...)', () => {
+    const r = convert('SELECT Year([OrderDate]) FROM orders');
+    const s = ddl(r);
+    // EXTRACT(YEAR FROM ...) should NOT prefix the column after FROM
+    expect(s).toContain('EXTRACT(YEAR FROM');
+    expect(s).not.toContain('EXTRACT(YEAR FROM myschema.');
+    // The real FROM clause should still be prefixed
+    expect(s).toContain('FROM myschema."orders"');
+  });
 });
 
 // ============================================================
@@ -446,6 +456,32 @@ describe('PARAMETERS declaration', () => {
     const s = ddl(r);
     expect(s).not.toContain('PARAMETERS');
     expect(s).toContain('SELECT');
+  });
+
+  test('Parent ref declared as DAO parameter → filtered out, creates VIEW not FUNCTION', () => {
+    const r = convert(
+      'SELECT * FROM orders WHERE EmployeeID=[Parent].[EmployeeID]',
+      {
+        parameters: [{ name: '[Parent].[EmployeeID]', type: 'Long' }],
+        controlMapping: { 'employees.employeeid': { table: 'employees', column: 'employeeid' } }
+      }
+    );
+    // Should be a VIEW (no real params), not a FUNCTION
+    expect(r.pgObjectType).toBe('view');
+    expect(ddl(r)).toContain('CREATE OR REPLACE VIEW');
+    expect(ddl(r)).not.toContain('p_parentemployeeid');
+    // Parent ref should resolve to state subquery
+    expect(ddl(r)).toContain('shared.form_control_state');
+  });
+
+  test('Table.Column declared as DAO parameter → filtered out, creates VIEW not FUNCTION', () => {
+    const r = convert(
+      'SELECT Sum(Quantity) AS Total, Employees.FullName AS Expr1 FROM orders GROUP BY Employees.FullName',
+      { parameters: [{ name: 'Employees.FullNameFNLN', type: 'Text' }] }
+    );
+    expect(r.pgObjectType).toBe('view');
+    expect(ddl(r)).toContain('CREATE OR REPLACE VIEW');
+    expect(ddl(r)).not.toContain('p_employeesfullnamefnln');
   });
 });
 
@@ -564,6 +600,38 @@ describe('Form references → state table subquery', () => {
     expect(ddl(r)).toContain("column_name = 'vendorid'");
   });
 
+  test('[Parent]![Parent]![controlName] → resolved (chained grandparent ref)', () => {
+    const r = convert(
+      'SELECT Id FROM products WHERE CustomerID = [Parent]![Parent]![CustomerID]',
+      { controlMapping: { 'orders.customerid': { table: 'orders', column: 'customerid' } } }
+    );
+    expect(ddl(r)).toContain(subqueryFragment);
+    expect(ddl(r)).toContain("table_name = 'orders'");
+    expect(ddl(r)).toContain("column_name = 'customerid'");
+    // No dangling !"customerid"
+    expect(ddl(r)).not.toContain('!"');
+  });
+
+  test('Parent!Parent!controlName (bare) → resolved (chained grandparent ref)', () => {
+    const r = convert(
+      'SELECT Id FROM products WHERE CustomerID = Parent!Parent!CustomerID',
+      { controlMapping: { 'orders.customerid': { table: 'orders', column: 'customerid' } } }
+    );
+    expect(ddl(r)).toContain(subqueryFragment);
+    expect(ddl(r)).toContain("column_name = 'customerid'");
+    expect(ddl(r)).not.toContain('!"');
+  });
+
+  test('[Parent].[controlName] dot notation → resolved', () => {
+    const r = convert(
+      'SELECT Id FROM products WHERE EmployeeID = [Parent].[EmployeeID]',
+      { controlMapping: { 'orders.employeeid': { table: 'orders', column: 'employeeid' } } }
+    );
+    expect(ddl(r)).toContain(subqueryFragment);
+    expect(ddl(r)).toContain("column_name = 'employeeid'");
+    expect(ddl(r)).not.toContain('"parent"');
+  });
+
   test('unresolved 2-part ref (no mapping) → NULL with comment', () => {
     const r = convert(
       'SELECT Id FROM products WHERE CategoryID = [Form]![unknownCtrl]',
@@ -594,13 +662,21 @@ describe('Form references → state table subquery', () => {
     );
   });
 
-  test('::text cast added for columns compared with state subquery', () => {
+  test('::text cast added for columns compared with state subquery (=)', () => {
     const r = convert(
       'SELECT Id FROM products WHERE CategoryID = [Forms]![frmProducts]![cboCategory]',
       { controlMapping: productMapping }
     );
     // The column being compared should get ::text cast
     expect(ddl(r)).toMatch(/::text/);
+  });
+
+  test('::text cast added for <> operator with state subquery', () => {
+    const r = convert(
+      'SELECT Id FROM products WHERE CategoryID <> [Forms]![frmProducts]![cboCategory]',
+      { controlMapping: productMapping }
+    );
+    expect(ddl(r)).toMatch(/::text.*<>/);
   });
 
   test('form refs do not interfere with schema prefixing', () => {
@@ -612,6 +688,118 @@ describe('Form references → state table subquery', () => {
     expect(ddl(r)).toContain('myschema."orders"');
     expect(ddl(r)).toContain('shared.form_control_state');
     expect(ddl(r)).not.toContain('myschema."shared"');
+  });
+
+  // --- Report references (same resolution as Forms) ---
+
+  test('[Reports]![reportName]![controlName] → resolved subquery', () => {
+    const r = convert(
+      'SELECT Id FROM orders WHERE OrderDate >= [Reports]![rptSales]![StartDate]',
+      { controlMapping: { 'rptsales.startdate': { table: 'orders', column: 'orderdate' } } }
+    );
+    expect(ddl(r)).toContain(subqueryFragment);
+    expect(ddl(r)).toContain("table_name = 'orders'");
+    expect(ddl(r)).toContain("column_name = 'orderdate'");
+  });
+
+  test('Reports!reportName!controlName (bare) → resolved subquery', () => {
+    const r = convert(
+      'SELECT Id FROM orders WHERE OrderDate >= Reports!rptSales!StartDate',
+      { controlMapping: { 'rptsales.startdate': { table: 'orders', column: 'orderdate' } } }
+    );
+    expect(ddl(r)).toContain(subqueryFragment);
+    expect(ddl(r)).toContain("column_name = 'orderdate'");
+  });
+
+  test('[Report]![controlName] → resolved via control-name-only lookup', () => {
+    const r = convert(
+      'SELECT Id FROM orders WHERE OrderDate >= [Report]![StartDate]',
+      { controlMapping: { 'rptsales.startdate': { table: 'orders', column: 'orderdate' } } }
+    );
+    expect(ddl(r)).toContain(subqueryFragment);
+    expect(ddl(r)).toContain("column_name = 'orderdate'");
+  });
+
+  test('Report!controlName (bare) → resolved via control-name-only lookup', () => {
+    const r = convert(
+      'SELECT Id FROM orders WHERE OrderDate >= Report!StartDate',
+      { controlMapping: { 'rptsales.startdate': { table: 'orders', column: 'orderdate' } } }
+    );
+    expect(ddl(r)).toContain(subqueryFragment);
+    expect(ddl(r)).toContain("column_name = 'orderdate'");
+  });
+
+  test('unresolved [Reports]! ref → fallback subquery with warning', () => {
+    const r = convert(
+      'SELECT Id FROM orders WHERE x = [Reports]![rptMissing]![ctrl1]',
+      { controlMapping: {} }
+    );
+    expect(ddl(r)).toContain("table_name = 'rptmissing'");
+    expect(ddl(r)).toContain("column_name = 'ctrl1'");
+    expect(r.warnings.some(w => w.includes('Unresolved'))).toBe(true);
+  });
+
+  test('[Reports]![rptName]![ctrl with spaces] → resolved', () => {
+    const r = convert(
+      'SELECT Id FROM orders WHERE OrderDate >= [Reports]![rptSales]![Report Parameter Start Date]',
+      { controlMapping: { 'rptsales.report_parameter_start_date': { table: 'config', column: 'start_date' } } }
+    );
+    expect(ddl(r)).toContain(subqueryFragment);
+    expect(ddl(r)).toContain("table_name = 'config'");
+    expect(ddl(r)).toContain("column_name = 'start_date'");
+    // Must NOT appear as a function call
+    expect(ddl(r)).not.toContain('reportparameterstartdate(');
+  });
+});
+
+// ============================================================
+// User-defined function schema prefixing
+// ============================================================
+
+describe('user-defined function schema prefixing', () => {
+  test('VBA function calls get schema prefix', () => {
+    const r = convert(
+      'SELECT ProductNoStock([Products].[ProductID]) AS NoStock FROM Products'
+    );
+    expect(ddl(r)).toContain('"myschema"."productnostock"(');
+  });
+
+  test('multiple VBA function calls all get prefixed', () => {
+    const r = convert(
+      'SELECT ProductNoStock([Products].[ProductID]) AS A, ProductAllocated([Products].[ProductID]) AS B FROM Products'
+    );
+    expect(ddl(r)).toContain('"myschema"."productnostock"(');
+    expect(ddl(r)).toContain('"myschema"."productallocated"(');
+  });
+
+  test('PG builtins are NOT prefixed', () => {
+    const r = convert(
+      'SELECT COUNT(*), COALESCE(x, 0), UPPER(name) FROM tbl'
+    );
+    const sql = ddl(r);
+    expect(sql).toContain('COUNT(');
+    expect(sql).toContain('COALESCE(');
+    expect(sql).toContain('UPPER(');
+    expect(sql).not.toContain('"myschema"."count"');
+    expect(sql).not.toContain('"myschema"."coalesce"');
+    expect(sql).not.toContain('"myschema"."upper"');
+  });
+
+  test('Access functions translated to PG builtins are NOT prefixed', () => {
+    // Nz → COALESCE, IIf → CASE WHEN, Len → LENGTH
+    const r = convert('SELECT Nz(x, 0), Len(name) FROM tbl');
+    const sql = ddl(r);
+    expect(sql).toContain('COALESCE(');
+    expect(sql).toContain('LENGTH(');
+    expect(sql).not.toContain('"myschema"."coalesce"');
+    expect(sql).not.toContain('"myschema"."length"');
+  });
+
+  test('Get_UserID() style function gets prefixed', () => {
+    const r = convert(
+      'SELECT * FROM MRU WHERE EmployeeID = Get_UserID()'
+    );
+    expect(ddl(r)).toContain('"myschema"."get_userid"(');
   });
 });
 

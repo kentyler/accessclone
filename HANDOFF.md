@@ -7,18 +7,20 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 ## Current State
 
 ### Just Shipped (2026-02-12)
-- **Table-level form state sync** (commit 2be0c6f): `shared.form_control_state` now keyed by `(session_id, table_name, column_name)` instead of `(session_id, form_name, control_name)`. New `shared.control_column_map` table maps form controls to their underlying table.column at save time. Query converter resolves `[Forms]![frmX]![ctrl]` references via this mapping at conversion time.
-- **Import order changed**: tables → forms/reports → queries → macros → modules. Forms must be imported before queries so the control_column_map exists when the converter needs it.
-- Removed: `activeFormStateSubquery`, `parentFormStateSubquery`, `app.active_form` session var, `X-Form-Name` HTTP header.
+- **LLM fallback for query conversion** (PR #23): When the regex-based Access→PG converter produces SQL that fails execution, automatically falls back to Claude Sonnet with schema context (tables, views, columns, functions), control mappings, and the PG error message. LLM-assisted conversions flagged in `shared.import_issues` with category `llm-assisted`. Graceful degradation when no API key configured.
+- **VBA stub function generator**: `createStubFunctions()` parses VBA modules for function declarations and creates placeholder PG functions so views can reference user-defined functions. Endpoint: `POST /api/access-import/create-function-stubs`.
+- **Query converter fixes**: EXTRACT(YEAR FROM ...) no longer schema-prefixes the FROM keyword. DAO parameters that are actually form/parent refs (`[Parent].[EmployeeID]`, `[Table].[Column]`) filtered out — queries stay as views instead of becoming functions.
+- **Table-level form state sync**: `shared.form_control_state` keyed by `(session_id, table_name, column_name)`. `shared.control_column_map` maps form controls → table.column at save time. Query converter resolves `[Forms]![frmX]![ctrl]` via this mapping. See `skills/form-state-sync.md` for full architecture.
+- **Import order**: tables → forms/reports → queries → macros → modules. Forms must be imported before queries so control_column_map exists.
+- **Tested against two databases**: Northwind and a second Access database both import fully (tables, forms, reports, queries, modules, macros) without errors.
 
 ### In Progress / Uncommitted
-- 4 batch PowerShell scripts in `scripts/access/` are on disk but not committed: `export_forms_batch.ps1`, `export_reports_batch.ps1`, `export_modules_batch.ps1`, `export_macros_batch.ps1`. The server routes that call them already exist in `access-import.js`.
+- `ui/src/app/views/access_database_viewer.cljs` — modified (import order change)
+- 4 batch PowerShell scripts in `scripts/access/` (untracked): `export_forms_batch.ps1`, `export_reports_batch.ps1`, `export_modules_batch.ps1`, `export_macros_batch.ps1`
 
 ### Next Up
-- Re-import Northwind queries to verify the `extractCalculatedColumns` disable fix resolves type errors.
-- Test the retry loop for dependency ordering on cascading query views.
-- Restart server to trigger schema migration (control_column_map creation, form_control_state column rename).
-- GitHub repo presentation: README.md, LICENSE, repo metadata (see MEMORY.md for full list).
+- GitHub repo presentation: README.md, LICENSE, repo metadata (see below)
+- Test runtime form state sync end-to-end: open a form, navigate records, verify `form_control_state` populated and dependent views filter correctly
 
 ---
 
@@ -40,9 +42,15 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 ### Form Definitions
 - Controls have `:type` as keyword after normalization (`:text-box`, `:combo-box`), but arrive as strings from JSON round-trips. `normalize-form-definition` in `state_form.cljs` handles coercion. If you add new control properties, add normalization there too.
 
+### Query Converter Pipeline
+- **Regex converter** (`server/lib/query-converter/`): deterministic, fast, free — handles ~90% of queries. Split into modules: `index.js` (entry), `syntax.js` (brackets, operators, schema prefixing), `functions.js` (Access→PG function map), `ddl.js` (view/function DDL generation), `form-state.js` (form/TempVar ref resolution), `utils.js` (sanitizeName).
+- **LLM fallback** (`server/lib/query-converter/llm-fallback.js`): called when regex output fails PG execution. Sends original Access SQL + failed PG SQL + error + full schema context (tables, views, columns, functions) to Claude Sonnet. Response parsed, executed in transaction.
+- **VBA stubs** (`server/lib/vba-stub-generator.js`): creates placeholder PG functions from VBA module declarations so views referencing UDFs can be created before full VBA translation.
+
 ### Test Coverage
-- `server/__tests__/query-converter.test.js` — 77 tests, comprehensive. Touch the converter? Run these.
-- No tests for `expression-converter.js`, `control-mapping.js`, or any route handlers. These are tested manually via the import pipeline.
+- `server/__tests__/query-converter.test.js` — 95 tests, comprehensive. Touch the converter? Run these.
+- `server/__tests__/vba-stub-generator.test.js` — stub generator tests.
+- No tests for route handlers. These are tested manually via the import pipeline.
 - Frontend has no automated tests. Verify with `cd ui && npx shadow-cljs compile app` (should show only 2 harmless `no.en.core` redef warnings).
 
 ---
@@ -51,7 +59,7 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 
 ### Server-Side
 - **Error logging**: `logError(pool, source, message, err, {databaseId})` for real errors. `logEvent(pool, 'warning', source, message, {databaseId, details})` for graceful degradation. Source format: `"METHOD /api/path"`.
-- **Route structure**: Each route file exports `function(pool)` that returns an Express router.
+- **Route structure**: Each route file exports `function(pool)` (or `function(pool, secrets)` for routes needing API keys) that returns an Express router.
 - **Non-critical side effects** (graph population, control-column mapping) run outside the main transaction, wrapped in try/catch that logs warnings but doesn't fail the request.
 - **Schema per database**: Each imported Access database gets its own PostgreSQL schema. The schema name comes from `shared.databases.schema_name`, selected by the `X-Database-ID` header.
 

@@ -321,9 +321,9 @@
 (def import-phases
   [{:phase :tables   :label "Tables"          :types [:tables]          :requires []}
    {:phase :ui       :label "Forms & Reports" :types [:forms :reports]  :requires [:tables]}
-   {:phase :queries  :label "Queries"         :types [:queries]         :requires [:tables :forms :reports]}
-   {:phase :macros   :label "Macros"          :types [:macros]          :requires [:tables :queries :forms :reports]}
-   {:phase :modules  :label "Modules"         :types [:modules]         :requires [:tables :queries :forms :reports :macros]}])
+   {:phase :modules  :label "Modules"         :types [:modules]         :requires [:tables]}
+   {:phase :queries  :label "Queries"         :types [:queries]         :requires [:tables :forms :reports :modules]}
+   {:phase :macros   :label "Macros"          :types [:macros]          :requires [:tables :queries :forms :reports :modules]}])
 
 (defn- sanitize-name
   "Lowercase and replace spaces with underscores for comparison"
@@ -973,6 +973,23 @@
             []
             paths)))
 
+(defn- create-function-stubs!
+  "Call the server to create PG stub functions from VBA module declarations.
+   Returns a channel that closes when done."
+  [target-database-id]
+  (go
+    (let [response (<! (http/post (str api-base "/api/access-import/create-function-stubs")
+                                  {:json-params {:targetDatabaseId target-database-id}}))]
+      (when (:success response)
+        (let [body (:body response)
+              created (get body :created [])
+              warnings (get body :warnings [])]
+          (when (seq created)
+            (println (str "[STUBS] Created " (count created) " stub functions: " (str/join ", " created))))
+          (when (seq warnings)
+            (doseq [w warnings]
+              (println (str "[STUBS] Warning: " w)))))))))
+
 (defn import-all!
   "Import all objects across all phases from all selected databases.
    Uses batch import for forms/reports/modules/macros (single COM session per type per db).
@@ -1035,7 +1052,10 @@
             (doseq [[obj-type _ obj-name err] @phase-items]
               (swap! total-failed conj {:type obj-type :name obj-name :error err}))
             ;; Refresh target-existing after this phase (await completion)
-            (<! (load-target-existing-async! target-database-id)))))
+            (<! (load-target-existing-async! target-database-id))
+            ;; After modules phase, create PG stub functions from VBA declarations
+            (when (= phase :modules)
+              (<! (create-function-stubs! target-database-id))))))
       ;; Compute total — aggregate across all selected databases
       (let [all-source (reduce + (map (fn [t] (:total (type-progress t)))
                                       [:tables :queries :forms :reports :modules :macros]))

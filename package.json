@@ -4,7 +4,7 @@
   "description": "Convert Microsoft Access databases to modern web applications — PostgreSQL, Node.js, ClojureScript",
   "private": true,
   "scripts": {
-    "test": "cd server && npm test",
+    "test": "cd server && npm test && cd ../electron && npm test",
     "test:db": "cd server && npm run test:db",
     "start": "cd server && npm start",
     "build:ui": "cd ui && npx shadow-cljs compile app"

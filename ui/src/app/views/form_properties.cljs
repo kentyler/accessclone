@@ -40,9 +40,10 @@
         form-name (:name form-obj)
         ;; Access convention: Form_<FormName> with spaces as underscores
         module-name (when form-name
-                      (str "Form_" (str/replace form-name #"\s+" "_")))
+                      (str/lower-case (str "Form_" (str/replace form-name #"\s+" "_"))))
+        ;; Case-insensitive match — import may store different casing
         module (when module-name
-                 (first (filter #(= (:name %) module-name)
+                 (first (filter #(= (str/lower-case (:name %)) module-name)
                                 (get-in @state/app-state [:objects :modules]))))]
     (if module
       (state/open-object! :modules (:id module))

@@ -50,10 +50,12 @@
         report-obj (first (filter #(= (:id %) report-id)
                                   (get-in @state/app-state [:objects :reports])))
         report-name (:name report-obj)
+        ;; Access convention: Report_<ReportName> with spaces as underscores
         module-name (when report-name
-                      (str "Report_" (str/replace report-name #"\s+" "_")))
+                      (str/lower-case (str "Report_" (str/replace report-name #"\s+" "_"))))
+        ;; Case-insensitive match — import may store different casing
         module (when module-name
-                 (first (filter #(= (:name %) module-name)
+                 (first (filter #(= (str/lower-case (:name %)) module-name)
                                 (get-in @state/app-state [:objects :modules]))))]
     (if module
       (state/open-object! :modules (:id module))

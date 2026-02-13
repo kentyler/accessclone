@@ -168,6 +168,23 @@ See `/skills/` directory for conversion and design guidance:
 - `install.md` - Installation and setup guide
 - `codebase-guide.md` - Guided tour of the codebase for LLMs or humans trying to understand the project
 - `writing-skills.md` - Meta-guide for writing skill files (cross-platform patterns, checklist)
+- `testing.md` - Full testing guide for LLMs — what tests exist, when to run them, how to add new ones
+
+## Testing
+
+**Always run after making changes:** `npm test` (from project root — runs server + electron tests)
+
+| What you changed | What to run | Test file |
+|-----------------|-------------|-----------|
+| Query converter (`server/lib/query-converter/`) | `npm test` | `server/__tests__/query-converter.test.js` (95 tests) |
+| Lint / validation (`server/routes/lint/`) | `npm test` | `server/__tests__/lint.test.js` |
+| VBA stubs (`server/lib/vba-stub-generator.js`) | `npm test` | `server/__tests__/vba-stub-generator.test.js` |
+| Schema routing / multi-DB middleware | `npm run test:db` | `server/__tests__/db.schema-routing.test.js` (needs PostgreSQL) |
+| Electron utilities (`electron/lib/`) | `npm test` | `electron/__tests__/*.test.js` |
+
+DB tests require a running PostgreSQL instance and are gated behind `ACCESSCLONE_DB_TESTS=1`. They do NOT run with `npm test` — use `npm run test:db` explicitly.
+
+See `skills/testing.md` for the full guide including how to write new tests.
 
 ## Known Issues / Debugging Notes
 

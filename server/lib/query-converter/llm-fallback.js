@@ -34,6 +34,28 @@ async function buildSchemaContext(pool, schemaName) {
     const suffix = viewNames.has(tableName) ? ' (view)' : '';
     lines.push(`${tableName}${suffix}: ${cols.join(', ')}`);
   }
+
+  // Include function signatures so the LLM knows about available UDFs/stubs
+  const funcResult = await pool.query(`
+    SELECT r.routine_name,
+           COALESCE(r.data_type, 'void') AS return_type,
+           STRING_AGG(p.parameter_name || ' ' || p.data_type, ', ' ORDER BY p.ordinal_position) AS params
+    FROM information_schema.routines r
+    LEFT JOIN information_schema.parameters p
+      ON p.specific_schema = r.specific_schema AND p.specific_name = r.specific_name
+    WHERE r.routine_schema = $1
+    GROUP BY r.routine_name, r.data_type
+    ORDER BY r.routine_name
+  `, [schemaName]);
+  if (funcResult.rows.length > 0) {
+    lines.push('');
+    lines.push('FUNCTIONS:');
+    for (const row of funcResult.rows) {
+      const params = row.params || '';
+      lines.push(`${row.routine_name}(${params}) → ${row.return_type}`);
+    }
+  }
+
   return lines.join('\n');
 }
 
@@ -92,6 +114,8 @@ RULES:
 - Access Len(s) → LENGTH(s), Trim(s) → TRIM(s)
 - Access InStr(s,sub) → POSITION(sub IN s)
 - Access Format(val, fmt) → TO_CHAR(val, fmt) with PG format codes
+- Access Table.FunctionName syntax: Access sometimes references VBA functions as if they were columns (e.g. Employees.FullNameFnLn). If a "column" doesn't exist in the table but a FUNCTION with that name exists in the schema, rewrite it as a function call: schema.functionname(relevant_args). Check the FUNCTIONS list in the schema below.
+- If a referenced column doesn't exist on a table but exists on a VIEW in the schema, the query may need to join that view instead
 - Access HAVING without GROUP BY → use WHERE instead
 - Access TOP N → LIMIT N
 - Access DISTINCTROW → DISTINCT

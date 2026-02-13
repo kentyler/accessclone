@@ -170,6 +170,10 @@ Or use `DATABASE_URL` for a full connection string.
 
 LLM chat requires an `ANTHROPIC_API_KEY` environment variable.
 
+## Understanding the Codebase
+
+New to the project? See the [codebase guide](skills/codebase-guide.md) for a guided tour of the architecture, or [ARCHITECTURE.md](ARCHITECTURE.md) for the full technical deep dive.
+
 ## Contributing
 
 Contributions are welcome! Please see the [issue templates](.github/ISSUE_TEMPLATE/) for bug reports and feature requests.

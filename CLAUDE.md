@@ -166,6 +166,7 @@ See `/skills/` directory for conversion and design guidance:
 - `conversion-macros.md` - Macro import, format details, and translation strategy
 - `database-patterns.md` - PostgreSQL function patterns
 - `install.md` - Installation and setup guide
+- `codebase-guide.md` - Guided tour of the codebase for LLMs or humans trying to understand the project
 - `writing-skills.md` - Meta-guide for writing skill files (cross-platform patterns, checklist)
 
 ## Known Issues / Debugging Notes

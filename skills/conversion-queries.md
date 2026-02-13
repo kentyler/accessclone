@@ -229,6 +229,50 @@ DO:
 - Add `NULLIF(x, 0)` for division
 - Convert Access functions to PostgreSQL equivalents
 
+## Automated Pipeline
+
+The UI's "Import All" button handles query conversion automatically:
+
+1. **Export**: PowerShell `export_query.ps1` extracts the Access SQL and parameters via DAO
+2. **Convert**: `convertAccessQuery()` (regex-based) translates Access SQL → PostgreSQL DDL
+3. **Execute**: Runs the DDL in a transaction to create the view/function
+4. **LLM Fallback**: If the regex-converted SQL fails, sends the original Access SQL + PG error + schema context to Claude for a corrected conversion (see below)
+5. **Log**: Records success/failure and any warnings in `shared.import_log` and `shared.import_issues`
+
+### LLM Fallback (`server/lib/query-converter/llm-fallback.js`)
+
+The regex converter handles ~90% of queries, but Access SQL has many edge cases. When the converted SQL fails execution:
+
+```
+Regex-converted SQL
+    ↓
+Execute in transaction
+    ├── Success → commit, done
+    └── Failure → rollback
+            ↓
+        Send to Claude with context:
+        - Original Access SQL
+        - Failed PostgreSQL SQL
+        - PostgreSQL error message
+        - Full schema (tables, views, columns, types)
+        - Available PG functions (including VBA stubs)
+        - Form control → table.column mapping
+            ↓
+        Execute LLM result in transaction
+            ├── Success → commit (flagged as "LLM-assisted")
+            └── Failure → report both errors
+```
+
+LLM-assisted conversions are flagged in the import log (`llmAssisted: true`) and create an import issue with category `llm-assisted` for review.
+
+If no Anthropic API key is configured, the fallback is skipped and the original error is returned.
+
+### Form State References
+
+Queries that reference form controls (e.g., `[Forms]![frmProducts]![cboCategory]`) are converted to subqueries against `shared.form_control_state`. See `form-state-sync.md` for full details.
+
+**Import order matters**: forms must be imported before queries so that `shared.control_column_map` is populated for form reference resolution.
+
 ## Logging
 
 Log each query conversion:

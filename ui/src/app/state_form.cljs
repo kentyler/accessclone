@@ -862,7 +862,10 @@
                 % number-form-props))
       (update :header normalize-section)
       (update :detail normalize-section)
-      (update :footer normalize-section)))
+      (update :footer normalize-section)
+      (#(if-let [rs (get % :record-source)]
+          (assoc % :record-source (str/lower-case rs))
+          %))))
 
 (defn- setup-form-editor!
   "Initialize the form editor state with a normalized definition."

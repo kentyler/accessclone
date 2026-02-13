@@ -1,6 +1,7 @@
 (ns app.views.form-properties
   "Property sheet panel for the form editor"
-  (:require [app.state :as state]
+  (:require [clojure.string :as str]
+            [app.state :as state]
             [app.state-form :as state-form]
             [app.views.form-utils :as form-utils]))
 
@@ -29,6 +30,23 @@
   (or (get obj k)
       (when (get obj (get event-flag-keys k))
         "[Event Procedure]")))
+
+(defn open-event-module!
+  "Open the form's class module (Form_<name>) in the module viewer."
+  []
+  (let [form-id (get-in @state/app-state [:form-editor :form-id])
+        form-obj (first (filter #(= (:id %) form-id)
+                                (get-in @state/app-state [:objects :forms])))
+        form-name (:name form-obj)
+        ;; Access convention: Form_<FormName> with spaces as underscores
+        module-name (when form-name
+                      (str "Form_" (str/replace form-name #"\s+" "_")))
+        module (when module-name
+                 (first (filter #(= (:name %) module-name)
+                                (get-in @state/app-state [:objects :modules]))))]
+    (if module
+      (state/open-object! :modules (:id module))
+      (state/set-error! (str "Module not found: " (or module-name "unknown"))))))
 
 ;; Property definitions for each control type
 (def control-property-defs
@@ -157,9 +175,15 @@
          ^{:key (:name field)} [:option {:value (:name field)} (:name field)])])
 
     :event
-    [:input {:type "text"
-             :value (or value "")
-             :read-only true}]
+    [:div.event-input-row
+     [:input {:type "text"
+              :value (or value "")
+              :read-only true}]
+     (when (= value "[Event Procedure]")
+       [:button.event-browse-btn
+        {:title "Open event handler module"
+         :on-click #(open-event-module!)}
+        "..."])]
 
     ;; Default
     [:input {:type "text"

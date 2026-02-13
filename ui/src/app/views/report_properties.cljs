@@ -6,6 +6,60 @@
             [app.views.report-utils :as ru]))
 
 ;; ============================================================
+;; EVENT FLAG RESOLUTION
+;; ============================================================
+
+;; Map event property keys to the has-*-event flag keys stored by the importer
+(def event-flag-keys
+  {:on-click          :has-click-event
+   :on-dbl-click      :has-dblclick-event
+   :on-change         :has-change-event
+   :on-got-focus      :has-gotfocus-event
+   :on-lost-focus     :has-lostfocus-event
+   :on-enter          :has-enter-event
+   :on-exit           :has-exit-event
+   :before-update     :has-before-update-event
+   :after-update      :has-after-update-event
+   :on-load           :has-load-event
+   :on-unload         :has-unload-event
+   :on-open           :has-open-event
+   :on-close          :has-close-event
+   :on-current        :has-current-event
+   :before-insert     :has-before-insert-event
+   :after-insert      :has-after-insert-event
+   :on-activate       :has-activate-event
+   :on-deactivate     :has-deactivate-event
+   :on-no-data        :has-nodata-event
+   :on-page           :has-page-event
+   :on-error          :has-error-event
+   :on-format         :has-format-event
+   :on-print          :has-print-event
+   :on-retreat        :has-retreat-event})
+
+(defn resolve-event-value
+  "For event properties, check both the property key and the has-*-event flag."
+  [obj k]
+  (or (get obj k)
+      (when (get obj (get event-flag-keys k))
+        "[Event Procedure]")))
+
+(defn open-event-module!
+  "Open the report's class module (Report_<name>) in the module viewer."
+  []
+  (let [report-id (get-in @state/app-state [:report-editor :report-id])
+        report-obj (first (filter #(= (:id %) report-id)
+                                  (get-in @state/app-state [:objects :reports])))
+        report-name (:name report-obj)
+        module-name (when report-name
+                      (str "Report_" (str/replace report-name #"\s+" "_")))
+        module (when module-name
+                 (first (filter #(= (:name %) module-name)
+                                (get-in @state/app-state [:objects :modules]))))]
+    (if module
+      (state/open-object! :modules (:id module))
+      (state/set-error! (str "Module not found: " (or module-name "unknown"))))))
+
+;; ============================================================
 ;; PROPERTY DEFINITIONS
 ;; ============================================================
 
@@ -175,10 +229,15 @@
          ^{:key (:name field)} [:option {:value (:name field)} (:name field)])])
 
     :event
-    [:input {:type "text"
-             :value (or value "")
-             :placeholder "[Event Procedure]"
-             :on-change #(on-change (.. % -target -value))}]
+    [:div.event-input-row
+     [:input {:type "text"
+              :value (or value "")
+              :read-only true}]
+     (when (= value "[Event Procedure]")
+       [:button.event-browse-btn
+        {:title "Open event handler module"
+         :on-click #(open-event-module!)}
+        "..."])]
 
     ;; Default
     [:input {:type "text"
@@ -231,9 +290,15 @@
      :property-defs (cond is-control? control-property-defs
                           is-section? section-property-defs
                           :else report-property-defs)
-     :get-value (cond is-control? #(get selected-control %)
-                      is-section? #(get section-data %)
-                      :else #(get current %))
+     :get-value (cond is-control? #(if (event-flag-keys %)
+                                       (resolve-event-value selected-control %)
+                                       (get selected-control %))
+                      is-section? #(if (event-flag-keys %)
+                                     (resolve-event-value section-data %)
+                                     (get section-data %))
+                      :else #(if (event-flag-keys %)
+                               (resolve-event-value current %)
+                               (get current %)))
      :on-change (cond is-control? #(state-report/update-report-control! section-key idx %1 %2)
                       is-section? #(state-report/set-report-definition! (assoc-in current [section-key %1] %2))
                       :else #(state-report/set-report-definition! (assoc current %1 %2)))

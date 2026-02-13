@@ -255,10 +255,15 @@ function resolveParams(parameters, tempVarParams, columnTypes, sql) {
     }
   }
 
-  // Combine declared (non-TempVar) params with extracted TempVars
+  // Combine declared params with extracted TempVars.
+  // Filter out: TempVars, form/report/parent refs (resolved to subqueries),
+  // and Table.Column refs (Access exports these as params but they're column references).
+  const formRefPattern = /\b(TempVars|Parent|Form|Forms|Report|Reports)\b/i;
+  const isDottedRef = (name) => name.replace(/[\[\]]/g, '').includes('.');
   const allParams = [
     ...parameters
-      .filter(p => !/TempVars/i.test(p.name))
+      .filter(p => !formRefPattern.test(p.name))
+      .filter(p => !isDottedRef(p.name))
       .map(p => ({ name: p.name, pgName: 'p_' + sanitizeName(p.name), pgType: mapParamType(p.type) })),
     ...tempVarParams.map(p => ({
       name: p.name, pgName: p.pgName, pgType: daoTypeMap.get(p.pgName) || 'text'

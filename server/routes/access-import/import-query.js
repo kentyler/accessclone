@@ -8,9 +8,11 @@ const path = require('path');
 const { logError } = require('../../lib/events');
 const { clearSchemaCache } = require('../data');
 const { convertAccessQuery, sanitizeName } = require('../../lib/query-converter');
+const { createStubFunctions } = require('../../lib/vba-stub-generator');
+const { convertQueryWithLLM } = require('../../lib/query-converter/llm-fallback');
 const { makeLogImport, runPowerShell } = require('./helpers');
 
-module.exports = function(router, pool) {
+module.exports = function(router, pool, secrets) {
 
   /**
    * POST /api/access-import/import-query
@@ -115,12 +117,16 @@ module.exports = function(router, pool) {
         }
       }
 
-      // 5. Execute statements in a transaction
-      const client = await pool.connect();
-      try {
+      // 4c. Ensure VBA stub functions exist before executing (idempotent, skips existing)
+      await createStubFunctions(pool, schemaName, targetDatabaseId);
+
+      // 5. Execute statements in a transaction (with LLM fallback on failure)
+      let finalStatements = result.statements;
+      let llmAssisted = false;
+
+      async function executeStatements(client, statements) {
         await client.query('BEGIN');
-        for (const stmt of result.statements) {
-          // Skip comment-only statements
+        for (const stmt of statements) {
           if (stmt.trim().startsWith('--')) {
             result.warnings.push('Skipped comment-only statement');
             continue;
@@ -128,17 +134,66 @@ module.exports = function(router, pool) {
           await client.query(stmt);
         }
         await client.query('COMMIT');
-      } catch (txErr) {
-        await client.query('ROLLBACK');
-        // Log the failing SQL for diagnosis
-        console.error(`[QUERY ${queryName}] Failed SQL statements:`);
-        for (const stmt of result.statements) {
-          console.error(stmt.substring(0, 500));
+      }
+
+      const client = await pool.connect();
+      try {
+        // Attempt 1: regex-converted SQL
+        try {
+          await executeStatements(client, finalStatements);
+        } catch (regexErr) {
+          await client.query('ROLLBACK');
+          console.error(`[QUERY ${queryName}] Regex converter failed: ${regexErr.message}`);
+
+          // Attempt 2: LLM fallback
+          const apiKey = secrets?.anthropic?.api_key || process.env.ANTHROPIC_API_KEY;
+          if (apiKey && queryData.sql) {
+            console.log(`[QUERY ${queryName}] Trying LLM fallback...`);
+            try {
+              const llmResult = await convertQueryWithLLM({
+                apiKey, pool, schemaName,
+                originalAccessSQL: queryData.sql,
+                failedPgSQL: result.statements.join(';\n'),
+                pgError: regexErr.message,
+                controlMapping
+              });
+              if (llmResult.statements.length > 0) {
+                finalStatements = llmResult.statements;
+                llmAssisted = true;
+                result.warnings.push(...llmResult.warnings);
+                // Detect if LLM changed the object type
+                if (llmResult.pgObjectType) {
+                  result.pgObjectType = llmResult.pgObjectType;
+                }
+                await executeStatements(client, finalStatements);
+                console.log(`[QUERY ${queryName}] LLM fallback succeeded`);
+              } else {
+                throw regexErr;
+              }
+            } catch (llmErr) {
+              if (llmErr === regexErr) throw regexErr;
+              // LLM also failed — log both errors
+              await client.query('ROLLBACK').catch(() => {});
+              console.error(`[QUERY ${queryName}] LLM fallback also failed: ${llmErr.message}`);
+              console.error(`[QUERY ${queryName}] Original regex error: ${regexErr.message}`);
+              // Throw the LLM error with context about both failures
+              const combinedErr = new Error(
+                `Regex conversion failed: ${regexErr.message}\nLLM fallback also failed: ${llmErr.message}`
+              );
+              throw combinedErr;
+            }
+          } else {
+            // No API key or no original SQL — can't fall back
+            console.error(`[QUERY ${queryName}] Failed SQL statements:`);
+            for (const stmt of result.statements) {
+              console.error(stmt);
+            }
+            if (queryData.sql) {
+              console.error(`[QUERY ${queryName}] Original Access SQL: ${queryData.sql}`);
+            }
+            throw regexErr;
+          }
         }
-        if (queryData.sql) {
-          console.error(`[QUERY ${queryName}] Original Access SQL: ${queryData.sql.substring(0, 300)}`);
-        }
-        throw txErr;
       } finally {
         client.release();
       }
@@ -150,6 +205,7 @@ module.exports = function(router, pool) {
       const queryLogId = await logImport('success', null, {
         pgObjectType: result.pgObjectType,
         originalType: queryData.queryType,
+        llmAssisted: llmAssisted || undefined,
         warnings: result.warnings.length > 0 ? result.warnings : undefined,
         extractedFunctions: result.extractedFunctions.length > 0 ? result.extractedFunctions.map(f => f.name) : undefined
       });
@@ -158,11 +214,12 @@ module.exports = function(router, pool) {
       if (queryLogId && result.warnings.length > 0) {
         try {
           for (const warning of result.warnings) {
+            const category = warning.includes('LLM-assisted') ? 'llm-assisted' : 'conversion-warning';
             await pool.query(`
               INSERT INTO shared.import_issues
                 (import_log_id, database_id, object_name, object_type, severity, category, message)
-              VALUES ($1, $2, $3, 'query', 'warning', 'conversion-warning', $4)
-            `, [queryLogId, targetDatabaseId, queryName, warning]);
+              VALUES ($1, $2, $3, 'query', 'warning', $4, $5)
+            `, [queryLogId, targetDatabaseId, queryName, category, warning]);
           }
         } catch (issueErr) {
           console.error('Error creating import issues for query warnings:', issueErr);
@@ -174,7 +231,8 @@ module.exports = function(router, pool) {
         queryName: pgName,
         pgObjectType: result.pgObjectType,
         warnings: result.warnings,
-        originalType: queryData.queryType
+        originalType: queryData.queryType,
+        llmAssisted
       });
     } catch (err) {
       console.error(`Error importing query "${queryName}":`, err);
@@ -183,6 +241,49 @@ module.exports = function(router, pool) {
       });
       await logImport('error', err.message);
       res.status(500).json({ error: err.message || 'Failed to import query' });
+    }
+  });
+
+  /**
+   * POST /api/access-import/tag-state-controls
+   * Auto-tag controls that are referenced by converted queries.
+   */
+  /**
+   * POST /api/access-import/create-function-stubs
+   * Parse VBA modules for function declarations and create PG stub functions
+   * so that views referencing user-defined functions can be created.
+   */
+  router.post('/create-function-stubs', async (req, res) => {
+    try {
+      const { targetDatabaseId } = req.body;
+      if (!targetDatabaseId) {
+        return res.status(400).json({ error: 'targetDatabaseId is required' });
+      }
+
+      // Look up target schema
+      const dbResult = await pool.query(
+        'SELECT schema_name FROM shared.databases WHERE database_id = $1',
+        [targetDatabaseId]
+      );
+      if (dbResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Target database not found' });
+      }
+      const schemaName = dbResult.rows[0].schema_name;
+
+      const result = await createStubFunctions(pool, schemaName, targetDatabaseId);
+
+      console.log(`[STUBS] Created ${result.created.length}, skipped ${result.skipped.length}, warnings: ${result.warnings.length}`);
+
+      res.json({
+        success: true,
+        created: result.created,
+        skipped: result.skipped,
+        warnings: result.warnings
+      });
+    } catch (err) {
+      console.error('Error creating function stubs:', err);
+      logError(pool, 'POST /api/access-import/create-function-stubs', 'Failed to create function stubs', err);
+      res.status(500).json({ error: err.message || 'Failed to create function stubs' });
     }
   });
 

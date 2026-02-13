@@ -5,12 +5,12 @@
 const express = require('express');
 const router = express.Router();
 
-module.exports = function(pool) {
+module.exports = function(pool, secrets) {
   // Mount each route group onto the shared router
   require('./scan')(router, pool);
   require('./export')(router, pool);
   require('./import-table')(router, pool);
-  require('./import-query')(router, pool);
+  require('./import-query')(router, pool, secrets);
   require('./completeness')(router, pool);
 
   return router;

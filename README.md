@@ -59,11 +59,15 @@ Understand how objects connect before making changes.
 ## Quick Start
 
 ### Prerequisites
-- Windows with MS Access installed (for import — runtime is cross-platform)
-- PowerShell 5.1+
+
+**To run the application:**
 - Node.js 18+
 - PostgreSQL 14+
-- Java 11+ (for ClojureScript UI compilation)
+- PowerShell 5.1+
+- Windows with MS Access installed (for importing — the running app is cross-platform)
+
+**Additionally, for UI development:**
+- Java 11+ (required by shadow-cljs to compile ClojureScript)
 
 ### 1. Install Dependencies
 
@@ -101,6 +105,16 @@ For UI development with hot reload:
 4. Click Import — AccessClone handles the rest
 
 ## Architecture
+
+```
+Access DB (.accdb)  →  Export (PowerShell/COM)  →  Convert (Access SQL → PostgreSQL)
+                                                          ↓
+         Browser UI (ClojureScript)  ←  Express API  ←  PostgreSQL
+                    ↓
+            AI Chat Assistant (per-object context, tools, auto-analyze)
+```
+
+### Project Structure
 
 ```
 accessclone/
@@ -170,9 +184,34 @@ Or use `DATABASE_URL` for a full connection string.
 
 LLM chat requires an `ANTHROPIC_API_KEY` environment variable.
 
-## Understanding the Codebase
+## Testing
 
-New to the project? See the [codebase guide](skills/codebase-guide.md) for a guided tour of the architecture, or [ARCHITECTURE.md](ARCHITECTURE.md) for the full technical deep dive.
+After any change, run from the project root:
+
+```
+npm test
+```
+
+This runs all unit tests across server (146 tests) and electron (72 tests).
+
+If you changed database/schema routing code, also run:
+
+```
+npm run test:db
+```
+
+DB tests require a running PostgreSQL instance and are gated behind an environment variable — they won't run accidentally.
+
+## Documentation
+
+| Doc | Audience | Purpose |
+|-----|----------|---------|
+| [INSTRUCTIONS.md](INSTRUCTIONS.md) | New users, AI assistants | Step-by-step install and setup runbook |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Developers | Technical deep dive — state management, routing, design decisions |
+| [Codebase Guide](skills/codebase-guide.md) | LLMs, new contributors | Pipeline-oriented walkthrough of every subsystem |
+| [Testing Guide](skills/testing.md) | LLMs, developers | Test map, patterns, coverage gaps, when to run what |
+| [Conversion Guide](skills/conversion.md) | Users importing Access DBs | Full import workflow |
+| [CLAUDE.md](CLAUDE.md) | AI assistants developing the code | Implementation details, conventions, debugging notes |
 
 ## Contributing
 

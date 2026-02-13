@@ -171,7 +171,7 @@ module.exports = function(pool) {
       try {
         await client.query('BEGIN');
         if (sessionId) {
-          await client.query('SET LOCAL app.session_id = $1', [sessionId]);
+          await client.query('SELECT set_config($1, $2, true)', ['app.session_id', sessionId]);
         }
 
         result = await client.query(query, params);

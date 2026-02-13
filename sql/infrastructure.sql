@@ -146,7 +146,7 @@ CREATE TABLE IF NOT EXISTS app_config (
 );
 
 -- Get a config setting
-CREATE OR REPLACE FUNCTION get_config(p_setting_name text)
+CREATE OR REPLACE FUNCTION get_app_config(p_setting_name text)
 RETURNS text AS $$
     SELECT COALESCE(setting_value, '')
     FROM app_config
@@ -154,7 +154,7 @@ RETURNS text AS $$
 $$ LANGUAGE SQL;
 
 -- Set a config setting
-CREATE OR REPLACE FUNCTION set_config(
+CREATE OR REPLACE FUNCTION set_app_config(
     p_setting_name text,
     p_setting_value text,
     p_description text DEFAULT NULL

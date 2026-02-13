@@ -56,7 +56,7 @@ This creates:
 - `migration_log` table - Migration tracking
 - Session functions: `create_session()`, `clear_session()`, `cleanup_old_sessions()`
 - State functions: `get_state()`, `set_state()`, and typed getters
-- Config functions: `get_config()`, `set_config()`
+- Config functions: `get_app_config()`, `set_app_config()`
 - Utility functions: `normalize_text()`, `log_migration()`
 
 ### 3. Verify Infrastructure

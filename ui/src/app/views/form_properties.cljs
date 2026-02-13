@@ -4,6 +4,32 @@
             [app.state-form :as state-form]
             [app.views.form-utils :as form-utils]))
 
+;; Map event property keys to the has-*-event flag keys stored by the importer
+(def event-flag-keys
+  {:on-click          :has-click-event
+   :on-dbl-click      :has-dblclick-event
+   :on-change         :has-change-event
+   :on-got-focus      :has-gotfocus-event
+   :on-lost-focus     :has-lostfocus-event
+   :on-enter          :has-enter-event
+   :on-exit           :has-exit-event
+   :before-update     :has-before-update-event
+   :after-update      :has-after-update-event
+   :on-load           :has-load-event
+   :on-unload         :has-unload-event
+   :on-open           :has-open-event
+   :on-close          :has-close-event
+   :on-current        :has-current-event
+   :before-insert     :has-before-insert-event
+   :after-insert      :has-after-insert-event})
+
+(defn resolve-event-value
+  "For event properties, check both the property key and the has-*-event flag."
+  [obj k]
+  (or (get obj k)
+      (when (get obj (get event-flag-keys k))
+        "[Event Procedure]")))
+
 ;; Property definitions for each control type
 (def control-property-defs
   {:format [{:key :name :label "Name" :type :text}
@@ -133,8 +159,7 @@
     :event
     [:input {:type "text"
              :value (or value "")
-             :placeholder "[Event Procedure]"
-             :on-change #(on-change (.. % -target -value))}]
+             :read-only true}]
 
     ;; Default
     [:input {:type "text"
@@ -183,9 +208,15 @@
                         :else form-property-defs)
         section-data (when is-section? (get current section-key))
         get-value (cond
-                    is-control? #(get selected-control %)
-                    is-section? #(get section-data %)
-                    :else #(get current %))
+                    is-control? #(if (event-flag-keys %)
+                                   (resolve-event-value selected-control %)
+                                   (get selected-control %))
+                    is-section? #(if (event-flag-keys %)
+                                   (resolve-event-value section-data %)
+                                   (get section-data %))
+                    :else #(if (event-flag-keys %)
+                             (resolve-event-value current %)
+                             (get current %)))
         on-change (cond
                     is-control? #(state-form/update-control! section-key idx %1 %2)
                     is-section? #(state-form/set-form-definition!

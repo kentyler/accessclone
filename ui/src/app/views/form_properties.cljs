@@ -31,6 +31,14 @@
       (when (get obj (get event-flag-keys k))
         "[Event Procedure]")))
 
+(defn- find-form-module
+  "Find the class module for a form. Tries Form_<name> convention, case-insensitive."
+  [form-name]
+  (let [modules (get-in @state/app-state [:objects :modules])
+        ;; Access convention: Form_<FormName> with spaces as underscores
+        target (str/lower-case (str "Form_" (str/replace form-name #"\s+" "_")))]
+    (first (filter #(= (str/lower-case (:name %)) target) modules))))
+
 (defn open-event-module!
   "Open the form's class module (Form_<name>) in the module viewer."
   []
@@ -38,16 +46,16 @@
         form-obj (first (filter #(= (:id %) form-id)
                                 (get-in @state/app-state [:objects :forms])))
         form-name (:name form-obj)
-        ;; Access convention: Form_<FormName> with spaces as underscores
-        module-name (when form-name
-                      (str/lower-case (str "Form_" (str/replace form-name #"\s+" "_"))))
-        ;; Case-insensitive match — import may store different casing
-        module (when module-name
-                 (first (filter #(= (str/lower-case (:name %)) module-name)
-                                (get-in @state/app-state [:objects :modules]))))]
+        module (when form-name (find-form-module form-name))]
     (if module
       (state/open-object! :modules (:id module))
-      (state/set-error! (str "Module not found: " (or module-name "unknown"))))))
+      (let [modules (get-in @state/app-state [:objects :modules])
+            available (str/join ", " (map :name modules))]
+        (state/set-error!
+         (str "No module found for form \"" form-name "\". "
+              (if (seq modules)
+                (str "Available: " available)
+                "No modules imported yet.")))))))
 
 ;; Property definitions for each control type
 (def control-property-defs

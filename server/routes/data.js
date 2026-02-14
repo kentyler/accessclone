@@ -217,6 +217,10 @@ module.exports = function(pool) {
         }
       });
     } catch (err) {
+      // Relation doesn't exist yet (e.g. query not imported) — return empty data
+      if (err.code === '42P01') {
+        return res.json({ data: [], pagination: { limit: 50, offset: 0, totalCount: 0, hasMore: false } });
+      }
       console.error('Error fetching data:', err);
       logError(pool, 'GET /api/data/:source', 'Failed to fetch data', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to fetch data' });

@@ -143,6 +143,14 @@ module.exports = function(router, pool, secrets) {
           await executeStatements(client, finalStatements);
         } catch (regexErr) {
           await client.query('ROLLBACK');
+
+          // Missing dependency — skip LLM, let retry loop handle it
+          const isDependencyError = regexErr.code === '42P01' || regexErr.code === '42883';
+          if (isDependencyError) {
+            console.log(`[QUERY ${queryName}] Missing dependency, will retry: ${regexErr.message}`);
+            throw regexErr;
+          }
+
           console.error(`[QUERY ${queryName}] Regex converter failed: ${regexErr.message}`);
 
           // Attempt 2: LLM fallback
@@ -240,7 +248,11 @@ module.exports = function(router, pool, secrets) {
         details: { databasePath, queryName, targetDatabaseId }
       });
       await logImport('error', err.message);
-      res.status(500).json({ error: err.message || 'Failed to import query' });
+      const isDep = err.code === '42P01' || err.code === '42883';
+      res.status(500).json({
+        error: err.message || 'Failed to import query',
+        category: isDep ? 'missing-dependency' : 'conversion-error'
+      });
     }
   });
 

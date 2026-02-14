@@ -28,9 +28,9 @@
   (case ctrl-type
     :line [:hr.report-line]
     :rectangle [:div.report-rectangle]
-    :image (if-let [src (:picture ctrl)]
-             [:img.report-image {:src src :alt (or text "Image")}]
-             [:span text])
+    (:image :object-frame) (if-let [src (:picture ctrl)]
+                             [:img.report-image {:src src :alt (or text "Image")}]
+                             [:span text])
     :tab-control [:span "(tab control)"]
     :subform [:span "(subform)"]
     [:span text]))

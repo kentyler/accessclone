@@ -379,7 +379,7 @@
 (def control-renderers
   {:label render-label, :text-box render-textbox, :button render-button
    :check-box render-checkbox, :combo-box render-combobox, :line render-line
-   :rectangle render-rectangle, :image render-image, :list-box render-listbox
+   :rectangle render-rectangle, :image render-image, :object-frame render-image, :list-box render-listbox
    :option-group render-option-group, :option-button render-option-button
    :toggle-button render-toggle-button, :tab-control render-tab-control
    :subform render-subform})

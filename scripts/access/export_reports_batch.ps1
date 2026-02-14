@@ -115,6 +115,18 @@ function Export-ReportControlToObject {
     $hideDuplicates = Safe-GetProperty $ctl "HideDuplicates" $false
     if ($hideDuplicates) { $obj.hideDuplicates = $true }
 
+    # Image specific
+    if ($typeName -eq "image") {
+        $picture = Safe-GetProperty $ctl "Picture"
+        if ($picture) { $obj.picture = $picture }
+        $sizeMode = Safe-GetProperty $ctl "SizeMode"
+        if ($null -ne $sizeMode) {
+            $sizeModeMap = @{ 0 = "clip"; 1 = "stretch"; 3 = "zoom" }
+            $sizeModeName = $sizeModeMap[[int]$sizeMode]
+            if ($sizeModeName) { $obj.sizeMode = $sizeModeName }
+        }
+    }
+
     $sourceObject = Safe-GetProperty $ctl "SourceObject"
     if ($sourceObject) {
         $obj.sourceReport = $sourceObject

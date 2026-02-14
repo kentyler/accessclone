@@ -8,7 +8,7 @@
 
 (def api-base state/api-base)
 
-(declare get-item-name load-access-database-contents! load-target-existing! load-import-history!)
+(declare get-item-name load-access-database-contents! load-target-existing! load-import-history! load-image-status! import-images!)
 
 ;; ============================================================
 ;; Access JSON → AccessClone Form Definition Converter
@@ -164,6 +164,8 @@
     (:sourceReport ctrl)     (assoc :source-report (:sourceReport ctrl))
     (:linkChildFields ctrl)  (assoc :link-child-fields [(:linkChildFields ctrl)])
     (:linkMasterFields ctrl) (assoc :link-master-fields [(:linkMasterFields ctrl)])
+    (:picture ctrl)      (assoc :picture (:picture ctrl))
+    (:sizeMode ctrl)     (assoc :size-mode (keyword (:sizeMode ctrl)))
     (:rowSource ctrl)    (assoc :row-source (:rowSource ctrl))
     (:boundColumn ctrl)  (assoc :bound-column (:boundColumn ctrl))
     (:columnCount ctrl)  (assoc :column-count (:columnCount ctrl))
@@ -312,6 +314,7 @@
            :access-db-cache {}  ;; {path {:forms [] :reports [] :tables [] :queries [] :modules [] :macros []}}
            :import-all-active? false ;; True while Import All is running
            :import-all-status nil    ;; {:phase :tables :current "TableName" :imported 0 :total 0 :failed []}
+           :image-status nil         ;; {:total N :imported M} from /api/access-import/image-status
            }))
 
 ;; ============================================================
@@ -455,7 +458,22 @@
                  (set (concat view-names func-names)))))
       (fetch-existing-names! headers "/api/modules" :modules :modules identity)
       (fetch-existing-names! headers "/api/macros" :macros :macros identity)
-      (fetch-existing-names! headers "/api/reports" :reports :reports identity))))
+      (fetch-existing-names! headers "/api/reports" :reports :reports identity)
+      (load-image-status! database-id))))
+
+(defn load-image-status!
+  "Fetch image control list from saved definitions"
+  [database-id]
+  (when database-id
+    (go
+      (let [response (<! (http/get (str api-base "/api/access-import/image-status")
+                                   {:query-params {:targetDatabaseId database-id}}))]
+        (when (:success response)
+          (let [body (:body response)]
+            (swap! viewer-state assoc
+                   :image-status {:total (get body :total 0)
+                                  :imported (get body :imported 0)}
+                   :images (or (get body :images) []))))))))
 
 (defn load-target-existing-async!
   "Like load-target-existing! but returns a channel that closes when all fetches complete"
@@ -481,14 +499,17 @@
     done))
 
 (defn load-import-history!
-  "Load import history for the current Access database.
-   Also sets target-database-id based on prior successful imports:
-   if any objects were imported, selects that target database;
-   if none, clears the dropdown."
+  "Load import history for the target database (all object types, all sources).
+   Falls back to source_path filter if no target database is selected.
+   Also sets target-database-id based on prior successful imports."
   [db-path]
   (go
-    (let [response (<! (http/get (str api-base "/api/access-import/history")
-                                 {:query-params {:source_path db-path :limit 50}}))]
+    (let [target-db (:target-database-id @viewer-state)
+          query-params (if target-db
+                         {:target_database_id target-db :limit 200}
+                         {:source_path db-path :limit 200})
+          response (<! (http/get (str api-base "/api/access-import/history")
+                                 {:query-params query-params}))]
       (when (:success response)
         (let [history (get-in response [:body :history] [])
               ;; Find all distinct target databases from successful imports
@@ -499,11 +520,12 @@
                            distinct)]
           (swap! viewer-state assoc :import-log history)
           ;; Auto-select if objects were previously imported to a database
-          (if (seq targets)
-            (let [target (first targets)]
-              (swap! viewer-state assoc :target-database-id target)
-              (load-target-existing! target))
-            (swap! viewer-state assoc :target-database-id nil))
+          (when-not target-db
+            (if (seq targets)
+              (let [target (first targets)]
+                (swap! viewer-state assoc :target-database-id target)
+                (load-target-existing! target))
+              (swap! viewer-state assoc :target-database-id nil)))
           (save-import-state!))))))
 
 (defn- apply-cached-contents!
@@ -894,24 +916,27 @@
         selected (vec (:selected @viewer-state))]
     (swap! viewer-state assoc :importing? true)
     (go
-      (if (and (> (count selected) 1) (contains? batch-eligible-types obj-type))
-        ;; Batch import for forms/reports/modules/macros
-        (let [batch-fn (batch-import-fn-for-type obj-type)
-              result (<! (batch-fn access-db-path selected target-database-id))]
-          (doseq [{:keys [name error]} (:failed result)]
-            (state/log-event! "error" (str "Failed to import " (clojure.core/name obj-type) ": " name)
-                              "import-batch" {:error error})))
-        ;; Individual import (single item, or tables/queries)
-        (doseq [item-name selected]
-          (case obj-type
-            :forms   (<! (import-form! access-db-path item-name target-database-id))
-            :reports (<! (import-report! access-db-path item-name target-database-id))
-            :modules (<! (import-module! access-db-path item-name target-database-id))
-            :macros  (<! (import-macro! access-db-path item-name target-database-id))
-            :tables  (<! (import-table! access-db-path item-name target-database-id))
-            :queries (<! (import-query! access-db-path item-name target-database-id))
-            nil)
-          (<! (load-import-history! access-db-path))))
+      (if (= obj-type :images)
+        ;; Images: single COM session extracts all image controls
+        (<! (import-images! access-db-path target-database-id))
+        (if (and (> (count selected) 1) (contains? batch-eligible-types obj-type))
+          ;; Batch import for forms/reports/modules/macros
+          (let [batch-fn (batch-import-fn-for-type obj-type)
+                result (<! (batch-fn access-db-path selected target-database-id))]
+            (doseq [{:keys [name error]} (:failed result)]
+              (state/log-event! "error" (str "Failed to import " (clojure.core/name obj-type) ": " name)
+                                "import-batch" {:error error})))
+          ;; Individual import (single item, or tables/queries)
+          (doseq [item-name selected]
+            (case obj-type
+              :forms   (<! (import-form! access-db-path item-name target-database-id))
+              :reports (<! (import-report! access-db-path item-name target-database-id))
+              :modules (<! (import-module! access-db-path item-name target-database-id))
+              :macros  (<! (import-macro! access-db-path item-name target-database-id))
+              :tables  (<! (import-table! access-db-path item-name target-database-id))
+              :queries (<! (import-query! access-db-path item-name target-database-id))
+              nil)
+            (<! (load-import-history! access-db-path)))))
       ;; Refresh after completion
       (<! (load-import-history! access-db-path))
       (swap! viewer-state assoc :importing? false :selected #{})
@@ -990,6 +1015,22 @@
             (doseq [w warnings]
               (println (str "[STUBS] Warning: " w)))))))))
 
+(defn import-images!
+  "Call the server to extract and embed images from Access form/report image controls.
+   Returns a channel that closes when done."
+  [access-db-path target-database-id]
+  (go
+    (let [response (<! (http/post (str api-base "/api/access-import/import-images")
+                                  {:json-params {:databasePath access-db-path
+                                                 :targetDatabaseId target-database-id}}))]
+      (if (and (:success response) (get-in response [:body :success]))
+        (let [image-count (get-in response [:body :imageCount] 0)]
+          (when (pos? image-count)
+            (println (str "[IMAGES] Imported " image-count " images")))
+          (load-image-status! target-database-id))
+        (let [err (or (get-in response [:body :error]) "Image import failed")]
+          (state/log-event! "warning" (str "Image import: " err) "import-images"))))))
+
 (defn import-all!
   "Import all objects across all phases from all selected databases.
    Uses batch import for forms/reports/modules/macros (single COM session per type per db).
@@ -1055,7 +1096,11 @@
             (<! (load-target-existing-async! target-database-id))
             ;; After modules phase, create PG stub functions from VBA declarations
             (when (= phase :modules)
-              (<! (create-function-stubs! target-database-id))))))
+              (<! (create-function-stubs! target-database-id)))
+            ;; After UI phase (forms & reports), extract and embed images
+            (when (= phase :ui)
+              (doseq [p (:selected-paths @viewer-state)]
+                (<! (import-images! p target-database-id)))))))
       ;; Compute total — aggregate across all selected databases
       (let [all-source (reduce + (map (fn [t] (:total (type-progress t)))
                                       [:tables :queries :forms :reports :modules :macros]))
@@ -1099,48 +1144,65 @@
       [:option {:value "modules"} "Modules"]
       [:option {:value "macros"} "Macros"]]]))
 
+(defn- phase-log-type
+  "Map object type keyword to the source_object_type string stored in import_log."
+  [obj-type]
+  (case obj-type
+    :tables "table"
+    :queries "query"
+    :forms "form"
+    :reports "report"
+    :modules "module"
+    :macros "macro"
+    :images nil
+    nil))
+
 (defn import-phase-tracker
-  "Horizontal row of clickable phase steps showing import progress"
+  "Horizontal row of clickable phase buttons spanning both columns.
+   Selected type is highlighted; importing indicator shown on active button."
   []
   (let [obj-type (:object-type @viewer-state)
-        ;; Find which phase the current object-type belongs to
+        importing? (:importing? @viewer-state)
         active-phase (some (fn [p] (when (some #{obj-type} (:types p)) (:phase p)))
-                           import-phases)]
+                           import-phases)
+        ;; Build individual type buttons (not grouped by phase)
+        type-buttons [[:tables "Tables"]
+                      [:forms "Forms"]
+                      [:reports "Reports"]
+                      [:modules "Modules"]
+                      [:queries "Queries"]
+                      [:macros "Macros"]]]
     [:div.import-phase-tracker
-     (for [{:keys [phase label types requires] :as phase-def} import-phases]
-       (let [{:keys [total imported complete? empty?]} (phase-progress phase-def)
-             ready? (phase-ready? phase-def)
-             active? (= phase active-phase)]
-         ^{:key phase}
-         [:div.phase-step
+     (for [[t label] type-buttons]
+       (let [{:keys [total imported complete?]} (type-progress t)
+             active? (= t obj-type)]
+         ^{:key t}
+         [:button.phase-btn
           {:class (str (when active? "active ")
-                       (when complete? "complete ")
-                       (when (and (not ready?) (not complete?)) "blocked "))
-           :on-click #(do
-                        (swap! viewer-state assoc
-                               :object-type (first types)
-                               :selected #{})
-                        (save-import-state!))}
-          [:div.phase-indicator
-           (cond
-             complete? "\u2713"
-             (not ready?) "\u25CB"
-             :else "\u25CF")]
-          [:div.phase-info
-           [:span.phase-label label]
-           (when (pos? total)
-             [:span.phase-count (str imported "/" total)])]]))
-     ;; Sub-type toggle for Forms & Reports phase
-     (when (= active-phase :ui)
-       [:div.phase-sub-types
-        [:button {:class (when (= obj-type :forms) "active")
-                  :on-click #(do (swap! viewer-state assoc :object-type :forms :selected #{})
-                                 (save-import-state!))}
-         "Forms"]
-        [:button {:class (when (= obj-type :reports) "active")
-                  :on-click #(do (swap! viewer-state assoc :object-type :reports :selected #{})
-                                 (save-import-state!))}
-         "Reports"]])]))
+                       (when complete? "complete "))
+           :on-click #(do (swap! viewer-state assoc :object-type t :selected #{})
+                          (save-import-state!))}
+          [:span.phase-btn-label label]
+          (when (pos? total)
+            [:span.phase-btn-count (str imported "/" total)])
+          (when (and active? importing?)
+            [:span.phase-btn-spinner])]))
+     ;; Images button — shown when images exist
+     (let [{img-total :total img-imported :imported} (:image-status @viewer-state)
+           has-ui? (or (pos? (:imported (type-progress :forms)))
+                       (pos? (:imported (type-progress :reports))))
+           img-complete? (and has-ui? img-total (pos? img-total) (= img-imported img-total))
+           active? (= obj-type :images)]
+       (when (and has-ui? img-total (pos? img-total))
+         [:button.phase-btn
+          {:class (str (when active? "active ")
+                       (when img-complete? "complete "))
+           :on-click #(do (swap! viewer-state assoc :object-type :images :selected #{})
+                          (save-import-state!))}
+          [:span.phase-btn-label "Images"]
+          [:span.phase-btn-count (str img-imported "/" img-total)]
+          (when (and active? importing?)
+            [:span.phase-btn-spinner])]))]))
 
 (defn dependency-warning
   "Amber banner shown when the selected type has unmet prerequisites"
@@ -1199,14 +1261,19 @@
       :tables (str (:fieldCount item) " fields, " (:rowCount item) " rows")
       :queries (:type item)
       :modules (str (:lineCount item) " lines")
+      :images (:objectType item)
       nil)))
 
 (defn imported-names
   "Get set of object names (lowercased) that already exist in the target database"
   []
-  (let [obj-type (:object-type @viewer-state)
-        names (get-in @viewer-state [:target-existing obj-type] #{})]
-    (set (map clojure.string/lower-case names))))
+  (let [obj-type (:object-type @viewer-state)]
+    (if (= obj-type :images)
+      ;; Images have :imported flag on each item
+      (set (map #(clojure.string/lower-case (:name %))
+                (filter :imported (:images @viewer-state))))
+      (let [names (get-in @viewer-state [:target-existing obj-type] #{})]
+        (set (map clojure.string/lower-case names))))))
 
 (defn- render-import-item
   "Render a single item in the import object list."
@@ -1244,16 +1311,20 @@
       (str (.toLocaleDateString d) " " (.toLocaleTimeString d)))))
 
 (defn import-log-panel []
-  (let [{:keys [import-log importing?]} @viewer-state]
+  (let [{:keys [import-log object-type]} @viewer-state
+        filter-type (phase-log-type object-type)
+        filtered (if filter-type
+                   (filter #(= (:source_object_type %) filter-type) import-log)
+                   import-log)]
     [:div.import-log-panel
      [:div.log-header
       [:h4 "Import Log"]
-      (when importing?
-        [:span.importing-indicator "Importing..."])]
+      (when filter-type
+        [:span.log-filter-label filter-type])]
      [:div.log-entries
-      (if (empty? import-log)
+      (if (empty? filtered)
         [:div.log-empty "No imports yet"]
-        (for [entry import-log]
+        (for [entry filtered]
           ^{:key (:id entry)}
           [:div.log-entry {:class (:status entry)}
            [:div.log-entry-header
@@ -1261,7 +1332,6 @@
             [:span.log-object-name (:source_object_name entry)]
             [:span.log-status {:class (:status entry)} (:status entry)]]
            [:div.log-entry-details
-            [:span.log-target (str "→ " (:target_database_id entry))]
             [:span.log-time (format-timestamp (:created_at entry))]]
            (when (:error_message entry)
              [:div.log-error (:error_message entry)])]))]]))
@@ -1394,10 +1464,16 @@
                          :disabled loading?}
        (if cached? "Refresh" "Load")]]
      [:div.import-actions
-      (when (and (seq selected) (not importing?))
+      (when (and (not importing?) target-database-id
+                 (if (= object-type :images)
+                   (let [{:keys [total imported]} (:image-status @viewer-state)]
+                     (and total (pos? total) (not= total imported)))
+                   (seq selected)))
         [:button.btn-primary
          {:on-click #(import-selected! access-db-path target-database-id)}
-         (str "Import " (count selected) " " (name object-type))])]]))
+         (if (= object-type :images)
+           "Import All Images"
+           (str "Import " (count selected) " " (name object-type)))])]]))
 
 (defn- db-name-from-path
   "Extract filename from a full path"
@@ -1452,13 +1528,15 @@
             {:on-click #(import-all! target-database-id {:force? true})}
             (str "Re-import All (" total-all ")")])])
       [target-database-selector]]]]
+   (when-not (or error loading?)
+     [:div.viewer-phase-bar
+      [import-phase-tracker]])
    [:div.viewer-body
     [:div.viewer-main
      (cond
        error [:div.error-message error]
        loading? [:div.loading-spinner "Loading..."]
        :else [:<>
-              [import-phase-tracker]
               [dependency-warning]
               [import-all-progress]
               [toolbar active-path]

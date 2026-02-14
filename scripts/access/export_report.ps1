@@ -143,6 +143,18 @@ function Export-ReportControlToObject {
         if ($linkMaster) { $obj.linkMasterFields = $linkMaster }
     }
 
+    # Image specific
+    if ($typeName -eq "image") {
+        $picture = Safe-GetProperty $ctl "Picture"
+        if ($picture) { $obj.picture = $picture }
+        $sizeMode = Safe-GetProperty $ctl "SizeMode"
+        if ($null -ne $sizeMode) {
+            $sizeModeMap = @{ 0 = "clip"; 1 = "stretch"; 3 = "zoom" }
+            $sizeModeName = $sizeModeMap[[int]$sizeMode]
+            if ($sizeModeName) { $obj.sizeMode = $sizeModeName }
+        }
+    }
+
     # ComboBox / ListBox specific
     $rowSource = Safe-GetProperty $ctl "RowSource"
     if ($rowSource) {

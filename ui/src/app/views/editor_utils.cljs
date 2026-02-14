@@ -72,6 +72,11 @@
              ""))))))
 
 (defn display-text
-  "Get display text from a control, checking common text keys"
+  "Get display content from a control. Returns an img element for image controls
+   with picture data, otherwise text."
   [ctrl]
-  (or (:text ctrl) (:label ctrl) (:caption ctrl) ""))
+  (if (and (#{:image :object-frame} (:type ctrl)) (:picture ctrl))
+    [:img {:src (:picture ctrl)
+           :style {:width "100%" :height "100%" :object-fit "contain"}
+           :draggable false}]
+    (or (:text ctrl) (:label ctrl) (:caption ctrl) "")))

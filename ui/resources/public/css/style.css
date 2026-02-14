@@ -2602,6 +2602,192 @@ body {
   color: var(--gray-500);
 }
 
+/* Design View — split pane layout */
+.query-design-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.query-design-upper {
+  flex: 0 0 55%;
+  overflow: auto;
+  background: var(--gray-100);
+  border-bottom: 2px solid var(--gray-300);
+}
+
+.query-design-lower {
+  flex: 1;
+  overflow: auto;
+  background: white;
+}
+
+/* QBE Canvas — table boxes and join lines */
+.qbe-canvas {
+  padding: 16px;
+  min-height: 100%;
+}
+
+.qbe-table-row {
+  display: flex;
+  gap: 40px;
+  position: relative;
+  z-index: 1;
+}
+
+.qbe-table-box {
+  flex: 0 0 180px;
+  background: white;
+  border: 1px solid var(--gray-300);
+  border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  overflow: hidden;
+}
+
+.qbe-table-title {
+  padding: 0.375rem 0.5rem;
+  font-weight: 600;
+  font-size: 0.8125rem;
+  background: var(--primary);
+  color: white;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qbe-table-columns {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.qbe-table-column {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  border-bottom: 1px solid var(--gray-100);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--gray-700);
+}
+
+.qbe-table-column:last-child {
+  border-bottom: none;
+}
+
+.qbe-table-column.qbe-col-selected {
+  background: rgba(37, 99, 235, 0.08);
+  font-weight: 500;
+  color: var(--gray-900);
+}
+
+.qbe-table-column.qbe-col-empty {
+  color: var(--gray-400);
+  font-style: italic;
+}
+
+/* Join line labels */
+.qbe-join-label {
+  font-size: 0.625rem;
+  fill: var(--gray-500);
+  font-weight: 600;
+}
+
+.qbe-join-svg {
+  overflow: visible;
+}
+
+/* QBE Grid — field table */
+.qbe-grid-container {
+  overflow: auto;
+  height: 100%;
+}
+
+.qbe-grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.qbe-grid th {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  background: var(--gray-100);
+  border-bottom: 2px solid var(--gray-300);
+  border-right: 1px solid var(--gray-200);
+  font-weight: 600;
+  color: var(--gray-700);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+}
+
+.qbe-grid th:last-child {
+  border-right: none;
+}
+
+.qbe-grid td {
+  padding: 0.375rem 0.75rem;
+  border-bottom: 1px solid var(--gray-200);
+  border-right: 1px solid var(--gray-100);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qbe-grid td:last-child {
+  border-right: none;
+}
+
+.qbe-field-cell {
+  font-weight: 500;
+  max-width: 200px;
+}
+
+.qbe-table-cell {
+  color: var(--gray-600);
+  max-width: 150px;
+}
+
+.qbe-sort-cell {
+  color: var(--gray-600);
+  min-width: 80px;
+}
+
+.qbe-show-cell {
+  text-align: center;
+  width: 50px;
+}
+
+.qbe-checkmark {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.qbe-criteria-cell {
+  min-width: 150px;
+  color: var(--gray-500);
+}
+
+/* WHERE criteria summary row */
+.qbe-criteria-row td {
+  background: var(--gray-50);
+  border-top: 2px solid var(--gray-200);
+  padding: 0.5rem 0.75rem;
+}
+
+.qbe-criteria-label {
+  font-weight: 600;
+  color: var(--gray-700);
+  font-size: 0.75rem;
+}
+
+.qbe-criteria-text {
+  font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+  font-size: 0.75rem;
+  color: var(--gray-600);
+}
+
 /* ============================================================
    MODULE VIEWER
    ============================================================ */

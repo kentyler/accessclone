@@ -8,6 +8,7 @@ const router = express.Router();
 const { logError } = require('../lib/events');
 const { clearPkCache } = require('./data');
 const { resolveType, quoteIdent } = require('../lib/access-types');
+const { parseQueryDesign } = require('../lib/query-design-parser');
 
 const NAME_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
@@ -230,6 +231,53 @@ module.exports = function(pool) {
       console.error('Error fetching queries:', err);
       logError(pool, 'GET /api/queries', 'Failed to fetch queries', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to fetch queries' });
+    }
+  });
+
+  /**
+   * GET /api/queries/:name/design
+   * Parse a view's SQL definition into structured query design data
+   */
+  router.get('/queries/:name/design', async (req, res) => {
+    try {
+      const schemaName = req.schemaName || 'public';
+      const viewName = req.params.name;
+
+      // Get the view definition using pg_get_viewdef
+      const viewResult = await pool.query(`
+        SELECT pg_get_viewdef(c.oid, true) as definition
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE c.relname = $1 AND n.nspname = $2 AND c.relkind = 'v'
+      `, [viewName, schemaName]);
+
+      if (viewResult.rows.length === 0) {
+        return res.status(404).json({ error: 'View not found' });
+      }
+
+      const sql = viewResult.rows[0].definition;
+      const design = parseQueryDesign(sql);
+
+      if (!design.parseable) {
+        return res.json(design);
+      }
+
+      // Fetch columns for each referenced table/view
+      for (const table of design.tables) {
+        const colResult = await pool.query(`
+          SELECT column_name
+          FROM information_schema.columns
+          WHERE table_name = $1 AND table_schema = $2
+          ORDER BY ordinal_position
+        `, [table.name, table.schema || schemaName]);
+        table.columns = colResult.rows.map(r => r.column_name);
+      }
+
+      res.json(design);
+    } catch (err) {
+      console.error('Error fetching query design:', err);
+      logError(pool, 'GET /api/queries/:name/design', 'Failed to fetch query design', err, { databaseId: req.databaseId });
+      res.status(500).json({ error: 'Failed to fetch query design' });
     }
   });
 

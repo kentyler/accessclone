@@ -8,9 +8,36 @@
 (declare run-query!)
 
 (defn set-query-view-mode!
-  "Set query view mode - :results or :sql"
+  "Set query view mode - :results, :sql, or :design"
   [mode]
-  (swap! state/app-state assoc-in [:query-viewer :view-mode] mode))
+  (swap! state/app-state assoc-in [:query-viewer :view-mode] mode)
+  (when (= mode :design)
+    ;; Load design data if not already loaded for this query
+    (let [query-info (get-in @state/app-state [:query-viewer :query-info])
+          design-data (get-in @state/app-state [:query-viewer :design-data])]
+      (when (and query-info (nil? design-data))
+        (load-query-design! (:name query-info))))))
+
+(defn load-query-design!
+  "Fetch parsed query design from the server"
+  [query-name]
+  (swap! state/app-state assoc-in [:query-viewer :design-loading?] true)
+  (go
+    (let [response (<! (http/get (str state/api-base "/api/queries/"
+                                      (js/encodeURIComponent query-name) "/design")
+                                 {:headers (state/db-headers)}))]
+      (swap! state/app-state assoc-in [:query-viewer :design-loading?] false)
+      (if (:success response)
+        (let [data (:body response)]
+          (swap! state/app-state assoc-in [:query-viewer :design-data] data)
+          ;; If not parseable, switch to SQL view
+          (when (not (:parseable data))
+            (swap! state/app-state assoc-in [:query-viewer :view-mode] :sql)))
+        (do
+          (state/log-event! "error" "Failed to load query design" "load-query-design"
+                            {:response (:body response)})
+          ;; Fall back to SQL view on error
+          (swap! state/app-state assoc-in [:query-viewer :view-mode] :sql))))))
 
 (defn load-query-for-viewing!
   "Load a query for viewing"
@@ -23,7 +50,9 @@
           :result-fields []
           :view-mode :results
           :loading? true
-          :error nil})
+          :error nil
+          :design-data nil
+          :design-loading? false})
   ;; Trigger auto-analyze if pending (query-info is set synchronously above)
   (state/maybe-auto-analyze!)
   ;; Run the query to get results

@@ -10,15 +10,32 @@ param(
     [string]$TableName
 )
 
+# Force UTF-8 output so Node.js (which reads stdout as utf8) gets correct bytes
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 # Types to skip: OLE (11), Binary (17), Attachment (19)
 # Note: Calculated (18) is now handled — extracted as PG generated columns
 $skipTypes = @(11, 17, 19)
 
-# Custom JSON serializer — ConvertTo-Json has known bugs with embedded quotes
-# in large strings (e.g. HTML content in memo fields).
+# Use .NET's built-in JSON string escaper — handles all edge cases
+# (embedded quotes, backslashes, control chars, Unicode) correctly.
+# Falls back to manual escaping if System.Web is unavailable.
+$script:useNetEscape = $false
+try {
+    Add-Type -AssemblyName System.Web
+    $script:useNetEscape = $true
+} catch {}
+
 function Escape-JsonStr([string]$s) {
+    if ($script:useNetEscape) {
+        return [System.Web.HttpUtility]::JavaScriptStringEncode($s)
+    }
+    # Manual fallback — covers all JSON-required escapes
     $s = $s.Replace('\', '\\')
     $s = $s.Replace('"', '\"')
+    $s = $s.Replace("`b", '\b')
+    $s = $s.Replace("`f", '\f')
     $s = $s.Replace("`t", '\t')
     $s = $s.Replace("`n", '\n')
     $s = $s.Replace("`r", '\r')

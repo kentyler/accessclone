@@ -1,6 +1,6 @@
-# List all VBA modules in an Access database
+# List all VBA modules in an Access database (standard, class, and form/report class modules)
 # Usage: .\list_modules.ps1 -DatabasePath "path\to\db.accdb"
-# Output: JSON array of module objects with name and line count
+# Output: JSON array of module objects with name, lineCount, and componentType
 
 param(
     [Parameter(Mandatory=$true)]
@@ -22,20 +22,31 @@ try {
     $accessApp.OpenCurrentDatabase($DatabasePath)
 
     $modules = @()
-    foreach ($module in $accessApp.CurrentProject.AllModules) {
-        $moduleInfo = @{
-            name = $module.Name
-            lineCount = 0
+
+    # Use VBE.VBComponents to get ALL module types:
+    #   1 = vbext_ct_StdModule (standard modules like modGlobal)
+    #   2 = vbext_ct_ClassModule (standalone class modules like clsErrorHandler)
+    # 100 = vbext_ct_Document (form/report class modules like Form_frmAdmin)
+    foreach ($component in $accessApp.VBE.ActiveVBProject.VBComponents) {
+        $compType = [int]$component.Type
+        $lineCount = 0
+
+        try {
+            $lineCount = $component.CodeModule.CountOfLines
+        } catch {
+            # Could not access code module
         }
 
-        # Try to get line count by opening the module
-        try {
-            $accessApp.DoCmd.OpenModule($module.Name)
-            $moduleObj = $accessApp.Modules($module.Name)
-            $moduleInfo.lineCount = $moduleObj.CountOfLines
-            $accessApp.DoCmd.Close(5, $module.Name)  # acModule = 5
-        } catch {
-            # Could not get line count
+        # Skip document modules (type 100) with no code — every form/report
+        # has a VBComponent even if there's no code behind it
+        if ($compType -eq 100 -and $lineCount -eq 0) {
+            continue
+        }
+
+        $moduleInfo = @{
+            name = $component.Name
+            lineCount = $lineCount
+            componentType = $compType
         }
 
         $modules += $moduleInfo

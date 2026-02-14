@@ -1,8 +1,61 @@
 (ns app.views.form-properties
   "Property sheet panel for the form editor"
-  (:require [app.state :as state]
+  (:require [clojure.string :as str]
+            [app.state :as state]
             [app.state-form :as state-form]
             [app.views.form-utils :as form-utils]))
+
+;; Map event property keys to the has-*-event flag keys stored by the importer
+(def event-flag-keys
+  {:on-click          :has-click-event
+   :on-dbl-click      :has-dblclick-event
+   :on-change         :has-change-event
+   :on-got-focus      :has-gotfocus-event
+   :on-lost-focus     :has-lostfocus-event
+   :on-enter          :has-enter-event
+   :on-exit           :has-exit-event
+   :before-update     :has-before-update-event
+   :after-update      :has-after-update-event
+   :on-load           :has-load-event
+   :on-unload         :has-unload-event
+   :on-open           :has-open-event
+   :on-close          :has-close-event
+   :on-current        :has-current-event
+   :before-insert     :has-before-insert-event
+   :after-insert      :has-after-insert-event})
+
+(defn resolve-event-value
+  "For event properties, check both the property key and the has-*-event flag."
+  [obj k]
+  (or (get obj k)
+      (when (get obj (get event-flag-keys k))
+        "[Event Procedure]")))
+
+(defn- find-form-module
+  "Find the class module for a form. Tries Form_<name> convention, case-insensitive."
+  [form-name]
+  (let [modules (get-in @state/app-state [:objects :modules])
+        ;; Access convention: Form_<FormName> with spaces as underscores
+        target (str/lower-case (str "Form_" (str/replace form-name #"\s+" "_")))]
+    (first (filter #(= (str/lower-case (:name %)) target) modules))))
+
+(defn open-event-module!
+  "Open the form's class module (Form_<name>) in the module viewer."
+  []
+  (let [form-id (get-in @state/app-state [:form-editor :form-id])
+        form-obj (first (filter #(= (:id %) form-id)
+                                (get-in @state/app-state [:objects :forms])))
+        form-name (:name form-obj)
+        module (when form-name (find-form-module form-name))]
+    (if module
+      (state/open-object! :modules (:id module))
+      (let [modules (get-in @state/app-state [:objects :modules])
+            available (str/join ", " (map :name modules))]
+        (state/set-error!
+         (str "No module found for form \"" form-name "\". "
+              (if (seq modules)
+                (str "Available: " available)
+                "No modules imported yet.")))))))
 
 ;; Property definitions for each control type
 (def control-property-defs
@@ -131,10 +184,15 @@
          ^{:key (:name field)} [:option {:value (:name field)} (:name field)])])
 
     :event
-    [:input {:type "text"
-             :value (or value "")
-             :placeholder "[Event Procedure]"
-             :on-change #(on-change (.. % -target -value))}]
+    [:div.event-input-row
+     [:input {:type "text"
+              :value (or value "")
+              :read-only true}]
+     (when (= value "[Event Procedure]")
+       [:button.event-browse-btn
+        {:title "Open event handler module"
+         :on-click #(open-event-module!)}
+        "..."])]
 
     ;; Default
     [:input {:type "text"
@@ -183,9 +241,15 @@
                         :else form-property-defs)
         section-data (when is-section? (get current section-key))
         get-value (cond
-                    is-control? #(get selected-control %)
-                    is-section? #(get section-data %)
-                    :else #(get current %))
+                    is-control? #(if (event-flag-keys %)
+                                   (resolve-event-value selected-control %)
+                                   (get selected-control %))
+                    is-section? #(if (event-flag-keys %)
+                                   (resolve-event-value section-data %)
+                                   (get section-data %))
+                    :else #(if (event-flag-keys %)
+                             (resolve-event-value current %)
+                             (get current %)))
         on-change (cond
                     is-control? #(state-form/update-control! section-key idx %1 %2)
                     is-section? #(state-form/set-form-definition!

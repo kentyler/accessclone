@@ -61,12 +61,15 @@
                                (or (str/starts-with? n "group-header-")
                                    (str/starts-with? n "group-footer-"))))
                            all-keys)]
-    (reduce (fn [d gk]
-              (if (get d gk)
-                (update d gk normalize-report-section)
-                d))
-            def-with-sections
-            group-keys)))
+    (-> (reduce (fn [d gk]
+                  (if (get d gk)
+                    (update d gk normalize-report-section)
+                    d))
+                def-with-sections
+                group-keys)
+        (#(if-let [rs (get % :record-source)]
+            (assoc % :record-source (str/lower-case rs))
+            %)))))
 
 ;; ============================================================
 ;; REPORT EDITOR - DEFINITION & CONTROLS

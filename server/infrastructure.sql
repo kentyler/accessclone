@@ -187,7 +187,7 @@ $$;
 --------------------------------------------------------------------------------
 
 -- Get a config setting
-CREATE OR REPLACE FUNCTION get_config(p_setting_name text)
+CREATE OR REPLACE FUNCTION get_app_config(p_setting_name text)
 RETURNS text
 LANGUAGE sql
 AS $$
@@ -197,7 +197,7 @@ AS $$
 $$;
 
 -- Set a config setting (upsert)
-CREATE OR REPLACE FUNCTION set_config(p_setting_name text, p_setting_value text, p_description text DEFAULT NULL)
+CREATE OR REPLACE FUNCTION set_app_config(p_setting_name text, p_setting_value text, p_description text DEFAULT NULL)
 RETURNS void
 LANGUAGE sql
 AS $$
@@ -269,6 +269,6 @@ BEGIN
     RAISE NOTICE 'Functions: create_session, clear_session, cleanup_old_sessions,';
     RAISE NOTICE '           get_state, get_state_int, get_state_numeric, get_state_bool,';
     RAISE NOTICE '           get_state_date, get_state_timestamp, set_state,';
-    RAISE NOTICE '           normalize_text, get_config, set_config, log_migration';
+    RAISE NOTICE '           normalize_text, get_app_config, set_app_config, log_migration';
 END;
 $$;

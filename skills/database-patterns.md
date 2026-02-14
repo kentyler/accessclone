@@ -303,10 +303,10 @@ $$ LANGUAGE plpgsql;
 
 ```sql
 -- Read a setting
-v_tax_rate := get_config('tax_rate')::numeric;
+v_tax_rate := get_app_config('tax_rate')::numeric;
 
 -- Set a setting
-SELECT set_config('tax_rate', '0.08', 'Default tax rate');
+SELECT set_app_config('tax_rate', '0.08', 'Default tax rate');
 ```
 
 ---

@@ -56,6 +56,18 @@ CREATE INDEX IF NOT EXISTS idx_edges_rel ON shared._edges(rel_type);
 CREATE INDEX IF NOT EXISTS idx_edges_status ON shared._edges(status) WHERE status IS NOT NULL;
 
 -- ============================================================
+-- Databases - registry of managed databases with schema mapping
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.databases (
+    database_id VARCHAR(100) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    schema_name VARCHAR(255) NOT NULL,
+    description TEXT,
+    last_accessed TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
 -- Forms - UI form definitions (EDN) with append-only versioning
 -- ============================================================
 CREATE TABLE IF NOT EXISTS shared.forms (

@@ -231,53 +231,69 @@ describe('syntax translations', () => {
 // TempVars extraction
 // ============================================================
 
-describe('TempVars → state table subquery', () => {
-  const subqueryFragment = 'SELECT value FROM shared.form_control_state';
-
-  test('[TempVars]![var] → subquery (view, not function)', () => {
+describe('TempVars → session_state cross-join', () => {
+  test('[TempVars]![var] → cross-join (view, not function)', () => {
     const r = convert('SELECT Id FROM recipe WHERE Id=[TempVars]![recipe_id]');
     expect(r.pgObjectType).toBe('view');
-    expect(ddl(r)).toContain(subqueryFragment);
-    expect(ddl(r)).toContain("table_name = '_tempvars'");
-    expect(ddl(r)).toContain("column_name = 'recipe_id'");
+    const s = ddl(r);
+    expect(s).toContain('shared.session_state ss1');
+    expect(s).toContain("ss1.table_name = '_tempvars'");
+    expect(s).toContain("ss1.column_name = 'recipe_id'");
+    expect(s).toContain('ss1.value');
   });
 
-  test('TempVars("var") → subquery', () => {
+  test('TempVars("var") → cross-join', () => {
     const r = convert('SELECT Id FROM recipe WHERE Id=TempVars("recipe_id")');
     expect(r.pgObjectType).toBe('view');
-    expect(ddl(r)).toContain(subqueryFragment);
-    expect(ddl(r)).toContain("column_name = 'recipe_id'");
+    const s = ddl(r);
+    expect(s).toContain('shared.session_state ss1');
+    expect(s).toContain("ss1.column_name = 'recipe_id'");
   });
 
-  test('TempVars!var → subquery', () => {
+  test('TempVars!var → cross-join', () => {
     const r = convert('SELECT Id FROM recipe WHERE Id=TempVars!recipe_id');
     expect(r.pgObjectType).toBe('view');
-    expect(ddl(r)).toContain(subqueryFragment);
-    expect(ddl(r)).toContain("column_name = 'recipe_id'");
+    const s = ddl(r);
+    expect(s).toContain('shared.session_state ss1');
+    expect(s).toContain("ss1.column_name = 'recipe_id'");
   });
 
-  test('subquery uses current_setting for session scoping', () => {
+  test('session_state view is used (no current_setting in query)', () => {
     const r = convert('SELECT Id FROM recipe WHERE Id=[TempVars]![recipe_id]');
-    expect(ddl(r)).toContain("current_setting('app.session_id', true)");
+    // The view handles session scoping, so current_setting should NOT appear in the query
+    expect(ddl(r)).not.toContain("current_setting");
+    expect(ddl(r)).toContain('shared.session_state');
   });
 
-  test('multiple TempVars both converted to subqueries', () => {
+  test('multiple TempVars get separate aliases (ss1, ss2)', () => {
     const r = convert(
       'SELECT Id FROM recipe WHERE Id=[TempVars]![recipe_id] AND name=[TempVars]![recipe_name]'
     );
-    expect(ddl(r)).toContain("column_name = 'recipe_id'");
-    expect(ddl(r)).toContain("column_name = 'recipe_name'");
-    // Both are subqueries, query stays a view
+    const s = ddl(r);
+    expect(s).toContain("ss1.column_name = 'recipe_id'");
+    expect(s).toContain("ss2.column_name = 'recipe_name'");
+    expect(s).toContain('shared.session_state ss1');
+    expect(s).toContain('shared.session_state ss2');
     expect(r.pgObjectType).toBe('view');
   });
 
-  test('duplicate TempVars both appear as subqueries in WHERE', () => {
+  test('duplicate TempVars both get separate aliases in WHERE', () => {
     const r = convert(
       'SELECT Id FROM recipe WHERE Id=[TempVars]![recipe_id] AND Id2=[TempVars]![recipe_id]'
     );
-    // Each occurrence gets its own subquery
-    const matches = ddl(r).match(/column_name = 'recipe_id'/g);
+    const s = ddl(r);
+    // Each occurrence gets its own alias
+    expect(s).toContain('ss1.value');
+    expect(s).toContain('ss2.value');
+    const matches = s.match(/column_name = 'recipe_id'/g);
     expect(matches.length).toBe(2);
+  });
+
+  test('TempVars with no WHERE clause get WHERE added', () => {
+    const r = convert('SELECT Id, [TempVars]![recipe_id] AS rid FROM recipe');
+    const s = ddl(r);
+    expect(s).toContain('shared.session_state ss1');
+    expect(s).toContain("ss1.table_name = '_tempvars'");
   });
 });
 
@@ -292,11 +308,11 @@ describe('query type routing', () => {
     expect(ddl(r)).toContain('CREATE OR REPLACE VIEW');
   });
 
-  test('SELECT with TempVars → VIEW with subquery (not function)', () => {
+  test('SELECT with TempVars → VIEW with session_state cross-join (not function)', () => {
     const r = convert('SELECT Id, Name FROM recipe WHERE Id=[TempVars]![rid]');
     expect(r.pgObjectType).toBe('view');
     expect(ddl(r)).toContain('CREATE OR REPLACE VIEW');
-    expect(ddl(r)).toContain('shared.form_control_state');
+    expect(ddl(r)).toContain('shared.session_state ss1');
   });
 
   test('UPDATE → plpgsql FUNCTION returning integer', () => {
@@ -378,9 +394,9 @@ describe('schema prefixing', () => {
     expect(s).not.toContain('app.app.');
   });
 
-  test('does not mangle shared.form_control_state in subqueries', () => {
+  test('does not mangle shared.session_state in cross-joins', () => {
     const r = convert('SELECT Id FROM recipe WHERE Id=[TempVars]![rid]');
-    expect(ddl(r)).toContain('shared.form_control_state');
+    expect(ddl(r)).toContain('shared.session_state');
     expect(ddl(r)).not.toContain('myschema."shared"');
   });
 
@@ -470,8 +486,8 @@ describe('PARAMETERS declaration', () => {
     expect(r.pgObjectType).toBe('view');
     expect(ddl(r)).toContain('CREATE OR REPLACE VIEW');
     expect(ddl(r)).not.toContain('p_parentemployeeid');
-    // Parent ref should resolve to state subquery
-    expect(ddl(r)).toContain('shared.form_control_state');
+    // Parent ref should resolve to session_state cross-join
+    expect(ddl(r)).toContain('shared.session_state');
   });
 
   test('Table.Column declared as DAO parameter → filtered out, creates VIEW not FUNCTION', () => {
@@ -489,9 +505,7 @@ describe('PARAMETERS declaration', () => {
 // Form references → state table subquery
 // ============================================================
 
-describe('Form references → state table subquery', () => {
-  const subqueryFragment = 'SELECT value FROM shared.form_control_state';
-
+describe('Form references → session_state cross-join', () => {
   // Standard controlMapping for tests: frmProducts has cboCategory bound to products.categoryid
   const productMapping = {
     'frmproducts.cbocategory': { table: 'products', column: 'categoryid' },
@@ -499,45 +513,50 @@ describe('Form references → state table subquery', () => {
     'frmproducts.vendorid': { table: 'products', column: 'vendorid' }
   };
 
-  test('[Forms]![formName]![controlName] → resolved subquery', () => {
+  test('[Forms]![formName]![controlName] → resolved cross-join', () => {
     const r = convert(
       'SELECT Id FROM orders WHERE CategoryID = [Forms]![frmProducts]![cboCategory]',
       { controlMapping: productMapping }
     );
     expect(r.pgObjectType).toBe('view');
-    expect(ddl(r)).toContain(subqueryFragment);
-    expect(ddl(r)).toContain("table_name = 'products'");
-    expect(ddl(r)).toContain("column_name = 'categoryid'");
+    const s = ddl(r);
+    expect(s).toContain('shared.session_state ss1');
+    expect(s).toContain("ss1.table_name = 'products'");
+    expect(s).toContain("ss1.column_name = 'categoryid'");
+    expect(s).toContain('ss1.value');
   });
 
-  test('Forms![formName]![controlName] → resolved subquery', () => {
+  test('Forms![formName]![controlName] → resolved cross-join', () => {
     const r = convert(
       'SELECT Id FROM orders WHERE CategoryID = Forms![frmProducts]![cboCategory]',
       { controlMapping: productMapping }
     );
-    expect(ddl(r)).toContain(subqueryFragment);
-    expect(ddl(r)).toContain("table_name = 'products'");
-    expect(ddl(r)).toContain("column_name = 'categoryid'");
+    const s = ddl(r);
+    expect(s).toContain('shared.session_state ss1');
+    expect(s).toContain("ss1.table_name = 'products'");
+    expect(s).toContain("ss1.column_name = 'categoryid'");
   });
 
-  test('Forms!formName!controlName (bare) → resolved subquery', () => {
+  test('Forms!formName!controlName (bare) → resolved cross-join', () => {
     const r = convert(
       'SELECT Id FROM orders WHERE CategoryID = Forms!frmProducts!cboCategory',
       { controlMapping: productMapping }
     );
-    expect(ddl(r)).toContain(subqueryFragment);
-    expect(ddl(r)).toContain("table_name = 'products'");
-    expect(ddl(r)).toContain("column_name = 'categoryid'");
+    const s = ddl(r);
+    expect(s).toContain('shared.session_state ss1');
+    expect(s).toContain("ss1.table_name = 'products'");
+    expect(s).toContain("ss1.column_name = 'categoryid'");
   });
 
-  test('Forms!formName.controlName (dot notation) → resolved subquery', () => {
+  test('Forms!formName.controlName (dot notation) → resolved cross-join', () => {
     const r = convert(
       'SELECT Id FROM orders WHERE CategoryID = Forms!frmProducts.cboCategory',
       { controlMapping: productMapping }
     );
-    expect(ddl(r)).toContain(subqueryFragment);
-    expect(ddl(r)).toContain("table_name = 'products'");
-    expect(ddl(r)).toContain("column_name = 'categoryid'");
+    const s = ddl(r);
+    expect(s).toContain('shared.session_state ss1');
+    expect(s).toContain("ss1.table_name = 'products'");
+    expect(s).toContain("ss1.column_name = 'categoryid'");
   });
 
   test('form names with spaces are sanitized and resolved', () => {
@@ -545,8 +564,9 @@ describe('Form references → state table subquery', () => {
       'SELECT Id FROM orders WHERE x = [Forms]![Product Entry Form]![txtQty]',
       { controlMapping: { 'product_entry_form.txtqty': { table: 'orders', column: 'quantity' } } }
     );
-    expect(ddl(r)).toContain("table_name = 'orders'");
-    expect(ddl(r)).toContain("column_name = 'quantity'");
+    const s = ddl(r);
+    expect(s).toContain("ss1.table_name = 'orders'");
+    expect(s).toContain("ss1.column_name = 'quantity'");
   });
 
   test('mixed TempVars and Form refs in same query', () => {
@@ -555,9 +575,11 @@ describe('Form references → state table subquery', () => {
       { controlMapping: productMapping }
     );
     expect(r.pgObjectType).toBe('view');
-    expect(ddl(r)).toContain("table_name = 'products'");
-    expect(ddl(r)).toContain("table_name = '_tempvars'");
-    expect(ddl(r)).toContain("column_name = 'currentstatus'");
+    const s = ddl(r);
+    // TempVars is translated first, so it gets ss1; form ref gets ss2
+    expect(s).toContain("table_name = '_tempvars'");
+    expect(s).toContain("table_name = 'products'");
+    expect(s).toContain("column_name = 'currentstatus'");
   });
 
   test('[Form]![controlName] → resolved via control-name-only lookup', () => {
@@ -565,9 +587,10 @@ describe('Form references → state table subquery', () => {
       'SELECT Id FROM products WHERE CategoryID = [Form]![cboProductCategories]',
       { controlMapping: productMapping }
     );
-    expect(ddl(r)).toContain(subqueryFragment);
-    expect(ddl(r)).toContain("table_name = 'products'");
-    expect(ddl(r)).toContain("column_name = 'categoryid'");
+    const s = ddl(r);
+    expect(s).toContain('shared.session_state ss1');
+    expect(s).toContain("ss1.table_name = 'products'");
+    expect(s).toContain("ss1.column_name = 'categoryid'");
   });
 
   test('Form!controlName (bare) → resolved via control-name-only lookup', () => {
@@ -575,9 +598,10 @@ describe('Form references → state table subquery', () => {
       'SELECT Id FROM products WHERE CategoryID = Form!cboCategory',
       { controlMapping: { 'someform.cbocategory': { table: 'categories', column: 'id' } } }
     );
-    expect(ddl(r)).toContain(subqueryFragment);
-    expect(ddl(r)).toContain("table_name = 'categories'");
-    expect(ddl(r)).toContain("column_name = 'id'");
+    const s = ddl(r);
+    expect(s).toContain('shared.session_state ss1');
+    expect(s).toContain("ss1.table_name = 'categories'");
+    expect(s).toContain("ss1.column_name = 'id'");
   });
 
   test('[Parent]![controlName] → resolved via control-name-only lookup', () => {
@@ -585,9 +609,10 @@ describe('Form references → state table subquery', () => {
       'SELECT Id FROM products WHERE VendorID = [Parent]![VendorID]',
       { controlMapping: productMapping }
     );
-    expect(ddl(r)).toContain(subqueryFragment);
-    expect(ddl(r)).toContain("table_name = 'products'");
-    expect(ddl(r)).toContain("column_name = 'vendorid'");
+    const s = ddl(r);
+    expect(s).toContain('shared.session_state ss1');
+    expect(s).toContain("ss1.table_name = 'products'");
+    expect(s).toContain("ss1.column_name = 'vendorid'");
   });
 
   test('Parent!controlName (bare) → resolved via control-name-only lookup', () => {
@@ -595,9 +620,10 @@ describe('Form references → state table subquery', () => {
       'SELECT Id FROM products WHERE VendorID = Parent!VendorID',
       { controlMapping: productMapping }
     );
-    expect(ddl(r)).toContain(subqueryFragment);
-    expect(ddl(r)).toContain("table_name = 'products'");
-    expect(ddl(r)).toContain("column_name = 'vendorid'");
+    const s = ddl(r);
+    expect(s).toContain('shared.session_state ss1');
+    expect(s).toContain("ss1.table_name = 'products'");
+    expect(s).toContain("ss1.column_name = 'vendorid'");
   });
 
   test('[Parent]![Parent]![controlName] → resolved (chained grandparent ref)', () => {
@@ -605,11 +631,12 @@ describe('Form references → state table subquery', () => {
       'SELECT Id FROM products WHERE CustomerID = [Parent]![Parent]![CustomerID]',
       { controlMapping: { 'orders.customerid': { table: 'orders', column: 'customerid' } } }
     );
-    expect(ddl(r)).toContain(subqueryFragment);
-    expect(ddl(r)).toContain("table_name = 'orders'");
-    expect(ddl(r)).toContain("column_name = 'customerid'");
+    const s = ddl(r);
+    expect(s).toContain('shared.session_state ss1');
+    expect(s).toContain("ss1.table_name = 'orders'");
+    expect(s).toContain("ss1.column_name = 'customerid'");
     // No dangling !"customerid"
-    expect(ddl(r)).not.toContain('!"');
+    expect(s).not.toContain('!"');
   });
 
   test('Parent!Parent!controlName (bare) → resolved (chained grandparent ref)', () => {
@@ -617,9 +644,9 @@ describe('Form references → state table subquery', () => {
       'SELECT Id FROM products WHERE CustomerID = Parent!Parent!CustomerID',
       { controlMapping: { 'orders.customerid': { table: 'orders', column: 'customerid' } } }
     );
-    expect(ddl(r)).toContain(subqueryFragment);
-    expect(ddl(r)).toContain("column_name = 'customerid'");
-    expect(ddl(r)).not.toContain('!"');
+    const s = ddl(r);
+    expect(s).toContain("ss1.column_name = 'customerid'");
+    expect(s).not.toContain('!"');
   });
 
   test('[Parent].[controlName] dot notation → resolved', () => {
@@ -627,9 +654,10 @@ describe('Form references → state table subquery', () => {
       'SELECT Id FROM products WHERE EmployeeID = [Parent].[EmployeeID]',
       { controlMapping: { 'orders.employeeid': { table: 'orders', column: 'employeeid' } } }
     );
-    expect(ddl(r)).toContain(subqueryFragment);
-    expect(ddl(r)).toContain("column_name = 'employeeid'");
-    expect(ddl(r)).not.toContain('"parent"');
+    const s = ddl(r);
+    expect(s).toContain('shared.session_state ss1');
+    expect(s).toContain("ss1.column_name = 'employeeid'");
+    expect(s).not.toContain('"parent"');
   });
 
   test('unresolved 2-part ref (no mapping) → NULL with comment', () => {
@@ -641,14 +669,15 @@ describe('Form references → state table subquery', () => {
     expect(r.warnings.some(w => w.includes('Unresolved'))).toBe(true);
   });
 
-  test('unresolved 3-part ref (no mapping) → fallback subquery with warning', () => {
+  test('unresolved 3-part ref (no mapping) → fallback cross-join with warning', () => {
     const r = convert(
       'SELECT Id FROM orders WHERE x = [Forms]![frmMissing]![ctrl1]',
       { controlMapping: {} }
     );
+    const s = ddl(r);
     // Falls back to form name as table, control as column
-    expect(ddl(r)).toContain("table_name = 'frmmissing'");
-    expect(ddl(r)).toContain("column_name = 'ctrl1'");
+    expect(s).toContain("ss1.table_name = 'frmmissing'");
+    expect(s).toContain("ss1.column_name = 'ctrl1'");
     expect(r.warnings.some(w => w.includes('Unresolved'))).toBe(true);
   });
 
@@ -662,7 +691,7 @@ describe('Form references → state table subquery', () => {
     );
   });
 
-  test('::text cast added for columns compared with state subquery (=)', () => {
+  test('::text cast added for columns compared with session_state ref (=)', () => {
     const r = convert(
       'SELECT Id FROM products WHERE CategoryID = [Forms]![frmProducts]![cboCategory]',
       { controlMapping: productMapping }
@@ -671,7 +700,7 @@ describe('Form references → state table subquery', () => {
     expect(ddl(r)).toMatch(/::text/);
   });
 
-  test('::text cast added for <> operator with state subquery', () => {
+  test('::text cast added for <> operator with session_state ref', () => {
     const r = convert(
       'SELECT Id FROM products WHERE CategoryID <> [Forms]![frmProducts]![cboCategory]',
       { controlMapping: productMapping }
@@ -684,31 +713,34 @@ describe('Form references → state table subquery', () => {
       'SELECT Id FROM orders WHERE x = [Forms]![frmTest]![ctrl1]',
       { controlMapping: { 'frmtest.ctrl1': { table: 'orders', column: 'status' } } }
     );
-    // The main table should be prefixed, the subquery should use shared. intact
-    expect(ddl(r)).toContain('myschema."orders"');
-    expect(ddl(r)).toContain('shared.form_control_state');
-    expect(ddl(r)).not.toContain('myschema."shared"');
+    const s = ddl(r);
+    // The main table should be prefixed, session_state should use shared. intact
+    expect(s).toContain('myschema."orders"');
+    expect(s).toContain('shared.session_state');
+    expect(s).not.toContain('myschema."shared"');
   });
 
   // --- Report references (same resolution as Forms) ---
 
-  test('[Reports]![reportName]![controlName] → resolved subquery', () => {
+  test('[Reports]![reportName]![controlName] → resolved cross-join', () => {
     const r = convert(
       'SELECT Id FROM orders WHERE OrderDate >= [Reports]![rptSales]![StartDate]',
       { controlMapping: { 'rptsales.startdate': { table: 'orders', column: 'orderdate' } } }
     );
-    expect(ddl(r)).toContain(subqueryFragment);
-    expect(ddl(r)).toContain("table_name = 'orders'");
-    expect(ddl(r)).toContain("column_name = 'orderdate'");
+    const s = ddl(r);
+    expect(s).toContain('shared.session_state ss1');
+    expect(s).toContain("ss1.table_name = 'orders'");
+    expect(s).toContain("ss1.column_name = 'orderdate'");
   });
 
-  test('Reports!reportName!controlName (bare) → resolved subquery', () => {
+  test('Reports!reportName!controlName (bare) → resolved cross-join', () => {
     const r = convert(
       'SELECT Id FROM orders WHERE OrderDate >= Reports!rptSales!StartDate',
       { controlMapping: { 'rptsales.startdate': { table: 'orders', column: 'orderdate' } } }
     );
-    expect(ddl(r)).toContain(subqueryFragment);
-    expect(ddl(r)).toContain("column_name = 'orderdate'");
+    const s = ddl(r);
+    expect(s).toContain('shared.session_state ss1');
+    expect(s).toContain("ss1.column_name = 'orderdate'");
   });
 
   test('[Report]![controlName] → resolved via control-name-only lookup', () => {
@@ -716,8 +748,9 @@ describe('Form references → state table subquery', () => {
       'SELECT Id FROM orders WHERE OrderDate >= [Report]![StartDate]',
       { controlMapping: { 'rptsales.startdate': { table: 'orders', column: 'orderdate' } } }
     );
-    expect(ddl(r)).toContain(subqueryFragment);
-    expect(ddl(r)).toContain("column_name = 'orderdate'");
+    const s = ddl(r);
+    expect(s).toContain('shared.session_state ss1');
+    expect(s).toContain("ss1.column_name = 'orderdate'");
   });
 
   test('Report!controlName (bare) → resolved via control-name-only lookup', () => {
@@ -725,17 +758,19 @@ describe('Form references → state table subquery', () => {
       'SELECT Id FROM orders WHERE OrderDate >= Report!StartDate',
       { controlMapping: { 'rptsales.startdate': { table: 'orders', column: 'orderdate' } } }
     );
-    expect(ddl(r)).toContain(subqueryFragment);
-    expect(ddl(r)).toContain("column_name = 'orderdate'");
+    const s = ddl(r);
+    expect(s).toContain('shared.session_state ss1');
+    expect(s).toContain("ss1.column_name = 'orderdate'");
   });
 
-  test('unresolved [Reports]! ref → fallback subquery with warning', () => {
+  test('unresolved [Reports]! ref → fallback cross-join with warning', () => {
     const r = convert(
       'SELECT Id FROM orders WHERE x = [Reports]![rptMissing]![ctrl1]',
       { controlMapping: {} }
     );
-    expect(ddl(r)).toContain("table_name = 'rptmissing'");
-    expect(ddl(r)).toContain("column_name = 'ctrl1'");
+    const s = ddl(r);
+    expect(s).toContain("ss1.table_name = 'rptmissing'");
+    expect(s).toContain("ss1.column_name = 'ctrl1'");
     expect(r.warnings.some(w => w.includes('Unresolved'))).toBe(true);
   });
 
@@ -744,11 +779,12 @@ describe('Form references → state table subquery', () => {
       'SELECT Id FROM orders WHERE OrderDate >= [Reports]![rptSales]![Report Parameter Start Date]',
       { controlMapping: { 'rptsales.report_parameter_start_date': { table: 'config', column: 'start_date' } } }
     );
-    expect(ddl(r)).toContain(subqueryFragment);
-    expect(ddl(r)).toContain("table_name = 'config'");
-    expect(ddl(r)).toContain("column_name = 'start_date'");
+    const s = ddl(r);
+    expect(s).toContain('shared.session_state ss1');
+    expect(s).toContain("ss1.table_name = 'config'");
+    expect(s).toContain("ss1.column_name = 'start_date'");
     // Must NOT appear as a function call
-    expect(ddl(r)).not.toContain('reportparameterstartdate(');
+    expect(s).not.toContain('reportparameterstartdate(');
   });
 });
 

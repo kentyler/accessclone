@@ -123,8 +123,12 @@ RULES:
 - PIVOT/TRANSFORM queries → use crosstab() from tablefunc extension or CASE aggregation
 
 FORM/REPORT REFERENCES:
-References like [Forms]![FormName]![ControlName] or [TempVars]![VarName] should be resolved using shared.form_control_state subqueries:
-(SELECT value FROM shared.form_control_state WHERE session_id = current_setting('app.session_id') AND table_name = 'TABLE' AND column_name = 'COLUMN')
+References like [Forms]![FormName]![ControlName] or [TempVars]![VarName] should be resolved using cross-joins against shared.session_state (a view pre-filtered on the current session).
+
+For each reference, add shared.session_state with an alias (ss1, ss2, ...) to the FROM clause:
+  FROM schema.tablename t, shared.session_state ss1
+Filter with: ss1.table_name = 'TABLE' AND ss1.column_name = 'COLUMN'
+Compare with: column::text = ss1.value
 
 Control mapping (formName.controlName → tableName.columnName):
 ${mappingContext}

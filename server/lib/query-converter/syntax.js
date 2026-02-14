@@ -5,7 +5,7 @@
 const { sanitizeName, escapeRegex } = require('./utils');
 const { translateTempVars, translateFormRefs } = require('./form-state');
 
-function applySyntaxTranslations(sql, controlMapping, referencedEntries, warnings) {
+function applySyntaxTranslations(sql, controlMapping, referencedEntries, warnings, stateRefs) {
   // DISTINCTROW → DISTINCT
   sql = sql.replace(/\bDISTINCTROW\b/gi, 'DISTINCT');
 
@@ -36,16 +36,17 @@ function applySyntaxTranslations(sql, controlMapping, referencedEntries, warning
   // & (string concat) → ||
   sql = sql.replace(/\s*&\s*/g, ' || ');
 
-  // TempVars and Form references → state table subqueries
-  // Must run BEFORE double-quote conversion and bracket removal
-  sql = translateTempVars(sql);
-  sql = translateFormRefs(sql, controlMapping, referencedEntries, warnings);
+  // TempVars and Form references → cross-join aliases (ssN.value) when stateRefs provided,
+  // or inline subqueries (expression context) when stateRefs is omitted.
+  // Must run BEFORE double-quote conversion and bracket removal.
+  sql = translateTempVars(sql, stateRefs);
+  sql = translateFormRefs(sql, controlMapping, referencedEntries, warnings, stateRefs);
 
-  // Cast columns compared with state table subqueries to ::text.
-  // The state table value column is text; PG won't implicitly cast integer=text.
+  // Cast columns compared with session_state refs to ::text.
+  // The state value column is text; PG won't implicitly cast integer=text.
   sql = sql.replace(
-    /([\w."]+(?:\.[\w."]+)?)\s*(\)*\s*(?:<>|[<>!]?=|[<>])\s*)\(SELECT value FROM shared\.form_control_state\b/g,
-    '$1::text$2(SELECT value FROM shared.form_control_state'
+    /([\w."]+(?:\.[\w."]+)?)\s*(\)*\s*(?:<>|[<>!]?=|[<>])\s*)(ss\d+\.value)\b/g,
+    '$1::text$2$3'
   );
 
   // Convert Access double-quoted string literals to single quotes BEFORE bracket removal.

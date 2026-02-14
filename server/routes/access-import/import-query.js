@@ -18,7 +18,7 @@ module.exports = function(router, pool, secrets) {
    * POST /api/access-import/import-query
    */
   router.post('/import-query', async (req, res) => {
-    const { databasePath, queryName, targetDatabaseId, force } = req.body;
+    const { databasePath, queryName, targetDatabaseId } = req.body;
 
     const logImport = makeLogImport(pool, databasePath, queryName, 'query', targetDatabaseId);
 
@@ -92,32 +92,9 @@ module.exports = function(router, pool, secrets) {
         return res.status(400).json({ error: 'No SQL statements generated', warnings: result.warnings });
       }
 
-      // 4. Check name conflicts (views + functions) — skip when force re-importing
       const pgName = result.pgObjectName;
-      if (!force) {
-        if (result.pgObjectType === 'view') {
-          const existsResult = await pool.query(
-            `SELECT 1 FROM information_schema.views WHERE table_schema = $1 AND table_name = $2`,
-            [schemaName, pgName]
-          );
-          if (existsResult.rows.length > 0) {
-            await logImport('error', `View "${pgName}" already exists in target database`);
-            return res.status(409).json({ error: `View "${pgName}" already exists in target database` });
-          }
-        }
-        if (result.pgObjectType === 'function') {
-          const existsResult = await pool.query(
-            `SELECT 1 FROM information_schema.routines WHERE routine_schema = $1 AND routine_name = $2`,
-            [schemaName, pgName]
-          );
-          if (existsResult.rows.length > 0) {
-            await logImport('error', `Function "${pgName}" already exists in target database`);
-            return res.status(409).json({ error: `Function "${pgName}" already exists in target database` });
-          }
-        }
-      }
 
-      // 4c. Ensure VBA stub functions exist before executing (idempotent, skips existing)
+      // 4. Ensure VBA stub functions exist before executing (idempotent, skips existing)
       await createStubFunctions(pool, schemaName, targetDatabaseId);
 
       // 5. Execute statements in a transaction (with LLM fallback on failure)
@@ -131,7 +108,24 @@ module.exports = function(router, pool, secrets) {
             result.warnings.push('Skipped comment-only statement');
             continue;
           }
-          await client.query(stmt);
+          try {
+            await client.query(stmt);
+          } catch (stmtErr) {
+            // CREATE OR REPLACE VIEW fails if column list changed (42P01 handled elsewhere).
+            // Detect this and retry with DROP + CREATE.
+            const isColumnChange = stmtErr.code === '42601' || // syntax
+              (stmtErr.message && /cannot.*(?:change|drop|rename).*(?:column|view)/i.test(stmtErr.message));
+            if (isColumnChange && /CREATE\s+OR\s+REPLACE\s+VIEW/i.test(stmt)) {
+              const viewMatch = stmt.match(/VIEW\s+(\S+)\s+AS/i);
+              if (viewMatch) {
+                await client.query(`DROP VIEW IF EXISTS ${viewMatch[1]} CASCADE`);
+                await client.query(stmt);
+                result.warnings.push(`Dropped and recreated view (column list changed)`);
+                continue;
+              }
+            }
+            throw stmtErr;
+          }
         }
         await client.query('COMMIT');
       }

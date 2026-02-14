@@ -927,16 +927,30 @@
               (state/log-event! "error" (str "Failed to import " (clojure.core/name obj-type) ": " name)
                                 "import-batch" {:error error})))
           ;; Individual import (single item, or tables/queries)
-          (doseq [item-name selected]
-            (case obj-type
-              :forms   (<! (import-form! access-db-path item-name target-database-id))
-              :reports (<! (import-report! access-db-path item-name target-database-id))
-              :modules (<! (import-module! access-db-path item-name target-database-id))
-              :macros  (<! (import-macro! access-db-path item-name target-database-id))
-              :tables  (<! (import-table! access-db-path item-name target-database-id))
-              :queries (<! (import-query! access-db-path item-name target-database-id))
-              nil)
-            (<! (load-import-history! access-db-path)))))
+          ;; Queries use a retry loop to handle dependency ordering (max 20 passes)
+          (if (and (= obj-type :queries) (> (count selected) 1))
+            (loop [pass 1
+                   pending selected]
+              (let [imported-this-pass (atom 0)
+                    still-pending (atom [])]
+                (doseq [item-name pending]
+                  (let [result (<! (import-query! access-db-path item-name target-database-id))]
+                    (if (true? result)
+                      (swap! imported-this-pass inc)
+                      (swap! still-pending conj item-name))))
+                (<! (load-import-history! access-db-path))
+                (when (and (seq @still-pending) (pos? @imported-this-pass) (< pass 20))
+                  (recur (inc pass) @still-pending))))
+            (doseq [item-name selected]
+              (case obj-type
+                :forms   (<! (import-form! access-db-path item-name target-database-id))
+                :reports (<! (import-report! access-db-path item-name target-database-id))
+                :modules (<! (import-module! access-db-path item-name target-database-id))
+                :macros  (<! (import-macro! access-db-path item-name target-database-id))
+                :tables  (<! (import-table! access-db-path item-name target-database-id))
+                :queries (<! (import-query! access-db-path item-name target-database-id))
+                nil)
+              (<! (load-import-history! access-db-path))))))
       ;; Refresh after completion
       (<! (load-import-history! access-db-path))
       (swap! viewer-state assoc :importing? false :selected #{})
@@ -1086,8 +1100,8 @@
                         (swap! still-pending conj [obj-type db-path obj-name
                                                    (if (map? result) (:error result) "Unknown error")]))))
                   (reset! phase-items @still-pending)
-                  ;; Continue if we made progress and still have pending items
-                  (when (and (seq @phase-items) (pos? @imported-this-pass))
+                  ;; Continue if we made progress and still have pending items (max 20 passes)
+                  (when (and (seq @phase-items) (pos? @imported-this-pass) (< pass 20))
                     (recur (inc pass))))))
             ;; Record any remaining as failed (only applies to individual mode)
             (doseq [[obj-type _ obj-name err] @phase-items]

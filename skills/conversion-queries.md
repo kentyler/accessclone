@@ -269,9 +269,32 @@ If no Anthropic API key is configured, the fallback is skipped and the original 
 
 ### Form State References
 
-Queries that reference form controls (e.g., `[Forms]![frmProducts]![cboCategory]`) are converted to subqueries against `shared.form_control_state`. See `form-state-sync.md` for full details.
+Queries that reference form controls (e.g., `[Forms]![frmProducts]![cboCategory]`) or TempVars are converted to cross-joins against `shared.session_state` (a view pre-filtered on the current session). Each reference gets a unique alias (`ss1`, `ss2`, …) added to the FROM clause, with filtering conditions in WHERE.
+
+Example — Access: `WHERE VendorID = [Forms]![frmProducts]![VendorID]`
+Becomes: `FROM schema.products products, shared.session_state ss1 WHERE ss1.table_name = 'products' AND ss1.column_name = 'vendorid' AND products.vendorid::text = ss1.value`
+
+See `form-state-sync.md` for full details on the cross-join pattern, dual-mode operation (cross-join for queries vs subquery for expressions), and runtime sync.
 
 **Import order matters**: forms must be imported before queries so that `shared.control_column_map` is populated for form reference resolution.
+
+### Re-import Behavior
+
+Queries can be re-imported at any time. The DDL uses `CREATE OR REPLACE VIEW/FUNCTION`, which replaces existing objects in-place **without** dropping dependent views. If a view's column list changed (rare), `executeStatements` catches the error and does a targeted `DROP CASCADE` + `CREATE` for just that view.
+
+**No pre-emptive DROP**: The import does NOT drop existing objects before creating them. A blanket `DROP CASCADE` would destroy dependent views that were already imported, breaking the retry loop.
+
+### Dependency Retry Loop
+
+Queries often depend on other queries (view A references view B). When importing multiple queries, a multi-pass retry loop handles dependency ordering:
+
+1. **Pass 1**: Try all queries. Those whose dependencies exist succeed; others fail with PG error 42P01 (relation not found) or 42883 (function not found).
+2. **Pass 2+**: Retry only failed queries. Since pass 1 created some views, more queries resolve.
+3. **Stops when**: all queries imported, OR a pass completes with zero progress (remaining failures are genuine errors), OR 20 passes reached.
+
+Dependency errors (42P01/42883) are identified server-side and skip the LLM fallback — they're expected and resolved by the retry loop. The server returns `category: 'missing-dependency'` for these errors.
+
+Both `import-selected!` (UI multi-select) and `import-all!` (Import All / Re-import All buttons) use this retry loop.
 
 ## Logging
 

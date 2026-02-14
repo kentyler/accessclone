@@ -16,8 +16,8 @@ Without a mechanism to supply these values at runtime, converted queries would b
 
 A two-layer system:
 
-1. **Import time**: A mapping table connects form controls to their underlying table columns. The query converter translates form/TempVar references into subqueries against a runtime state table.
-2. **Runtime**: When a user opens a form and navigates records, tagged controls push their values to the state table. Views that reference form state automatically pick up current values.
+1. **Import time**: A mapping table connects form controls to their underlying table columns. The query converter translates form/TempVar references into cross-joins against `shared.session_state` (a view pre-filtered on the current session).
+2. **Runtime**: When a user opens a form and navigates records, tagged controls push their values to the state table. Views that cross-join session_state automatically pick up current values.
 
 ## Data Flow
 
@@ -43,15 +43,26 @@ translateFormRefs() resolves             PUT /api/form-state sends entries
 via control_column_map lookup                    ▼
         │                                form_control_state rows upserted
         ▼                                (session_id, table_name, column_name, value)
-Subquery emitted in SQL:                         │
-(SELECT value FROM                               ▼
- shared.form_control_state               Views using subqueries now
- WHERE session_id = ...                  return filtered results
- AND table_name = 'T'
- AND column_name = 'C')
+Cross-join emitted in SQL:                       │
+FROM schema.table t,                             ▼
+  shared.session_state ss1               Views cross-joining session_state
+WHERE ss1.table_name = 'T'              now return filtered results
+  AND ss1.column_name = 'C'
+  AND t.col::text = ss1.value
 ```
 
-## Tables
+## Tables and Views
+
+### shared.session_state (view, created by schema.js)
+
+A convenience view pre-filtered on the current session. Used as cross-joins in converted query views — avoids verbose inline subqueries and makes queries readable in Design View.
+
+```sql
+CREATE OR REPLACE VIEW shared.session_state AS
+SELECT table_name, column_name, value
+FROM shared.form_control_state
+WHERE session_id = current_setting('app.session_id', true);
+```
 
 ### shared.control_column_map (populated at import time)
 
@@ -85,7 +96,12 @@ abc-123    | _tempvars  | currentuser | admin
 
 ## Query Converter: Form Reference Resolution
 
-The converter (`form-state.js`) handles three reference patterns:
+The converter (`form-state.js`) operates in two modes:
+
+- **Cross-join mode** (query converter): Each reference becomes `ssN.value` and metadata is collected into a `stateRefs` array. After translation, `buildStateFromWhere(stateRefs)` generates FROM/WHERE additions that `injectStateJoins()` inserts into the SQL.
+- **Subquery mode** (expression converter): When `stateRefs` is omitted, falls back to inline scalar subqueries. Used by `pipeline.js` for calculated control expressions that have no FROM clause.
+
+Three reference patterns are handled:
 
 ### 3-part: `[Forms]![formName]![controlName]`
 
@@ -95,9 +111,11 @@ Exact lookup in `control_column_map` by form name + control name.
 [Forms]![frmProducts]![cboCategory]
 → looks up frmproducts.cbocategory in mapping
 → finds: table=categories, column=category_id
-→ emits: (SELECT value::text FROM shared.form_control_state
-          WHERE session_id = current_setting('app.session_id', true)
-          AND table_name = 'categories' AND column_name = 'category_id')
+→ emits inline: ss1.value (with ss1 added to stateRefs)
+→ injected into SQL:
+    FROM schema.products products, shared.session_state ss1
+    WHERE ss1.table_name = 'categories' AND ss1.column_name = 'category_id'
+      AND products.categoryid::text = ss1.value
 ```
 
 ### 2-part: `[Form]![controlName]` or `[Parent].[controlName]`
@@ -108,7 +126,7 @@ Cross-form lookup — searches all mappings for a matching control name (any for
 [Parent].[EmployeeID]
 → looks up *.employeeid in mapping
 → finds: table=employees, column=employee_id (from frmEmployees)
-→ emits the same subquery pattern
+→ emits the same cross-join pattern with next alias (ss2, ss3, etc.)
 ```
 
 ### TempVars: `TempVars("varName")` or `[TempVars]![varName]`
@@ -117,9 +135,9 @@ Uses reserved table name `_tempvars`.
 
 ```
 TempVars("CurrentRegion")
-→ emits: (SELECT value::text FROM shared.form_control_state
-          WHERE session_id = current_setting('app.session_id', true)
-          AND table_name = '_tempvars' AND column_name = 'currentregion')
+→ emits: ss1.value
+→ injected: shared.session_state ss1
+   WHERE ss1.table_name = '_tempvars' AND ss1.column_name = 'currentregion'
 ```
 
 ### Unresolved references
@@ -176,9 +194,13 @@ Each API request sets `SET LOCAL app.session_id` on the PG connection before run
 
 | File | Role |
 |------|------|
-| `server/lib/query-converter/form-state.js` | `translateFormRefs()`, `translateTempVars()`, `resolveControlMapping()` |
+| `server/graph/schema.js` | Creates `shared.session_state` view at startup |
+| `server/lib/query-converter/form-state.js` | `translateFormRefs()`, `translateTempVars()`, `buildStateFromWhere()`, dual-mode (cross-join / subquery) |
+| `server/lib/query-converter/index.js` | `injectStateJoins()` inserts FROM/WHERE additions after schema prefixing |
+| `server/lib/query-converter/syntax.js` | Threads `stateRefs`, applies `::text` cast for `ssN.value` comparisons |
 | `server/lib/query-converter/ddl.js` | `resolveParams()` filters out DAO params that are actually form/parent refs |
-| `server/routes/access-import/import-query.js` | Loads `control_column_map`, passes to converter |
+| `server/lib/expression-converter/pipeline.js` | Uses subquery mode (no stateRefs) for control-source expressions |
+| `server/routes/access-import/import-query.js` | Loads `control_column_map`, passes to converter; retry with DROP for column changes |
 | `server/routes/form-state.js` | `PUT /api/form-state` endpoint |
 | `server/routes/forms.js` | Populates `control_column_map` on form save |
 | `server/routes/reports.js` | Populates `control_column_map` on report save |

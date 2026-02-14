@@ -8,7 +8,7 @@
  */
 
 const { sanitizeName } = require('./utils');
-const { formStateSubquery, resolveControlMapping, translateTempVars, translateFormRefs } = require('./form-state');
+const { formStateSubquery, resolveControlMapping, translateTempVars, translateFormRefs, buildStateFromWhere } = require('./form-state');
 const { applyFunctionTranslations } = require('./functions');
 const { applySyntaxTranslations, addSchemaPrefix, addSchemaFunctionPrefix } = require('./syntax');
 const {
@@ -16,6 +16,41 @@ const {
   buildSelectView, buildParameterizedSelect, buildPlpgsqlFunction, buildMakeTableFunction,
   resolveParams
 } = require('./ddl');
+
+/**
+ * Inject cross-join FROM and WHERE additions for session_state refs into SQL.
+ * Handles SELECT, UPDATE, DELETE, and INSERT...SELECT statements.
+ */
+function injectStateJoins(sql, stateRefs) {
+  const { fromAdditions, whereAdditions } = buildStateFromWhere(stateRefs);
+  if (!fromAdditions) return sql;
+
+  // Find the insertion point for FROM additions: before WHERE/GROUP BY/ORDER BY/HAVING/LIMIT
+  // We need to find the end of the FROM clause (including JOINs)
+  const fromInsertRegex = /\b(WHERE|GROUP\s+BY|ORDER\s+BY|HAVING|LIMIT)\b/i;
+  const fromMatch = fromInsertRegex.exec(sql);
+
+  if (fromMatch) {
+    // Insert FROM additions before the first clause keyword
+    const insertPos = fromMatch.index;
+    const before = sql.substring(0, insertPos).trimEnd();
+    const after = sql.substring(insertPos);
+
+    if (/\bWHERE\b/i.test(after)) {
+      // WHERE exists — inject FROM additions before WHERE, prepend state conditions to WHERE
+      sql = before + fromAdditions + ' ' +
+        after.replace(/\bWHERE\b/i, `WHERE ${whereAdditions} AND`);
+    } else {
+      // No WHERE — inject FROM additions + new WHERE clause before GROUP BY/ORDER BY/etc.
+      sql = before + fromAdditions + ` WHERE ${whereAdditions} ` + after;
+    }
+  } else {
+    // No WHERE/GROUP BY/ORDER BY/HAVING/LIMIT — append FROM additions + WHERE
+    sql = sql.trimEnd() + fromAdditions + ` WHERE ${whereAdditions}`;
+  }
+
+  return sql;
+}
 
 /**
  * Convert an Access query to PostgreSQL statements.
@@ -46,18 +81,26 @@ function convertAccessQuery(queryData, schemaName, columnTypes, controlMapping) 
 
   // Track which state table entries are referenced by form refs
   const referencedStateEntries = [];
+  // Collect cross-join metadata for session_state refs
+  const stateRefs = [];
 
   // Step 2: Function translations
   try { sql = applyFunctionTranslations(sql); }
   catch (err) { warnings.push(`Function translation error: ${err.message}`); }
 
   // Step 3: Syntax translations (threads controlMapping for form ref resolution)
-  try { sql = applySyntaxTranslations(sql, controlMapping, referencedStateEntries, warnings); }
+  try { sql = applySyntaxTranslations(sql, controlMapping, referencedStateEntries, warnings, stateRefs); }
   catch (err) { warnings.push(`Syntax translation error: ${err.message}`); }
 
   // Step 4: Schema prefix (tables in FROM/JOIN, then user-defined function calls)
+  // Must run BEFORE state join injection so shared.session_state isn't double-prefixed
   sql = addSchemaPrefix(sql, schemaName);
   sql = addSchemaFunctionPrefix(sql, schemaName);
+
+  // Step 5: Inject cross-join FROM/WHERE for session_state refs
+  if (stateRefs.length > 0) {
+    sql = injectStateJoins(sql, stateRefs);
+  }
 
   // Custom aggregates
   const statements = [];
@@ -65,7 +108,7 @@ function convertAccessQuery(queryData, schemaName, columnTypes, controlMapping) 
     statements.push(...getAggregateStatements(schemaName));
   }
 
-  // Step 5: Build DDL based on query type
+  // Step 6: Build DDL based on query type
   const hasParams = uniqueParams.length > 0;
   const isSelect = /^\s*SELECT\b/i.test(sql);
   const isUpdate = queryTypeCode === 48 || /^\s*UPDATE\b/i.test(sql);
@@ -133,5 +176,5 @@ function convertAccessExpression(expr) {
 
 module.exports = {
   convertAccessQuery, convertAccessExpression, sanitizeName,
-  formStateSubquery, resolveControlMapping, translateTempVars, translateFormRefs
+  formStateSubquery, resolveControlMapping, translateTempVars, translateFormRefs, buildStateFromWhere
 };

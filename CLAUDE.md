@@ -160,19 +160,25 @@ Auto-analyze: When a report or form is opened with no existing chat transcript, 
 ### Query Converter (server/lib/query-converter/)
 Converts Access SQL to PostgreSQL views/functions. Two-stage pipeline:
 
-1. **Regex converter** (fast, deterministic, free): `index.js` orchestrates; `syntax.js` handles brackets/operators/schema-prefixing; `functions.js` maps Access→PG functions; `ddl.js` generates CREATE VIEW/FUNCTION DDL; `form-state.js` resolves form/TempVar references via `shared.control_column_map`.
+1. **Regex converter** (fast, deterministic, free): `index.js` orchestrates; `syntax.js` handles brackets/operators/schema-prefixing; `functions.js` maps Access→PG functions; `ddl.js` generates CREATE VIEW/FUNCTION DDL; `form-state.js` resolves form/TempVar references via cross-joins against `shared.session_state`.
 2. **LLM fallback** (`llm-fallback.js`): When regex output fails PG execution, sends original Access SQL + error + full schema context (tables, views, columns, available functions) + control mapping to Claude Sonnet. LLM-assisted conversions flagged in `shared.import_issues` with category `llm-assisted`. **Dependency errors (42P01/42883) skip the LLM fallback** — the frontend retry loop handles these across passes. Error responses include `category: 'missing-dependency' | 'conversion-error'`.
 
 VBA stub functions (`server/lib/vba-stub-generator.js`) are created before query execution so views referencing user-defined functions don't fail.
+
+**Re-import behavior**: Queries use `CREATE OR REPLACE VIEW/FUNCTION`, so re-importing replaces existing objects in-place without affecting dependent views. If a view's column list changed, `executeStatements` catches the error, does a targeted `DROP CASCADE` + `CREATE` for just that view.
 
 95 tests in `server/__tests__/query-converter.test.js`. Run after any converter changes.
 
 ### Form State Sync
 See `skills/form-state-sync.md` for full architecture. Key points:
+- `shared.session_state`: a view on `form_control_state` pre-filtered by `current_setting('app.session_id', true)` — used as cross-joins in converted queries
 - `shared.control_column_map`: maps `(database_id, form_name, control_name)` → `(table_name, column_name)`, populated at form/report save
 - `shared.form_control_state`: runtime state `(session_id, table_name, column_name, value)`, populated when users navigate records in forms with tagged controls
-- Query converter resolves `[Forms]![frmX]![ctrl]` and `[TempVars]![var]` references to subqueries against `form_control_state`
+- Query converter resolves `[Forms]![frmX]![ctrl]` and `[TempVars]![var]` to cross-join aliases (`ss1.value`, `ss2.value`) against `shared.session_state`, with filtering in WHERE
 - Import order matters: tables → forms/reports → queries (forms must exist before queries to populate the mapping)
+
+### Query Import Retry Loop
+Both `import-selected!` and `import-all!` use a multi-pass retry loop for queries to handle dependency ordering (query A depends on query B which depends on query C). Each pass imports what it can; failed queries are retried in the next pass. The loop continues while progress is made (at least one query succeeded), up to 20 passes max. Dependency errors (PG 42P01/42883) are identified server-side and returned with `category: 'missing-dependency'`.
 
 ## Skills Files
 

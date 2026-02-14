@@ -275,6 +275,14 @@ CREATE TABLE IF NOT EXISTS shared.control_column_map (
     PRIMARY KEY (database_id, form_name, control_name)
 );
 CREATE INDEX IF NOT EXISTS idx_ccm_table ON shared.control_column_map(database_id, table_name, column_name);
+
+-- ============================================================
+-- Session State View - pre-filtered on current session for cross-join usage in converted queries
+-- ============================================================
+CREATE OR REPLACE VIEW shared.session_state AS
+SELECT table_name, column_name, value
+FROM shared.form_control_state
+WHERE session_id = current_setting('app.session_id', true);
 `;
 
 /**

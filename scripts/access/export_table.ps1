@@ -14,6 +14,44 @@ param(
 # Note: Calculated (18) is now handled — extracted as PG generated columns
 $skipTypes = @(11, 17, 19)
 
+# Custom JSON serializer — ConvertTo-Json has known bugs with embedded quotes
+# in large strings (e.g. HTML content in memo fields).
+function Escape-JsonStr([string]$s) {
+    $s = $s.Replace('\', '\\')
+    $s = $s.Replace('"', '\"')
+    $s = $s.Replace("`t", '\t')
+    $s = $s.Replace("`n", '\n')
+    $s = $s.Replace("`r", '\r')
+    return $s
+}
+
+function ConvertTo-SafeJson($obj) {
+    if ($null -eq $obj -or $obj -is [System.DBNull]) { return 'null' }
+    if ($obj -is [bool]) { if ($obj) { return 'true' } else { return 'false' } }
+    if ($obj -is [int] -or $obj -is [long] -or $obj -is [double] -or $obj -is [decimal] -or $obj -is [single]) {
+        return $obj.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+    }
+    if ($obj -is [string]) { return '"' + (Escape-JsonStr $obj) + '"' }
+    if ($obj -is [hashtable]) {
+        if ($obj.Count -eq 0) { return '{}' }
+        $pairs = [System.Collections.ArrayList]::new()
+        foreach ($key in $obj.Keys) {
+            [void]$pairs.Add(('"' + (Escape-JsonStr ([string]$key)) + '":' + (ConvertTo-SafeJson $obj[$key])))
+        }
+        return '{' + ($pairs -join ',') + '}'
+    }
+    if ($obj -is [array]) {
+        if ($obj.Count -eq 0) { return '[]' }
+        $items = [System.Collections.ArrayList]::new()
+        foreach ($item in $obj) {
+            [void]$items.Add((ConvertTo-SafeJson $item))
+        }
+        return '[' + ($items -join ',') + ']'
+    }
+    # Fallback: treat as string
+    return '"' + (Escape-JsonStr ([string]$obj)) + '"'
+}
+
 # Remove lock file if exists
 $lockFile = $DatabasePath -replace '\.accdb$', '.laccdb'
 Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
@@ -151,7 +189,7 @@ try {
         fieldCount = $fields.Count
     }
 
-    $result | ConvertTo-Json -Depth 10 -Compress
+    ConvertTo-SafeJson $result
 }
 catch {
     Write-Error $_.Exception.Message

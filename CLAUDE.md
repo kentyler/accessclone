@@ -79,6 +79,10 @@ This is AccessClone, a platform for converting MS Access databases to web applic
 ### Access Import — AutoExec Warning
 **IMPORTANT**: Before opening any Access database via COM automation (import scripts, export scripts, diagnose script), check if it has an AutoExec macro. If so, the user must rename it to "xAutoExec" first — otherwise it will fire on open, potentially showing a login dialog or running startup code that hangs the PowerShell process indefinitely.
 
+### Access Import — PowerShell Script Notes
+- `export_table.ps1` uses a custom `ConvertTo-SafeJson` serializer instead of `ConvertTo-Json` — PowerShell's built-in cmdlet has known bugs with embedded double quotes in large strings (e.g. HTML in memo fields). The custom serializer handles escaping of `"`, `\`, `\r`, `\n`, `\t` correctly.
+- `list_modules.ps1`, `export_module.ps1`, `export_modules_batch.ps1` handle Form_/Report_ class modules (VBE type 100) with a design-view fallback: if `CodeModule.CountOfLines` is inaccessible (common with `AutomationSecurity=3`), the script opens the form/report in design view via `DoCmd.OpenForm`/`DoCmd.OpenReport` to force the code module to load, then closes it after reading. The listing script only skips type 100 modules with *confirmed* zero lines (not inaccessible ones).
+
 ### State Management
 State is split across three modules that share a single Reagent atom (`app-state`):
 
@@ -157,7 +161,7 @@ Auto-analyze: When a report or form is opened with no existing chat transcript, 
 Converts Access SQL to PostgreSQL views/functions. Two-stage pipeline:
 
 1. **Regex converter** (fast, deterministic, free): `index.js` orchestrates; `syntax.js` handles brackets/operators/schema-prefixing; `functions.js` maps Access→PG functions; `ddl.js` generates CREATE VIEW/FUNCTION DDL; `form-state.js` resolves form/TempVar references via `shared.control_column_map`.
-2. **LLM fallback** (`llm-fallback.js`): When regex output fails PG execution, sends original Access SQL + error + full schema context (tables, views, columns, available functions) + control mapping to Claude Sonnet. LLM-assisted conversions flagged in `shared.import_issues` with category `llm-assisted`.
+2. **LLM fallback** (`llm-fallback.js`): When regex output fails PG execution, sends original Access SQL + error + full schema context (tables, views, columns, available functions) + control mapping to Claude Sonnet. LLM-assisted conversions flagged in `shared.import_issues` with category `llm-assisted`. **Dependency errors (42P01/42883) skip the LLM fallback** — the frontend retry loop handles these across passes. Error responses include `category: 'missing-dependency' | 'conversion-error'`.
 
 VBA stub functions (`server/lib/vba-stub-generator.js`) are created before query execution so views referencing user-defined functions don't fail.
 

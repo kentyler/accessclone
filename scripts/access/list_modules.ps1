@@ -30,16 +30,20 @@ try {
     foreach ($component in $accessApp.VBE.ActiveVBProject.VBComponents) {
         $compType = [int]$component.Type
         $lineCount = 0
+        $codeReadOK = $false
 
         try {
             $lineCount = $component.CodeModule.CountOfLines
+            $codeReadOK = $true
         } catch {
-            # Could not access code module
+            # Could not access code module — for document modules (type 100)
+            # this may mean we need to open the form/report in design view first
         }
 
-        # Skip document modules (type 100) with no code — every form/report
-        # has a VBComponent even if there's no code behind it
-        if ($compType -eq 100 -and $lineCount -eq 0) {
+        # Skip document modules only if we CONFIRMED they have no code.
+        # If CodeModule was inaccessible, include them — export will retry
+        # with the form/report open in design view.
+        if ($compType -eq 100 -and $codeReadOK -and $lineCount -eq 0) {
             continue
         }
 

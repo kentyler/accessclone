@@ -153,14 +153,32 @@ The chat system prompt includes context based on the active tab:
 
 Auto-analyze: When a report or form is opened with no existing chat transcript, `maybe-auto-analyze!` in state.cljs automatically sends a prompt asking the LLM to describe the object's structure/purpose and flag potential issues. Uses a pending-flag pattern to handle the race between transcript loading and definition loading — whichever async operation completes second triggers the analysis. The generated analysis is saved as the transcript so it won't re-fire on subsequent opens.
 
+### Query Converter (server/lib/query-converter/)
+Converts Access SQL to PostgreSQL views/functions. Two-stage pipeline:
+
+1. **Regex converter** (fast, deterministic, free): `index.js` orchestrates; `syntax.js` handles brackets/operators/schema-prefixing; `functions.js` maps Access→PG functions; `ddl.js` generates CREATE VIEW/FUNCTION DDL; `form-state.js` resolves form/TempVar references via `shared.control_column_map`.
+2. **LLM fallback** (`llm-fallback.js`): When regex output fails PG execution, sends original Access SQL + error + full schema context (tables, views, columns, available functions) + control mapping to Claude Sonnet. LLM-assisted conversions flagged in `shared.import_issues` with category `llm-assisted`.
+
+VBA stub functions (`server/lib/vba-stub-generator.js`) are created before query execution so views referencing user-defined functions don't fail.
+
+95 tests in `server/__tests__/query-converter.test.js`. Run after any converter changes.
+
+### Form State Sync
+See `skills/form-state-sync.md` for full architecture. Key points:
+- `shared.control_column_map`: maps `(database_id, form_name, control_name)` → `(table_name, column_name)`, populated at form/report save
+- `shared.form_control_state`: runtime state `(session_id, table_name, column_name, value)`, populated when users navigate records in forms with tagged controls
+- Query converter resolves `[Forms]![frmX]![ctrl]` and `[TempVars]![var]` references to subqueries against `form_control_state`
+- Import order matters: tables → forms/reports → queries (forms must exist before queries to populate the mapping)
+
 ## Skills Files
 
 See `/skills/` directory for conversion and design guidance:
 - `form-design.md` - Form structure and patterns
+- `form-state-sync.md` - Form state sync architecture (control_column_map, form_control_state, import/runtime flow)
 - `conversion.md` - Access database conversion workflow
 - `conversion-setup.md` - Database setup and initial configuration
 - `conversion-tables.md` - Table export from Access
-- `conversion-queries.md` - Query/view export from Access
+- `conversion-queries.md` - Query/view export from Access (includes LLM fallback docs)
 - `conversion-forms.md` - Form export from Access (critical transformations documented)
 - `conversion-vba.md` - VBA to PostgreSQL function conversion
 - `conversion-macros.md` - Macro import, format details, and translation strategy

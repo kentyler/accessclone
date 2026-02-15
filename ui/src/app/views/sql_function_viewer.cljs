@@ -1,6 +1,30 @@
 (ns app.views.sql-function-viewer
-  "SQL Function viewer - read-only display of PostgreSQL function source"
-  (:require [app.state :as state]))
+  "SQL Function viewer - display of PostgreSQL function source, editable for new functions"
+  (:require [app.state :as state]
+            [clojure.string :as str]))
+
+(defn- update-fn-source! [new-source]
+  (swap! state/app-state assoc-in [:sql-function-viewer :info :source] new-source))
+
+(defn- update-fn-name! [new-name]
+  (swap! state/app-state assoc-in [:sql-function-viewer :info :name] new-name))
+
+(defn- save-function-via-llm!
+  "Send the current function SQL to the LLM, asking it to review and save via update_query tool"
+  []
+  (let [info (get-in @state/app-state [:sql-function-viewer :info])
+        source (:source info)
+        fn-name (:name info)]
+    (when (and fn-name (not (str/blank? source)))
+      ;; Open chat panel if closed
+      (when-not (:chat-panel-open? @state/app-state)
+        (swap! state/app-state assoc :chat-panel-open? true))
+      ;; Set chat input with save instruction and send
+      (state/set-chat-input!
+       (str "Please save this as a PostgreSQL function named \"" fn-name "\". "
+            "Review the SQL for any issues, then use the update_query tool with ddl_type \"function\" to create it. "
+            "Here is the SQL:\n\n" source))
+      (state/send-chat-message!))))
 
 (defn sql-function-viewer
   "Main SQL function viewer component"
@@ -13,30 +37,49 @@
         ;; Track which function is loaded
         (when (and func (not= (:id func) current-id))
           (swap! state/app-state assoc :sql-function-viewer {:fn-id (:id func) :info func}))
-        (let [info (or (get-in @state/app-state [:sql-function-viewer :info]) func)]
+        (let [info (or (get-in @state/app-state [:sql-function-viewer :info]) func)
+              is-new? (:is-new? info)]
           [:div.sql-function-viewer
            [:div.query-toolbar
             [:div.toolbar-left
-             [:span.toolbar-label "SQL Function"]]]
+             [:span.toolbar-label "SQL Function"]]
+            (when is-new?
+              [:div.toolbar-right
+               [:button.secondary-btn
+                {:on-click #(save-function-via-llm!)
+                 :disabled (or (str/blank? (:source info))
+                               (str/blank? (:name info)))}
+                "Save"]])]
            [:div.module-info-panel
             [:div.info-row
              [:span.info-label "Name:"]
-             [:span.info-value (:name info)]]
-            (when (:arguments info)
+             (if is-new?
+               [:input.info-input {:type "text"
+                                   :value (or (:name info) "")
+                                   :placeholder "function_name"
+                                   :on-change #(update-fn-name! (.. % -target -value))}]
+               [:span.info-value (:name info)])]
+            (when (and (not is-new?) (:arguments info))
               [:div.info-row
                [:span.info-label "Arguments:"]
                [:span.info-value (:arguments info)]])
-            (when (:return-type info)
+            (when (and (not is-new?) (:return-type info))
               [:div.info-row
                [:span.info-label "Returns:"]
                [:span.info-value (:return-type info)]])
-            (when (:description info)
+            (when (and (not is-new?) (:description info))
               [:div.info-row
                [:span.info-label "Description:"]
                [:span.info-value (:description info)]])]
            [:div.module-vba-panel
             [:div.panel-header
              [:span "Function Definition"]]
-            [:div.code-container
-             [:pre.code-display
-              [:code (:source info)]]]]])))))
+            (if is-new?
+              [:div.sql-editor-container
+               [:textarea.sql-editor
+                {:value (or (:source info) "")
+                 :placeholder "CREATE OR REPLACE FUNCTION my_function()\nRETURNS void AS $$\nBEGIN\n  -- function body\nEND;\n$$ LANGUAGE plpgsql;"
+                 :on-change #(update-fn-source! (.. % -target -value))}]]
+              [:div.code-container
+               [:pre.code-display
+                [:code (:source info)]]])]])))))

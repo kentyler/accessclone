@@ -88,3 +88,49 @@
             (state/log-event! "error" "Query execution failed" "run-query" {:response (:body response)})
             (swap! state/app-state assoc-in [:query-viewer :error]
                    (get-in response [:body :error] "Query failed"))))))))
+
+;; ============================================================
+;; QUERY CREATION & SAVE VIA LLM
+;; ============================================================
+
+(defn update-query-name!
+  "Set the pending name for a new query"
+  [name]
+  (swap! state/app-state assoc-in [:query-viewer :pending-name] name))
+
+(defn create-new-query!
+  "Create a placeholder new query and open it in SQL view"
+  []
+  (let [existing-queries (get-in @state/app-state [:objects :queries])
+        new-id (inc (reduce max 0 (map :id existing-queries)))
+        new-query {:id new-id
+                   :name (str "new_query_" new-id)
+                   :is-new? true
+                   :sql ""
+                   :fields []}]
+    (state/add-object! :queries new-query)
+    (state/open-object! :queries new-id)
+    ;; Switch to SQL view for editing
+    (swap! state/app-state assoc-in [:query-viewer :view-mode] :sql)
+    (swap! state/app-state assoc-in [:query-viewer :pending-name] (:name new-query))))
+
+(defn save-query-via-llm!
+  "Send the current SQL to the LLM, asking it to review and save via update_query tool"
+  []
+  (let [query-info (get-in @state/app-state [:query-viewer :query-info])
+        sql (get-in @state/app-state [:query-viewer :sql])
+        pending-name (get-in @state/app-state [:query-viewer :pending-name])
+        query-name (or pending-name (:name query-info))]
+    (when (and query-name (not (str/blank? sql)))
+      ;; Update query-info name if we have a pending name
+      (when pending-name
+        (swap! state/app-state assoc-in [:query-viewer :query-info :name] pending-name))
+      ;; Open chat panel if closed
+      (when-not (:chat-panel-open? @state/app-state)
+        (swap! state/app-state assoc :chat-panel-open? true))
+      ;; Set chat input with save instruction and send
+      (state/set-chat-input!
+       (str "Please save this as a view named \"" query-name "\". "
+            "Review the SQL for any issues, then use the update_query tool to create it. "
+            "Here is the SQL:\n\n" sql))
+      (state/send-chat-message!))))

@@ -72,6 +72,25 @@
             %)))))
 
 ;; ============================================================
+;; REPORT CREATION
+;; ============================================================
+
+(defn create-new-report! []
+  (let [existing-reports (get-in @app-state [:objects :reports])
+        new-id (inc (reduce max 0 (map :id existing-reports)))
+        new-report {:id new-id
+                    :name (str "Report" new-id)
+                    :definition {:record-source nil
+                                 :grouping []
+                                 :report-header {:height 80 :controls []}
+                                 :page-header   {:height 60 :controls []}
+                                 :detail         {:height 120 :controls []}
+                                 :page-footer   {:height 60 :controls []}
+                                 :report-footer {:height 80 :controls []}}}]
+    (state/add-object! :reports new-report)
+    (state/open-object! :reports new-id)))
+
+;; ============================================================
 ;; REPORT EDITOR - DEFINITION & CONTROLS
 ;; ============================================================
 
@@ -254,3 +273,36 @@
                 (set-report-lint-errors! (:errors result))))
             ;; Lint endpoint failed, save anyway
             (do-save-report!)))))))
+
+;; ============================================================
+;; REPORT GROUP BAND MANAGEMENT
+;; ============================================================
+
+(defn add-group-level!
+  "Add a new grouping level. Appends to :grouping array and creates
+   group-header-N and group-footer-N sections."
+  []
+  (let [current (get-in @app-state [:report-editor :current])
+        grouping (or (:grouping current) [])
+        new-idx (count grouping)
+        hdr-key (keyword (str "group-header-" new-idx))
+        ftr-key (keyword (str "group-footer-" new-idx))
+        updated (-> current
+                    (assoc :grouping (conj grouping {:field "" :sort-order "ascending"}))
+                    (assoc hdr-key {:height 60 :controls []})
+                    (assoc ftr-key {:height 60 :controls []}))]
+    (set-report-definition! updated)))
+
+(defn remove-group-level!
+  "Remove the last grouping level and its header/footer sections."
+  []
+  (let [current (get-in @app-state [:report-editor :current])
+        grouping (or (:grouping current) [])]
+    (when (pos? (count grouping))
+      (let [last-idx (dec (count grouping))
+            hdr-key (keyword (str "group-header-" last-idx))
+            ftr-key (keyword (str "group-footer-" last-idx))
+            updated (-> current
+                        (assoc :grouping (pop grouping))
+                        (dissoc hdr-key ftr-key))]
+        (set-report-definition! updated)))))

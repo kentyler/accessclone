@@ -9,6 +9,12 @@
 
 (declare show-record-menu form-view-control)
 
+(defn- sort-by-tab-index
+  "Sort controls by :tab-index for correct tab order.
+   Controls with :tab-index come first (ascending), then those without."
+  [controls]
+  (sort-by (fn [c] (or (:tab-index c) 99999)) controls))
+
 ;; ============================================================
 ;; INDIVIDUAL CONTROL RENDERERS
 ;; ============================================================
@@ -16,11 +22,19 @@
 (defn render-label [ctrl _field _value _on-change _opts]
   [:span.view-label (fu/display-text ctrl)])
 
-(defn render-textbox [ctrl field value on-change {:keys [auto-focus? is-new? allow-edits?]}]
-  [:input.view-input
-   {:type "text" :value value :read-only (not allow-edits?)
-    :auto-focus (and is-new? auto-focus?)
-    :on-change #(when (and field allow-edits?) (on-change field (.. % -target -value)))}])
+(defn render-textbox [ctrl field value on-change {:keys [auto-focus? is-new? allow-edits? tab-idx]}]
+  (let [mask (fu/parse-input-mask (:input-mask ctrl))
+        password? (= "password" (some-> (:input-mask ctrl) str/lower-case str/trim))
+        placeholder (when mask (fu/mask-placeholder (:pattern mask) (:placeholder-char mask)))
+        max-len (when placeholder (count placeholder))]
+    [:input.view-input
+     (cond-> {:type (if password? "password" "text")
+              :value value :read-only (not allow-edits?)
+              :auto-focus (and is-new? auto-focus?)
+              :on-change #(when (and field allow-edits?) (on-change field (.. % -target -value)))}
+       tab-idx (assoc :tab-index tab-idx)
+       placeholder (assoc :placeholder placeholder)
+       max-len (assoc :max-length max-len))]))
 
 ;; --- Button action resolution ---
 
@@ -67,14 +81,18 @@
     (or (resolve-action-from-prop (:on-click ctrl))
         (resolve-action-from-caption (str/lower-case button-text) button-text))))
 
-(defn render-button [ctrl _field _value _on-change _opts]
+(defn render-button [ctrl _field _value _on-change {:keys [tab-idx]}]
   (let [text (or (:text ctrl) (:caption ctrl) "Button")]
-    [:button.view-button {:on-click (resolve-button-action ctrl)} text]))
+    [:button.view-button
+     (cond-> {:on-click (resolve-button-action ctrl)}
+       tab-idx (assoc :tab-index tab-idx))
+     text]))
 
-(defn render-checkbox [ctrl field value on-change {:keys [allow-edits?]}]
+(defn render-checkbox [ctrl field value on-change {:keys [allow-edits? tab-idx]}]
   [:label.view-checkbox
-   [:input {:type "checkbox" :checked (boolean value) :disabled (not allow-edits?)
-            :on-change #(when (and field allow-edits?) (on-change field (.. % -target -checked)))}]
+   [:input (cond-> {:type "checkbox" :checked (boolean value) :disabled (not allow-edits?)
+                    :on-change #(when (and field allow-edits?) (on-change field (.. % -target -checked)))}
+             tab-idx (assoc :tab-index tab-idx))]
    (or (:text ctrl) (:caption ctrl))])
 
 ;; --- Row-source helpers (shared by combobox & listbox) ---
@@ -115,10 +133,11 @@
 
 (defn render-combobox [ctrl field value on-change opts]
   (when-let [rs (:row-source ctrl)] (state-form/fetch-row-source! rs))
-  (fn [ctrl field value on-change {:keys [allow-edits?]}]
+  (fn [ctrl field value on-change {:keys [allow-edits? tab-idx]}]
     [:select.view-select
-     {:value (str (or value "")) :disabled (not allow-edits?)
-      :on-change #(when (and field allow-edits?) (on-change field (.. % -target -value)))}
+     (cond-> {:value (str (or value "")) :disabled (not allow-edits?)
+              :on-change #(when (and field allow-edits?) (on-change field (.. % -target -value)))}
+       tab-idx (assoc :tab-index tab-idx))
      [:option {:value ""} ""]
      (row-source-options ctrl)]))
 
@@ -142,15 +161,16 @@
 
 (defn render-listbox [ctrl field value on-change opts]
   (when-let [rs (:row-source ctrl)] (state-form/fetch-row-source! rs))
-  (fn [ctrl field value on-change {:keys [allow-edits?]}]
+  (fn [ctrl field value on-change {:keys [allow-edits? tab-idx]}]
     [:select.view-listbox
-     {:multiple true :size (or (:list-rows ctrl) 5)
-      :value (str (or value "")) :disabled (not allow-edits?)
-      :on-change #(when (and field allow-edits?) (on-change field (.. % -target -value)))}
+     (cond-> {:multiple true :size (or (:list-rows ctrl) 5)
+              :value (str (or value "")) :disabled (not allow-edits?)
+              :on-change #(when (and field allow-edits?) (on-change field (.. % -target -value)))}
+       tab-idx (assoc :tab-index tab-idx))
      [:option {:value ""} ""]
      (row-source-options ctrl)]))
 
-(defn render-option-group [ctrl field value on-change {:keys [allow-edits?]}]
+(defn render-option-group [ctrl field value on-change {:keys [allow-edits? tab-idx]}]
   (let [options (or (:options ctrl) [])
         group-name (or (:name ctrl) (str "optgrp-" (random-uuid)))]
     [:div.view-option-group
@@ -158,29 +178,32 @@
        (for [[idx opt] (map-indexed vector options)]
          ^{:key idx}
          [:label.view-option-item
-          [:input {:type "radio" :name group-name
-                   :value (or (:value opt) idx)
-                   :checked (= value (or (:value opt) idx))
-                   :disabled (not allow-edits?)
-                   :on-change #(when (and field allow-edits?)
-                                 (on-change field (or (:value opt) idx)))}]
+          [:input (cond-> {:type "radio" :name group-name
+                           :value (or (:value opt) idx)
+                           :checked (= value (or (:value opt) idx))
+                           :disabled (not allow-edits?)
+                           :on-change #(when (and field allow-edits?)
+                                         (on-change field (or (:value opt) idx)))}
+                    tab-idx (assoc :tab-index tab-idx))]
           (or (:label opt) (str "Option " (inc idx)))])
        [:span.view-option-placeholder "(No options defined)"])]))
 
-(defn render-option-button [ctrl field value on-change {:keys [allow-edits?]}]
+(defn render-option-button [ctrl field value on-change {:keys [allow-edits? tab-idx]}]
   (let [opt-val (or (:option-value ctrl) (:value ctrl) 1)
         grp (or (:group-name ctrl) (:name ctrl) (str "opt-" (random-uuid)))]
     [:label.view-option-item
-     [:input {:type "radio" :name grp :value opt-val
-              :checked (= (str value) (str opt-val)) :disabled (not allow-edits?)
-              :on-change #(when (and field allow-edits?) (on-change field opt-val))}]
+     [:input (cond-> {:type "radio" :name grp :value opt-val
+                      :checked (= (str value) (str opt-val)) :disabled (not allow-edits?)
+                      :on-change #(when (and field allow-edits?) (on-change field opt-val))}
+               tab-idx (assoc :tab-index tab-idx))]
      (or (:text ctrl) (:caption ctrl) "")]))
 
-(defn render-toggle-button [ctrl field value on-change {:keys [allow-edits?]}]
+(defn render-toggle-button [ctrl field value on-change {:keys [allow-edits? tab-idx]}]
   (let [pressed? (boolean value)]
     [:button.view-toggle-button
-     {:class (when pressed? "pressed") :disabled (not allow-edits?)
-      :on-click #(when (and field allow-edits?) (on-change field (not pressed?)))}
+     (cond-> {:class (when pressed? "pressed") :disabled (not allow-edits?)
+              :on-click #(when (and field allow-edits?) (on-change field (not pressed?)))}
+       tab-idx (assoc :tab-index tab-idx))
      (or (:text ctrl) (:caption ctrl) "Toggle")]))
 
 ;; --- Tab control ---
@@ -389,17 +412,28 @@
   [ctrl current-record on-change & [{:keys [auto-focus? allow-edits? all-controls]}]]
   (let [ctrl-type (:type ctrl)
         field (fu/resolve-control-field ctrl)
-        value (fu/resolve-field-value field current-record nil ctrl)
+        raw-value (fu/resolve-field-value field current-record nil ctrl)
+        value (if-let [fmt (:format ctrl)]
+                (fu/format-value raw-value fmt)
+                raw-value)
         renderer (get control-renderers ctrl-type render-default)
         base-style (fu/control-style ctrl)
         cf-style (expr/apply-conditional-formatting ctrl current-record nil)
-        style (if cf-style (merge base-style cf-style) base-style)]
+        style (if cf-style (merge base-style cf-style) base-style)
+        tab-idx (if (= 0 (:tab-stop ctrl)) -1 (:tab-index ctrl))
+        tip (:control-tip-text ctrl)
+        ctrl-enabled? (not= 0 (:enabled ctrl))
+        ctrl-locked? (= 1 (:locked ctrl))
+        effective-edits? (and allow-edits? ctrl-enabled? (not ctrl-locked?))]
     [:div.view-control
-     {:style style :on-context-menu show-record-menu}
+     (cond-> {:style style :on-context-menu show-record-menu}
+       tip (assoc :title tip)
+       (not ctrl-enabled?) (assoc :class "disabled"))
      [renderer ctrl field value on-change
       {:auto-focus? auto-focus? :is-new? (:__new__ current-record)
-       :allow-edits? allow-edits? :all-controls all-controls
-       :current-record current-record :on-change on-change}]]))
+       :allow-edits? effective-edits? :all-controls all-controls
+       :current-record current-record :on-change on-change
+       :tab-idx tab-idx}]]))
 
 ;; ============================================================
 ;; RECORD CONTEXT MENU
@@ -449,23 +483,38 @@
          new-record? "*"
          :else "\u00A0")])
 
+(defn- section-view-style
+  "Build style map for a section in view mode, including background image if present."
+  [height section-data]
+  (let [picture (:picture section-data)
+        has-picture? (and picture (not= picture ""))]
+    (cond-> {:height height}
+      has-picture?
+      (assoc :background-image (str "url(" picture ")")
+             :background-size (case (:picture-size-mode section-data)
+                                "stretch" "100% 100%" "zoom" "contain" "auto")
+             :background-repeat "no-repeat"
+             :background-position "center"))))
+
 (defn form-view-section
   "Render a section in view mode"
   [section form-def current-record on-field-change & [{:keys [show-selectors? allow-edits?]}]]
   (let [height (fu/get-section-height form-def section)
+        section-data (get form-def section)
+        style (section-view-style height section-data)
         all-controls (fu/get-section-controls form-def section)
-        controls (remove #(or (:parent-page %) (= :page (:type %))) all-controls)]
+        controls (sort-by-tab-index (remove #(or (:parent-page %) (= :page (:type %))) all-controls))]
     (when (seq all-controls)
       (if (and show-selectors? (= section :detail))
         [:div.single-form-row
          [record-selector true false]
-         [:div.view-section {:class (name section) :style {:height height :flex 1}}
+         [:div.view-section {:class (name section) :style (assoc style :flex 1)}
           [:div.view-controls-container
            (for [[idx ctrl] (map-indexed vector controls)]
              ^{:key idx}
              [form-view-control ctrl current-record on-field-change
               {:allow-edits? allow-edits? :all-controls all-controls}])]]]
-        [:div.view-section {:class (name section) :style {:height height}}
+        [:div.view-section {:class (name section) :style style}
          [:div.view-controls-container
           (for [[idx ctrl] (map-indexed vector controls)]
             ^{:key idx}
@@ -477,7 +526,7 @@
   [idx record form-def selected? on-select on-field-change & [{:keys [show-selectors? allow-edits?]}]]
   (let [height (fu/get-section-height form-def :detail)
         all-controls (fu/get-section-controls form-def :detail)
-        controls (vec (remove #(or (:parent-page %) (= :page (:type %))) all-controls))
+        controls (vec (sort-by-tab-index (remove #(or (:parent-page %) (= :page (:type %))) all-controls)))
         first-tb (first (keep-indexed (fn [i c] (when (= (:type c) :text-box) i)) controls))]
     [:div.view-section.detail.continuous-row
      {:class (when selected? "selected") :style {:height height} :on-click #(on-select idx)}
@@ -561,11 +610,14 @@
 (defn- continuous-form-body
   "Render the continuous form body with header, scrolling detail rows, and footer."
   [current current-record all-records record-pos on-field-change on-select-record opts]
-  (let [{:keys [show-selectors? allow-edits? allow-additions? dividing-lines? form-width]} opts]
+  (let [{:keys [show-selectors? allow-edits? allow-additions? dividing-lines? form-width]} opts
+        show-header? (not= 0 (get-in current [:header :visible] 1))
+        show-footer? (not= 0 (get-in current [:footer :visible] 1))]
     [:div.view-sections-container.continuous
      {:class (when-not dividing-lines? "no-dividing-lines")
       :style (when form-width {:max-width form-width})}
-     [form-view-section :header current current-record on-field-change {:allow-edits? allow-edits?}]
+     (when show-header?
+       [form-view-section :header current current-record on-field-change {:allow-edits? allow-edits?}])
      [:div.continuous-records-container
       (for [[idx record] (map-indexed vector all-records)]
         (let [sel? (= (inc idx) (:current record-pos))
@@ -575,18 +627,23 @@
            {:show-selectors? show-selectors? :allow-edits? allow-edits?}]))
       (when (and allow-additions? (not (some :__new__ all-records)))
         [tentative-new-row current show-selectors?])]
-     [form-view-section :footer current current-record on-field-change {:allow-edits? allow-edits?}]]))
+     (when show-footer?
+       [form-view-section :footer current current-record on-field-change {:allow-edits? allow-edits?}])]))
 
 (defn- single-form-body
   "Render the single-form body with header, detail, and footer."
   [current current-record on-field-change opts]
-  (let [{:keys [show-selectors? allow-edits? form-width]} opts]
+  (let [{:keys [show-selectors? allow-edits? form-width]} opts
+        show-header? (not= 0 (get-in current [:header :visible] 1))
+        show-footer? (not= 0 (get-in current [:footer :visible] 1))]
     [:div.view-sections-container
      {:style (when form-width {:max-width form-width})}
-     [form-view-section :header current current-record on-field-change {:allow-edits? allow-edits?}]
+     (when show-header?
+       [form-view-section :header current current-record on-field-change {:allow-edits? allow-edits?}])
      [form-view-section :detail current current-record on-field-change
       {:show-selectors? show-selectors? :allow-edits? allow-edits?}]
-     [form-view-section :footer current current-record on-field-change {:allow-edits? allow-edits?}]]))
+     (when show-footer?
+       [form-view-section :footer current current-record on-field-change {:allow-edits? allow-edits?}])]))
 
 (defn- form-view-opts [current]
   {:show-selectors?  (not= 0 (:record-selectors current))

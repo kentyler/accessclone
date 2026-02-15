@@ -16,11 +16,11 @@ const {
  *
  * @param {string} toolName - Name of the tool to execute
  * @param {Object} input - Tool input parameters
- * @param {Object} ctx - Context: { pool, database_id, form_context, module_context, req }
- * @returns {{ toolResult: Object|null, navigationCommand: Object|null, earlyReturn: Function|null }}
+ * @param {Object} ctx - Context: { pool, database_id, form_context, module_context, query_context, sql_function_context, req }
+ * @returns {{ toolResult: Object|null, navigationCommand: Object|null, updateTranslation: Object|null, updateQuery: Object|null }}
  */
 async function executeTool(toolName, input, ctx) {
-  const { pool, database_id, form_context, module_context, req } = ctx;
+  const { pool, database_id, form_context, module_context, query_context, sql_function_context, req } = ctx;
   const schema = database_id || 'public';
   let toolResult = null;
   let navigationCommand = null;
@@ -180,6 +180,24 @@ async function executeTool(toolName, input, ctx) {
     const { cljs_source, summary } = input;
     toolResult = { success: true, summary };
     return { toolResult, navigationCommand, updateTranslation: { cljs_source, summary } };
+
+  } else if (toolName === 'update_query') {
+    const { query_name, sql, ddl_type } = input;
+    const client = await pool.connect();
+    try {
+      await client.query(`SET search_path TO "${schema}", public`);
+      await client.query('BEGIN');
+      await client.query(sql);
+      await client.query('COMMIT');
+      toolResult = { success: true, query_name, ddl_type, message: `Successfully created/updated ${ddl_type} "${query_name}"` };
+      return { toolResult, navigationCommand, updateTranslation: null, updateQuery: { query_name, ddl_type } };
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      logEvent(pool, 'warning', 'POST /api/chat/tool', `Chat tool error: update_query`, { databaseId: req.databaseId, details: { tool: 'update_query', error: err.message } });
+      toolResult = { error: err.message, query_name, ddl_type };
+    } finally {
+      client.release();
+    }
   }
 
   return { toolResult, navigationCommand, updateTranslation: null };

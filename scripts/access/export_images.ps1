@@ -92,14 +92,65 @@ function Find-ImageStart {
     return $null
 }
 
+function Load-SharedImages {
+    param($accessApp)
+    $shared = @{}
+    try {
+        $db = $accessApp.CurrentDb
+        # MSysResources stores shared image resources (PictureType = Shared)
+        $rs = $db.OpenRecordset("SELECT Name, Extension, Data FROM MSysResources WHERE Type = 'img'", 4)  # 4 = dbOpenSnapshot
+        while (-not $rs.EOF) {
+            $name = $rs.Fields("Name").Value
+            $ext = $rs.Fields("Extension").Value
+            $field = $rs.Fields("Data")
+            $size = $field.FieldSize
+            if ($size -gt 0 -and $size -le 512000) {
+                [byte[]]$bytes = $field.GetChunk(0, $size)
+                $result = Find-ImageStart -bytes $bytes
+                if ($result) {
+                    $offset = $result.offset
+                    $imageLength = $bytes.Length - $offset
+                    $imageBytes = New-Object byte[] $imageLength
+                    [Array]::Copy($bytes, $offset, $imageBytes, 0, $imageLength)
+                    $shared[$name] = @{
+                        base64 = [Convert]::ToBase64String($imageBytes)
+                        mimeType = $result.mimeType
+                    }
+                    Log-Info "  Loaded shared image: $name ($ext, $imageLength bytes)"
+                }
+            } elseif ($size -gt 512000) {
+                Log-Warn "Skipping shared image ${name}: too large ($size bytes)"
+            }
+            $rs.MoveNext()
+        }
+        $rs.Close()
+    } catch {
+        Log-Warn "Could not read MSysResources (shared images): $_"
+    }
+    return $shared
+}
+
 function Extract-ImageFromControl {
-    param($ctl, [string]$objectType, [string]$objectName)
+    param($ctl, [string]$objectType, [string]$objectName, $sharedImages)
 
     $controlName = $ctl.Name
     try {
         # PictureData is a byte array property on image controls
         $pictureData = $ctl.PictureData
         if ($null -eq $pictureData -or $pictureData.Length -eq 0) {
+            # Fallback: if PictureType is Shared, look up by Picture name in MSysResources
+            $pictureName = Safe-GetProperty $ctl "Picture"
+            if ($pictureName -and $sharedImages -and $sharedImages.ContainsKey($pictureName)) {
+                $shared = $sharedImages[$pictureName]
+                Log-Info "  Extracted $controlName (${objectName}) from shared resource: $pictureName"
+                return @{
+                    objectType = $objectType
+                    objectName = $objectName
+                    controlName = $controlName
+                    base64 = $shared.base64
+                    mimeType = $shared.mimeType
+                }
+            }
             return $null
         }
 
@@ -139,6 +190,72 @@ function Extract-ImageFromControl {
         }
     } catch {
         Log-Warn "Error reading $controlName (${objectName}): $_"
+        return $null
+    }
+}
+
+function Extract-ImageFromObject {
+    param($obj, [string]$objectType, [string]$objectName,
+          [string]$level, [string]$sectionName, $sharedImages)
+    try {
+        $pictureData = $obj.PictureData
+        if ($null -eq $pictureData -or $pictureData.Length -eq 0) {
+            # Fallback: check for shared image reference
+            $pictureName = Safe-GetProperty $obj "Picture"
+            if ($pictureName -and $sharedImages -and $sharedImages.ContainsKey($pictureName)) {
+                $shared = $sharedImages[$pictureName]
+                $label = if ($sectionName) { "$level/$sectionName" } else { $level }
+                Log-Info "  Extracted $label (${objectName}) from shared resource: $pictureName"
+                return @{
+                    objectType = $objectType
+                    objectName = $objectName
+                    controlName = $null
+                    level = $level
+                    sectionName = $sectionName
+                    base64 = $shared.base64
+                    mimeType = $shared.mimeType
+                }
+            }
+            return $null
+        }
+
+        [byte[]]$bytes = $pictureData
+
+        if ($bytes.Length -gt 512000) {
+            Log-Warn "Skipping $level picture (${objectName}/$sectionName): too large ($($bytes.Length) bytes)"
+            return $null
+        }
+
+        $result = Find-ImageStart -bytes $bytes
+        if ($null -eq $result) {
+            Log-Warn "Skipping $level picture (${objectName}/$sectionName): no recognized image signature"
+            return $null
+        }
+
+        $offset = $result.offset
+        $mimeType = $result.mimeType
+
+        $imageLength = $bytes.Length - $offset
+        $imageBytes = New-Object byte[] $imageLength
+        [Array]::Copy($bytes, $offset, $imageBytes, 0, $imageLength)
+
+        $base64 = [Convert]::ToBase64String($imageBytes)
+
+        $label = if ($sectionName) { "$level/$sectionName" } else { $level }
+        Log-Info "  Extracted $label (${objectName}): $mimeType, $imageLength bytes"
+
+        return @{
+            objectType = $objectType
+            objectName = $objectName
+            controlName = $null
+            level = $level
+            sectionName = $sectionName
+            base64 = $base64
+            mimeType = $mimeType
+        }
+    } catch {
+        $label = if ($sectionName) { "$level/$sectionName" } else { $level }
+        Log-Warn "Error reading $label picture (${objectName}): $_"
         return $null
     }
 }
@@ -215,6 +332,10 @@ $maxRetries = 2  # how many times to restart Access after a crash
 
 try {
     $accessApp = Open-AccessSession
+
+    # Load shared images from MSysResources (used by controls with PictureType = Shared)
+    $sharedImages = Load-SharedImages $accessApp
+
     $itemIndex = 0
 
     while ($itemIndex -lt $workQueue.Count) {
@@ -233,6 +354,7 @@ try {
                 break
             }
             $accessApp = Open-AccessSession
+            $sharedImages = Load-SharedImages $accessApp
             # Don't increment itemIndex — retry the same item
             continue
         }
@@ -247,9 +369,22 @@ try {
                 foreach ($ctl in $form.Controls) {
                     $ct = [int]$ctl.ControlType
                     if ($ct -eq 103 -or $ct -eq 114) {  # 103=image, 114=object-frame
-                        $img = Extract-ImageFromControl -ctl $ctl -objectType "form" -objectName $objName
+                        $img = Extract-ImageFromControl -ctl $ctl -objectType "form" -objectName $objName -sharedImages $sharedImages
                         if ($img) { $images += $img }
                     }
+                }
+
+                # Form-level picture
+                $img = Extract-ImageFromObject $form "form" $objName "form" "" $sharedImages
+                if ($img) { $images += $img }
+
+                # Section-level pictures (1=header, 0=detail, 2=footer)
+                foreach ($secDef in @(@(1, "header"), @(0, "detail"), @(2, "footer"))) {
+                    try {
+                        $sec = $form.Section($secDef[0])
+                        $img = Extract-ImageFromObject $sec "form" $objName "section" $secDef[1] $sharedImages
+                        if ($img) { $images += $img }
+                    } catch {}
                 }
 
                 $accessApp.DoCmd.Close(2, $objName, 0)  # 2 = acForm, 0 = acSaveNo
@@ -260,20 +395,42 @@ try {
                 Start-Sleep -Milliseconds 500
 
                 $report = $accessApp.Screen.ActiveReport
+
+                # Section name map for reports
+                $reportSectionNames = @{
+                    0 = "detail"; 1 = "report-header"; 2 = "report-footer"
+                    3 = "page-header"; 4 = "page-footer"
+                }
+
                 for ($secIdx = 0; $secIdx -lt 20; $secIdx++) {
                     try {
                         $section = $report.Section($secIdx)
                         foreach ($ctl in $section.Controls) {
                             $ct = [int]$ctl.ControlType
                             if ($ct -eq 103 -or $ct -eq 114) {  # 103=image, 114=object-frame
-                                $img = Extract-ImageFromControl -ctl $ctl -objectType "report" -objectName $objName
+                                $img = Extract-ImageFromControl -ctl $ctl -objectType "report" -objectName $objName -sharedImages $sharedImages
                                 if ($img) { $images += $img }
                             }
                         }
+
+                        # Section-level picture
+                        $secName = $reportSectionNames[$secIdx]
+                        if (-not $secName) {
+                            # Group headers/footers: 5=group-header-0, 6=group-footer-0, etc.
+                            $grpLevel = [Math]::Floor(($secIdx - 5) / 2)
+                            if (($secIdx - 5) % 2 -eq 0) { $secName = "group-header-$grpLevel" }
+                            else { $secName = "group-footer-$grpLevel" }
+                        }
+                        $img = Extract-ImageFromObject $section "report" $objName "section" $secName $sharedImages
+                        if ($img) { $images += $img }
                     } catch {
                         # Section doesn't exist, continue
                     }
                 }
+
+                # Report-level picture
+                $img = Extract-ImageFromObject $report "report" $objName "report" "" $sharedImages
+                if ($img) { $images += $img }
 
                 $accessApp.DoCmd.Close(3, $objName, 0)  # 3 = acReport, 0 = acSaveNo
             }
@@ -294,6 +451,7 @@ try {
                     break
                 }
                 $accessApp = Open-AccessSession
+                $sharedImages = Load-SharedImages $accessApp
                 # Don't increment — retry the same item
             } else {
                 # Non-COM error (e.g., form doesn't exist) — skip this item
@@ -324,9 +482,14 @@ finally {
 # Build JSON output manually to handle large base64 strings safely
 $jsonParts = @()
 foreach ($img in $images) {
+    $cnVal = if ($null -eq $img.controlName) { 'null' } else { '"' + (Escape-JsonStr $img.controlName) + '"' }
+    $lvVal = if ($img.level) { '"' + (Escape-JsonStr $img.level) + '"' } else { 'null' }
+    $snVal = if ($img.sectionName) { '"' + (Escape-JsonStr $img.sectionName) + '"' } else { 'null' }
     $part = '{"objectType":"' + (Escape-JsonStr $img.objectType) + '",' +
             '"objectName":"' + (Escape-JsonStr $img.objectName) + '",' +
-            '"controlName":"' + (Escape-JsonStr $img.controlName) + '",' +
+            '"controlName":' + $cnVal + ',' +
+            '"level":' + $lvVal + ',' +
+            '"sectionName":' + $snVal + ',' +
             '"mimeType":"' + (Escape-JsonStr $img.mimeType) + '",' +
             '"base64":"' + $img.base64 + '"}'
     $jsonParts += $part

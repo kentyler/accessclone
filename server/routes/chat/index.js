@@ -6,7 +6,7 @@ const express = require('express');
 const router = express.Router();
 const path = require('path');
 const { logError } = require('../../lib/events');
-const { dataTools, graphTools, moduleTools } = require('./tools');
+const { dataTools, graphTools, moduleTools, queryTools } = require('./tools');
 const { summarizeDefinition, checkImportCompleteness, formatMissingList, buildAppInventory } = require('./context');
 const { executeTool } = require('./tool-handlers');
 
@@ -93,7 +93,10 @@ Use search_records when users want to FIND specific items. Use analyze_data when
           const fieldList = query_context.fields.map(f => `${f.name} (${f.type})`).join(', ');
           queryContext += `\nFields: ${fieldList}`;
         }
-        queryContext += `\n\nHelp the user understand this query, identify issues, or suggest improvements.`;
+        queryContext += `\n\nYou have a tool available:
+- update_query: Create or replace a PostgreSQL view or function by executing DDL. When the user asks to save or update this query, use this tool with the appropriate CREATE OR REPLACE VIEW statement.
+
+Help the user understand this query, identify issues, or suggest improvements. When asked to save changes, use the update_query tool.`;
       }
 
       // Graph tools context
@@ -145,7 +148,10 @@ When the user asks you to make changes, use the update_translation tool to apply
         if (sql_function_context.source) {
           sqlFunctionContext += `\n\nFunction definition:\n${sql_function_context.source}`;
         }
-        sqlFunctionContext += `\n\nThis function was imported from a Microsoft Access query and converted to PostgreSQL. Help the user understand it, identify issues, or suggest improvements.`;
+        sqlFunctionContext += `\n\nYou have a tool available:
+- update_query: Create or replace a PostgreSQL function by executing DDL. When the user asks to save or update this function, use this tool with ddl_type "function" and the full CREATE OR REPLACE FUNCTION statement.
+
+This function was imported from a Microsoft Access query and converted to PostgreSQL. Help the user understand it, identify issues, or suggest improvements. When asked to save changes, use the update_query tool.`;
       }
 
       // Macro context (when viewing an Access macro)
@@ -192,6 +198,7 @@ When the user asks you to make changes, use the update_translation tool to apply
       const availableTools = [
         ...(form_context?.record_source ? dataTools : []),
         ...(module_context?.module_name ? moduleTools : []),
+        ...((query_context?.query_name || sql_function_context?.function_name) ? queryTools : []),
         ...graphTools
       ];
 
@@ -229,9 +236,9 @@ Keep responses concise and helpful. When discussing code or SQL, use markdown co
       const toolUse = data.content.find(c => c.type === 'tool_use');
 
       if (toolUse) {
-        const { toolResult, navigationCommand, updateTranslation } = await executeTool(
+        const { toolResult, navigationCommand, updateTranslation, updateQuery } = await executeTool(
           toolUse.name, toolUse.input,
-          { pool, database_id, form_context, module_context, req }
+          { pool, database_id, form_context, module_context, query_context, sql_function_context, req }
         );
 
         // Special handling for update_translation — needs followup API call
@@ -260,6 +267,35 @@ Keep responses concise and helpful. When discussing code or SQL, use markdown co
           return res.json({
             message: assistantMsg,
             updated_code: updateTranslation.cljs_source
+          });
+        }
+
+        // Special handling for update_query — needs followup API call
+        if (updateQuery) {
+          const followupResponse3 = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': apiKey,
+              'anthropic-version': '2023-06-01'
+            },
+            body: JSON.stringify({
+              model: 'claude-sonnet-4-20250514',
+              max_tokens: 1024,
+              system: `You are a helpful assistant. The user asked to save/update a ${updateQuery.ddl_type} and you executed the DDL. Briefly confirm what was done.`,
+              messages: [
+                ...(history || []).map(m => ({ role: m.role, content: m.content })),
+                { role: 'user', content: message },
+                { role: 'assistant', content: data.content },
+                { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUse.id, content: JSON.stringify(toolResult) }] }
+              ]
+            })
+          });
+          const followupData3 = await followupResponse3.json();
+          const assistantMsg3 = followupData3.content?.find(c => c.type === 'text')?.text || `Successfully updated ${updateQuery.ddl_type} "${updateQuery.query_name}"`;
+          return res.json({
+            message: assistantMsg3,
+            updated_query: { query_name: updateQuery.query_name, ddl_type: updateQuery.ddl_type }
           });
         }
 

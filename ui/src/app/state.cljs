@@ -665,6 +665,47 @@
   (swap! app-state assoc-in [:module-viewer :cljs-dirty?] true))
 
 ;; ============================================================
+;; MODULE CREATION
+;; ============================================================
+
+(defn create-new-module! []
+  (let [existing-modules (get-in @app-state [:objects :modules])
+        new-id (inc (reduce max 0 (map :id existing-modules)))
+        mod-name (str "Module" new-id)
+        new-module {:id new-id
+                    :name mod-name
+                    :has-vba-source false
+                    :has-cljs-source false}]
+    (add-object! :modules new-module)
+    (open-object! :modules new-id)
+    ;; Create on server immediately with draft status
+    (go
+      (let [response (<! (http/put (str api-base "/api/modules/" (js/encodeURIComponent mod-name))
+                                   {:json-params {:cljs_source ""
+                                                  :status "draft"}
+                                    :headers (db-headers)}))]
+        (when-not (:success response)
+          (log-error! "Failed to create new module on server" "create-new-module"))))))
+
+;; ============================================================
+;; FUNCTION CREATION
+;; ============================================================
+
+(defn create-new-function! []
+  (let [existing-fns (get-in @app-state [:objects :sql-functions])
+        new-id (inc (reduce max 0 (map :id existing-fns)))
+        fn-name (str "new_function_" new-id)
+        new-fn {:id new-id
+                :name fn-name
+                :is-new? true
+                :arguments ""
+                :return-type "void"
+                :source ""
+                :description ""}]
+    (add-object! :sql-functions new-fn)
+    (open-object! :sql-functions new-id)))
+
+;; ============================================================
 ;; MACRO VIEWER
 ;; ============================================================
 
@@ -1230,6 +1271,10 @@
               (when-let [updated-code (get-in response [:body :updated_code])]
                 (swap! app-state assoc-in [:module-viewer :module-info :cljs-source] updated-code)
                 (swap! app-state assoc-in [:module-viewer :cljs-dirty?] true))
+              ;; Handle updated query/function from LLM DDL execution
+              (when-let [uq (get-in response [:body :updated_query])]
+                (load-queries!)
+                (load-sql-functions!))
               ;; Handle navigation command if present
               (when-let [nav (get-in response [:body :navigation])]
                 (when (= (:action nav) "navigate")

@@ -164,13 +164,39 @@
       (let [parsed (js->clj (js/JSON.parse field-data) :keywordize-keys true)]
         (add-field-control! (:name parsed) (:type parsed) raw-x raw-y ctrl-key? section)))))
 
+(defn- picture-background-size
+  "Map picture-size-mode to CSS background-size value."
+  [size-mode]
+  (case size-mode
+    "stretch" "100% 100%"
+    "zoom" "contain"
+    "auto"))
+
+(defn- section-body-style
+  "Build the style map for a report section body."
+  [height grid-size section-data]
+  (let [back-color (:back-color section-data)
+        picture (:picture section-data)
+        has-picture? (and picture (not= picture ""))]
+    (cond-> {:height height}
+      (not has-picture?)
+      (assoc :background-image (str "radial-gradient(circle, #ccc 1px, transparent 1px)")
+             :background-size (str grid-size "px " grid-size "px"))
+      has-picture?
+      (assoc :background-image (str "url(" picture ")")
+             :background-size (picture-background-size (:picture-size-mode section-data))
+             :background-repeat "no-repeat"
+             :background-position "center")
+      (and back-color (not= back-color ""))
+      (assoc :background-color back-color))))
+
 (defn report-section
   "A single report section (report-header, page-header, detail, etc.)"
   [section report-def selected grid-size]
   (let [height (ru/get-section-height report-def section)
         controls (ru/get-section-controls report-def section)
         section-label (ru/section-display-name section)
-        back-color (:back-color (get report-def section))
+        section-data (get report-def section)
         section-selected? (and selected (:section selected) (nil? (:idx selected))
                                (= (:section selected) section))]
     [:div.form-section {:class (name section)}
@@ -180,11 +206,7 @@
       [:span.section-label section-label]]
      [:div.section-body
       {:class (when section-selected? "selected")
-       :style (cond-> {:height height
-                        :background-image (str "radial-gradient(circle, #ccc 1px, transparent 1px)")
-                        :background-size (str grid-size "px " grid-size "px")}
-                (and back-color (not= back-color ""))
-                (assoc :background-color back-color))
+       :style (section-body-style height grid-size section-data)
        :on-drag-over #(.preventDefault %)
        :on-click #(when (or (.. % -target -classList (contains "section-body"))
                             (.. % -target -classList (contains "controls-container")))

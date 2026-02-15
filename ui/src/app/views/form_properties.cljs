@@ -99,6 +99,7 @@
 (def section-property-defs
   {:format [{:key :height :label "Height" :type :number}
             {:key :back-color :label "Back Color" :type :text}
+            {:key :picture :label "Picture" :type :picture}
             {:key :visible :label "Visible" :type :yes-no :default true}]
    :event  [{:key :on-click :label "On Click" :type :event}]
    :other  [{:key :tag :label "Tag" :type :text}]})
@@ -117,6 +118,7 @@
             {:key :record-selectors :label "Record Selectors" :type :yes-no}
             {:key :navigation-buttons :label "Navigation Buttons" :type :yes-no}
             {:key :dividing-lines :label "Dividing Lines" :type :yes-no}
+            {:key :picture :label "Picture" :type :picture}
             {:key :width :label "Width" :type :number}]
    :data [{:key :record-source :label "Record Source" :type :table-select}
           {:key :filter :label "Filter" :type :text}
@@ -182,6 +184,13 @@
        [:option {:value ""} "(none)"]
        (for [field fields]
          ^{:key (:name field)} [:option {:value (:name field)} (:name field)])])
+
+    :picture
+    [:input {:type "text" :read-only true
+             :value (cond
+                      (and value (str/starts-with? value "data:")) "(embedded image)"
+                      (and value (not (str/blank? value))) value
+                      :else "(none)")}]
 
     :event
     [:div.event-input-row

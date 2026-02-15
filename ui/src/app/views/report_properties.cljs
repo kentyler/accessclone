@@ -84,7 +84,8 @@
             {:key :margin-top :label "Margin Top" :type :number :default 72}
             {:key :margin-bottom :label "Margin Bottom" :type :number :default 72}
             {:key :margin-left :label "Margin Left" :type :number :default 72}
-            {:key :margin-right :label "Margin Right" :type :number :default 72}]
+            {:key :margin-right :label "Margin Right" :type :number :default 72}
+            {:key :picture :label "Picture" :type :picture}]
    :data [{:key :record-source :label "Record Source" :type :table-select}
           {:key :filter :label "Filter" :type :text}
           {:key :filter-on :label "Filter On" :type :yes-no}
@@ -119,7 +120,8 @@
             {:key :new-row-or-col :label "New Row Or Col" :type :select
              :options ["None" "Before Section" "After Section" "Before & After"]}
             {:key :repeat-section :label "Repeat Section" :type :yes-no}
-            {:key :alternate-back-color :label "Alternate Back Color" :type :text}]
+            {:key :alternate-back-color :label "Alternate Back Color" :type :text}
+            {:key :picture :label "Picture" :type :picture}]
    :event [{:key :on-format :label "On Format" :type :event}
            {:key :on-print :label "On Print" :type :event}
            {:key :on-retreat :label "On Retreat" :type :event}
@@ -229,6 +231,13 @@
        [:option {:value ""} "(none)"]
        (for [field fields]
          ^{:key (:name field)} [:option {:value (:name field)} (:name field)])])
+
+    :picture
+    [:input {:type "text" :read-only true
+             :value (cond
+                      (and value (str/starts-with? value "data:")) "(embedded image)"
+                      (and value (not (str/blank? value))) value
+                      :else "(none)")}]
 
     :event
     [:div.event-input-row

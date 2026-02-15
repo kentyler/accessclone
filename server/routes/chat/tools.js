@@ -172,4 +172,31 @@ const moduleTools = [
   }
 ];
 
-module.exports = { dataTools, graphTools, moduleTools };
+// Query/function DDL tools — available when viewing a query or SQL function
+const queryTools = [
+  {
+    name: 'update_query',
+    description: 'Create or replace a PostgreSQL view or function by executing DDL. Use this when the user asks to save, create, or update a query or function. For views: wrap the SELECT in CREATE OR REPLACE VIEW. For functions: use CREATE OR REPLACE FUNCTION with full body.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query_name: {
+          type: 'string',
+          description: 'Name of the view or function to create/replace'
+        },
+        sql: {
+          type: 'string',
+          description: 'The full DDL statement (CREATE OR REPLACE VIEW/FUNCTION ...)'
+        },
+        ddl_type: {
+          type: 'string',
+          enum: ['view', 'function'],
+          description: 'Whether this is a view or function'
+        }
+      },
+      required: ['query_name', 'sql', 'ddl_type']
+    }
+  }
+];
+
+module.exports = { dataTools, graphTools, moduleTools, queryTools };

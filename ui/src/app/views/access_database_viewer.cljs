@@ -90,6 +90,8 @@
     (:validationRule ctrl) (assoc :validation-rule (:validationRule ctrl))
     (:validationText ctrl) (assoc :validation-text (:validationText ctrl))
     (:tabIndex ctrl)       (assoc :tab-index (:tabIndex ctrl))
+    (or (:controlTipText ctrl) (:tooltip ctrl))
+    (assoc :control-tip-text (or (:controlTipText ctrl) (:tooltip ctrl)))
     (:parentPage ctrl)     (assoc :parent-page (:parentPage ctrl))
     (false? (:enabled ctrl)) (assoc :enabled false)
     (:locked ctrl)           (assoc :locked true)
@@ -153,6 +155,9 @@
    1 :whole-group
    2 :with-first-detail})
 
+(def picture-size-mode-map
+  {0 "clip" 1 "stretch" 3 "zoom"})
+
 (defn convert-report-control
   "Convert a single Access report control JSON object to AccessClone format"
   [ctrl]
@@ -188,6 +193,8 @@
            (pos? (:forceNewPage section))) (assoc :force-new-page (:forceNewPage section))
       (some? (:keepTogether section))(assoc :keep-together (:keepTogether section))
       (:backColor section)           (assoc :back-color (access-color->hex (:backColor section)))
+      (:picture section)             (assoc :picture (:picture section))
+      (some? (:pictureSizeMode section)) (assoc :picture-size-mode (get picture-size-mode-map (:pictureSizeMode section) "clip"))
 
       ;; Section events
       (:hasFormatEvent section)  (assoc :has-format-event true)
@@ -233,6 +240,8 @@
         group-sections (into {} (filter #(re-find #"^group-" (name (key %))) section-map))]
     (cond-> (build-report-base report-data section-map)
       (:caption report-data)            (assoc :caption (:caption report-data))
+      (:picture report-data)            (assoc :picture (:picture report-data))
+      (some? (:pictureSizeMode report-data)) (assoc :picture-size-mode (get picture-size-mode-map (:pictureSizeMode report-data) "clip"))
       (seq group-sections)              (merge group-sections)
       (:hasOpenEvent report-data)       (assoc :has-open-event true)
       (:hasCloseEvent report-data)      (assoc :has-close-event true)
@@ -244,17 +253,25 @@
 
 ;; ============================================================
 
+(defn- build-form-section
+  "Build a single form section with optional picture properties."
+  [sections section-name height-key by-section section-idx]
+  (cond-> {:height (twips->px (get sections height-key))
+           :controls (mapv convert-control (get by-section section-idx []))}
+    (get sections (keyword (str section-name "Picture")))
+    (assoc :picture (get sections (keyword (str section-name "Picture"))))
+    (some? (get sections (keyword (str section-name "PictureSizeMode"))))
+    (assoc :picture-size-mode (get picture-size-mode-map
+                                   (get sections (keyword (str section-name "PictureSizeMode"))) "clip"))))
+
 (defn- build-form-sections
   "Build header/detail/footer sections from Access form data."
   [form-data]
   (let [by-section (group-by #(or (:section %) 0) (or (:controls form-data) []))
         sections (or (:sections form-data) {})]
-    {:header {:height (twips->px (:headerHeight sections))
-              :controls (mapv convert-control (get by-section 1 []))}
-     :detail {:height (twips->px (:detailHeight sections))
-              :controls (mapv convert-control (get by-section 0 []))}
-     :footer {:height (twips->px (:footerHeight sections))
-              :controls (mapv convert-control (get by-section 2 []))}}))
+    {:header (build-form-section sections "header" :headerHeight by-section 1)
+     :detail (build-form-section sections "detail" :detailHeight by-section 0)
+     :footer (build-form-section sections "footer" :footerHeight by-section 2)}))
 
 (defn- bool->int [v] (if (false? v) 0 1))
 
@@ -281,6 +298,8 @@
       (:modal form-data) (assoc :modal 1)
       (:dataEntry form-data) (assoc :data-entry 1)
       (:backColor form-data) (assoc :back-color (access-color->hex (:backColor form-data)))
+      (:picture form-data) (assoc :picture (:picture form-data))
+      (some? (:pictureSizeMode form-data)) (assoc :picture-size-mode (get picture-size-mode-map (:pictureSizeMode form-data) "clip"))
       (:hasLoadEvent form-data)         (assoc :has-load-event true)
       (:hasOpenEvent form-data)         (assoc :has-open-event true)
       (:hasCloseEvent form-data)        (assoc :has-close-event true)

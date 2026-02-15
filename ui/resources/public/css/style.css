@@ -709,7 +709,13 @@ body {
 .sections-container {
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  overflow: auto;
+}
+
+.sections-inner {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
 }
 
 .form-section {
@@ -768,7 +774,7 @@ body {
 .section-body {
   position: relative;
   min-height: 40px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .section-body.selected {
@@ -1140,6 +1146,11 @@ body {
   position: absolute;
   display: flex;
   align-items: center;
+}
+
+.view-control.disabled {
+  opacity: 0.5;
+  pointer-events: none;
 }
 
 .view-label {

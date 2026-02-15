@@ -12,6 +12,7 @@
 (def resolve-control-field eu/resolve-control-field)
 (def resolve-field-value eu/resolve-field-value)
 (def display-text eu/display-text)
+(def format-value eu/format-value)
 
 ;; --- Report-specific constants ---
 

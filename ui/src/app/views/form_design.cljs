@@ -180,14 +180,31 @@
       (let [parsed (js->clj (js/JSON.parse field-data) :keywordize-keys true)]
         (add-field-control! (:name parsed) (:type parsed) raw-x raw-y ctrl-key? section)))))
 
+(defn- picture-background-size
+  "Map picture-size-mode to CSS background-size value."
+  [size-mode]
+  (case size-mode
+    "stretch" "100% 100%"
+    "zoom" "contain"
+    "auto"))
+
 (defn- section-body-style
   "Build the style map for a section body."
-  [height grid-size back-color]
-  (cond-> {:height height
-           :background-image (str "radial-gradient(circle, #ccc 1px, transparent 1px)")
-           :background-size (str grid-size "px " grid-size "px")}
-    (and back-color (not= back-color ""))
-    (assoc :background-color back-color)))
+  [height grid-size section-data]
+  (let [back-color (:back-color section-data)
+        picture (:picture section-data)
+        has-picture? (and picture (not= picture ""))]
+    (cond-> {:height height}
+      (not has-picture?)
+      (assoc :background-image (str "radial-gradient(circle, #ccc 1px, transparent 1px)")
+             :background-size (str grid-size "px " grid-size "px"))
+      has-picture?
+      (assoc :background-image (str "url(" picture ")")
+             :background-size (picture-background-size (:picture-size-mode section-data))
+             :background-repeat "no-repeat"
+             :background-position "center")
+      (and back-color (not= back-color ""))
+      (assoc :background-color back-color))))
 
 (defn form-section
   "A single form section (header, detail, or footer)"
@@ -206,7 +223,7 @@
       [:span.section-label section-label]]
      [:div.section-body
       {:class (when section-selected? "selected")
-       :style (section-body-style height grid-size (:back-color (get form-def section)))
+       :style (section-body-style height grid-size (get form-def section))
        :on-drag-over #(.preventDefault %)
        :on-click #(when (or (.. % -target -classList (contains "section-body"))
                             (.. % -target -classList (contains "controls-container")))
@@ -245,13 +262,28 @@
        [ctx-menu-item "Design View" #(state-form/set-view-mode! :design)
         (when (= (state-form/get-view-mode) :design) "active")]])))
 
+(defn- calc-controls-width
+  "Calculate the minimum width needed to show all controls across visible sections."
+  [form-def]
+  (let [sections (cond-> [:detail]
+                   (not= 0 (get-in form-def [:header :visible] 1)) (conj :header)
+                   (not= 0 (get-in form-def [:footer :visible] 1)) (conj :footer))
+        all-controls (mapcat #(form-utils/get-section-controls form-def %) sections)
+        max-right (reduce (fn [mx ctrl]
+                            (let [right (+ (or (:x ctrl) 0) (or (:width ctrl) 0))]
+                              (max mx right)))
+                          0 all-controls)]
+    (when (pos? max-right)
+      (+ max-right 20))))
+
 (defn form-canvas
   "The design surface where controls are placed"
   []
   (let [form-editor (:form-editor @state/app-state)
         current (:current form-editor)
         selected (:selected-control form-editor)
-        grid-size (state/get-grid-size)]
+        grid-size (state/get-grid-size)
+        content-width (or (:width current) (calc-controls-width current))]
     [:div.form-canvas
      {:tab-index 0
       :class (when @resize-state "resizing")
@@ -274,9 +306,13 @@
       [:span "Form Design View"]
       [form-context-menu]]
      [:div.canvas-body.sections-container
-      [form-section :header current selected grid-size]
-      [form-section :detail current selected grid-size]
-      [form-section :footer current selected grid-size]]
+      [:div.sections-inner
+       {:style (when content-width {:min-width content-width})}
+       (when-not (= 0 (get-in current [:header :visible] 1))
+         [form-section :header current selected grid-size])
+       [form-section :detail current selected grid-size]
+       (when-not (= 0 (get-in current [:footer :visible] 1))
+         [form-section :footer current selected grid-size])]]
      (when-not (= 0 (:navigation-buttons current))
        [:div.record-nav-bar
         [:span.nav-label "Record:"]

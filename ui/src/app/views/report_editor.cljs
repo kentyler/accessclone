@@ -57,7 +57,18 @@
        {:class (when (= view-mode :preview) "active")
         :title "Preview"
         :on-click #(state-report/set-report-view-mode! :preview)}
-       "Preview"]]
+       "Preview"]
+      (when (= view-mode :design)
+        [:<>
+         [:button.toolbar-btn
+          {:title "Add Group Level"
+           :on-click #(state-report/add-group-level!)}
+          "+ Group"]
+         [:button.toolbar-btn
+          {:title "Remove Group Level"
+           :disabled (empty? (get-in @state/app-state [:report-editor :current :grouping]))
+           :on-click #(state-report/remove-group-level!)}
+          "- Group"]])]
      [:div.toolbar-right
       [:button.secondary-btn
        {:disabled (not dirty?)

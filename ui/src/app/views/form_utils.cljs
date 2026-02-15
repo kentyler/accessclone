@@ -11,6 +11,9 @@
 (def resolve-control-field eu/resolve-control-field)
 (def resolve-field-value eu/resolve-field-value)
 (def display-text eu/display-text)
+(def format-value eu/format-value)
+(def parse-input-mask eu/parse-input-mask)
+(def mask-placeholder eu/mask-placeholder)
 
 ;; --- Form-specific functions ---
 

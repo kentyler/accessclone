@@ -16,7 +16,8 @@
 
 ;; Forward declarations for functions used before definition
 (declare save-current-record! save-form! save-form-to-file!
-         get-record-source-fields delete-current-record! load-form-for-editing!)
+         get-record-source-fields delete-current-record! load-form-for-editing!
+         set-form-definition!)
 
 ;; ============================================================
 ;; FORM-VIEW RECORD CONTEXT MENU & CLIPBOARD
@@ -99,6 +100,35 @@
                                :controls []}}]
     (state/add-object! :forms new-form)
     (state/open-object! :forms new-id)))
+
+;; ============================================================
+;; FORM HEADER/FOOTER TOGGLE
+;; ============================================================
+
+(defn toggle-form-header-footer!
+  "Toggle header and footer visibility together (like Access View > Form Header/Footer).
+   When hiding: saves current height to :_saved-height, sets height to 0, visible to 0.
+   When showing: restores from :_saved-height or defaults to 80, visible to 1."
+  []
+  (let [current (get-in @app-state [:form-editor :current])
+        header-visible? (not= 0 (get-in current [:header :visible] 1))
+        toggle-section (fn [def section]
+                         (if header-visible?
+                           ;; Hiding: save height, set to 0
+                           (-> def
+                               (assoc-in [section :_saved-height]
+                                         (get-in def [section :height] 80))
+                               (assoc-in [section :height] 0)
+                               (assoc-in [section :visible] 0))
+                           ;; Showing: restore height
+                           (-> def
+                               (assoc-in [section :height]
+                                         (get-in def [section :_saved-height] 80))
+                               (assoc-in [section :visible] 1))))]
+    (when current
+      (set-form-definition! (-> current
+                                (toggle-section :header)
+                                (toggle-section :footer))))))
 
 ;; ============================================================
 ;; FORM EDITOR - DEFINITION & SAVE
@@ -529,37 +559,144 @@
        (not (contains? current-record "id"))
        (not (:__new__ current-record))))
 
+;; ============================================================
+;; VALIDATION RULES
+;; ============================================================
+
+(defn- eval-simple-rule
+  "Evaluate a single Access validation condition against a value."
+  [value rule]
+  (let [rule (str/trim rule)
+        rule-lower (str/lower-case rule)]
+    (cond
+      ;; Is Not Null
+      (= rule-lower "is not null")
+      (and (some? value) (not= (str value) ""))
+
+      ;; Is Null
+      (= rule-lower "is null")
+      (or (nil? value) (= (str value) ""))
+
+      ;; Between X And Y
+      (re-find #"(?i)^between\s+" rule)
+      (if-let [[_ lo hi] (re-matches #"(?i)between\s+(.+?)\s+and\s+(.+)" rule)]
+        (let [n (js/parseFloat (str value))
+              lo-n (js/parseFloat lo)
+              hi-n (js/parseFloat hi)]
+          (and (not (js/isNaN n)) (<= lo-n n) (<= n hi-n)))
+        true)
+
+      ;; Like "pattern" — Access wildcards: * = any chars, ? = one char, # = one digit
+      (re-find #"(?i)^like\s+" rule)
+      (let [pattern (-> (subs rule 5) str/trim (str/replace #"\"" ""))
+            regex-str (-> pattern
+                          (str/replace #"\*" ".*")
+                          (str/replace #"\?" ".")
+                          (str/replace #"#" "\\d"))
+            re (js/RegExp. (str "^" regex-str "$") "i")]
+        (.test re (str (or value ""))))
+
+      ;; Comparison: >=, <=, <>, >, <, =
+      :else
+      (if-let [[_ op operand] (re-matches #"^(>=|<=|<>|>|<|=)\s*(.+)$" rule)]
+        (let [operand (str/replace operand #"\"" "")
+              n-val (js/parseFloat (str value))
+              n-op (js/parseFloat operand)
+              both-num? (and (not (js/isNaN n-val)) (not (js/isNaN n-op)))]
+          (if both-num?
+            (case op ">=" (>= n-val n-op) "<=" (<= n-val n-op) "<>" (not= n-val n-op)
+                     ">"  (> n-val n-op)  "<"  (< n-val n-op)  "="  (== n-val n-op) true)
+            (let [sv (str (or value "")) so operand]
+              (case op "<>" (not= sv so) "=" (= sv so) true))))
+        ;; Unrecognized — pass
+        true))))
+
+(defn- validate-rule
+  "Evaluate an Access validation rule (possibly compound with Or/And) against a value."
+  [value rule-str]
+  (if (or (nil? rule-str) (str/blank? rule-str))
+    true
+    (let [rule (str/trim rule-str)]
+      (cond
+        ;; Or — any branch true = valid (split carefully, not inside Between)
+        (and (re-find #"(?i)\s+or\s+" rule)
+             (not (re-find #"(?i)^between\s+" rule)))
+        (boolean (some #(validate-rule value %) (str/split rule #"(?i)\s+or\s+")))
+
+        ;; And — all branches true = valid (but not Between...And...)
+        (and (re-find #"(?i)\s+and\s+" rule)
+             (not (re-find #"(?i)^between\s+" rule)))
+        (every? #(validate-rule value %) (str/split rule #"(?i)\s+and\s+"))
+
+        ;; Single condition
+        :else
+        (eval-simple-rule value rule)))))
+
+(defn- validate-record
+  "Check all controls' validation rules against the current record.
+   Returns nil if valid, or {:field name :text message} for the first failure."
+  [form-def record]
+  (let [all-controls (mapcat #(get-in form-def [% :controls] []) [:header :detail :footer])]
+    (some (fn [ctrl]
+            (when-let [rule (:validation-rule ctrl)]
+              (let [field-name (or (:control-source ctrl) (:field ctrl))
+                    field-key (when field-name (keyword (str/lower-case field-name)))
+                    value (when field-key (get record field-key))]
+                (when (and field-name (not (validate-rule value rule)))
+                  {:field (or (:name ctrl) field-name)
+                   :text (or (:validation-text ctrl)
+                             (str "Validation failed for " (or (:name ctrl) field-name)
+                                  ": " rule))}))))
+          all-controls)))
+
 (defn save-current-record!
   "Save the current record to the database"
   []
   (let [record-source (get-in @app-state [:form-editor :current :record-source])
         current-record (get-in @app-state [:form-editor :current-record])
+        form-def (get-in @app-state [:form-editor :current])
         pos (get-in @app-state [:form-editor :record-position :current] 1)
         record-dirty? (get-in @app-state [:form-editor :record-dirty?])]
     (when (and record-source current-record record-dirty?)
-      (go
-        (let [abort? (<! (run-before-update-hook! current-record))]
-          (when-not abort?
-            (let [fields (get-record-source-fields record-source)
-                  pk-from-fields (some #(when (:pk %) (:name %)) fields)
-                  pk-field-name (or pk-from-fields "id")
-                  pk-value (pk-value-for-record current-record pk-field-name)
-                  is-new? (or (:__new__ current-record) (nil? pk-value) (= pk-value ""))
-                  record-for-api (record->api-map current-record)]
-              (if (check-no-pk? pk-from-fields current-record)
-                (js/alert (str "Cannot save: table \"" record-source "\" has no primary key. "
-                               "Add a primary key to this table before editing records."))
-                (if is-new?
-                  (<! (do-insert-record! record-source record-for-api pk-field-name pos))
-                  (<! (do-update-record! record-source record-for-api pk-field-name pk-value pos)))))))))))
+      (if-let [error (validate-record form-def current-record)]
+        (js/alert (:text error))
+        (go
+          (let [abort? (<! (run-before-update-hook! current-record))]
+            (when-not abort?
+              (let [fields (get-record-source-fields record-source)
+                    pk-from-fields (some #(when (:pk %) (:name %)) fields)
+                    pk-field-name (or pk-from-fields "id")
+                    pk-value (pk-value-for-record current-record pk-field-name)
+                    is-new? (or (:__new__ current-record) (nil? pk-value) (= pk-value ""))
+                    record-for-api (record->api-map current-record)]
+                (if (check-no-pk? pk-from-fields current-record)
+                  (js/alert (str "Cannot save: table \"" record-source "\" has no primary key. "
+                                 "Add a primary key to this table before editing records."))
+                  (if is-new?
+                    (<! (do-insert-record! record-source record-for-api pk-field-name pos))
+                    (<! (do-update-record! record-source record-for-api pk-field-name pk-value pos))))))))))))
+
+(defn- collect-default-values
+  "Scan form controls for :default-value and return a map of {field-keyword value}."
+  [form-def]
+  (let [all-controls (mapcat #(get-in form-def [% :controls] []) [:header :detail :footer])]
+    (reduce (fn [m ctrl]
+              (let [dv (:default-value ctrl)
+                    field (when (and dv (not (str/blank? (str dv))))
+                            (or (:control-source ctrl) (:field ctrl)))]
+                (if field
+                  (assoc m (keyword (str/lower-case field)) dv)
+                  m)))
+            {} all-controls)))
 
 (defn new-record!
-  "Create a new empty record"
+  "Create a new record, pre-populated with default values from controls"
   []
   (let [total (get-in @app-state [:form-editor :record-position :total] 0)
-        ;; Mark as new so save knows to INSERT not UPDATE
-        new-record {:__new__ true}]
-    ;; Add empty record to records array (for continuous forms display)
+        form-def (get-in @app-state [:form-editor :current])
+        defaults (collect-default-values form-def)
+        new-record (merge defaults {:__new__ true})]
+    ;; Add record to records array (for continuous forms display)
     (swap! app-state update-in [:form-editor :records] #(conj (vec %) new-record))
     (swap! app-state assoc-in [:form-editor :current-record] new-record)
     (swap! app-state assoc-in [:form-editor :record-position] {:current (inc total) :total (inc total)})

@@ -299,6 +299,25 @@ try {
     }
     if ($null -ne $backColor -and $backColor -ge 0) { $formObj.backColor = [long]$backColor }
 
+    # Form-level picture (background image)
+    $picture = Safe-GetProperty $form "Picture"
+    if ($picture) { $formObj.picture = $picture }
+    $pictureSizeMode = Safe-GetProperty $form "PictureSizeMode"
+    if ($null -ne $pictureSizeMode) { $formObj.pictureSizeMode = [int]$pictureSizeMode }
+
+    # Section-level pictures
+    foreach ($secDef in @(@(1, "header"), @(0, "detail"), @(2, "footer"))) {
+        try {
+            $sec = $form.Section($secDef[0])
+            $secPic = Safe-GetProperty $sec "Picture"
+            if ($secPic) {
+                $formObj.sections["$($secDef[1])Picture"] = $secPic
+                $secPicSM = Safe-GetProperty $sec "PictureSizeMode"
+                if ($null -ne $secPicSM) { $formObj.sections["$($secDef[1])PictureSizeMode"] = [int]$secPicSM }
+            }
+        } catch {}
+    }
+
     # Form-level events
     $formEvents = @(
         @("OnLoad", "hasLoadEvent"),

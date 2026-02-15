@@ -63,7 +63,14 @@
        {:class (when (= view-mode :view) "active")
         :title "Form View"
         :on-click #(state-form/set-view-mode! :view)}
-       "View"]]
+       "View"]
+      (when (= view-mode :design)
+        (let [hdr-visible? (not= 0 (get-in @state/app-state [:form-editor :current :header :visible] 1))]
+          [:button.toolbar-btn
+           {:class (when hdr-visible? "active")
+            :title "Toggle Form Header/Footer"
+            :on-click #(state-form/toggle-form-header-footer!)}
+           "Header/Footer"]))]
      [:div.toolbar-right
       [:button.secondary-btn
        {:disabled (not dirty?)

@@ -4,6 +4,8 @@
             [app.state :as state]
             [app.state-form :as state-form]
             [app.state-table :as state-table]
+            [app.state-report :as state-report]
+            [app.state-query :as state-query]
             [app.views.access-database-viewer :as access-db-viewer]))
 
 ;; Object types available in the dropdown (like Access navigation pane)
@@ -45,6 +47,30 @@
        {:on-click #(state-table/start-new-table!)}
        [:span.icon "+"]
        [:span "New Table"]]
+
+      :reports
+      [:button.new-object-btn
+       {:on-click #(state-report/create-new-report!)}
+       [:span.icon "+"]
+       [:span "New Report"]]
+
+      :modules
+      [:button.new-object-btn
+       {:on-click #(state/create-new-module!)}
+       [:span.icon "+"]
+       [:span "New Module"]]
+
+      :queries
+      [:button.new-object-btn
+       {:on-click #(state-query/create-new-query!)}
+       [:span.icon "+"]
+       [:span "New Query"]]
+
+      :sql-functions
+      [:button.new-object-btn
+       {:on-click #(state/create-new-function!)}
+       [:span.icon "+"]
+       [:span "New Function"]]
 
       nil)))
 

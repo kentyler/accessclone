@@ -61,12 +61,20 @@
          height (or (:height section-data) 40)
          controls (or (:controls section-data) [])
          back-color (:back-color section-data)
+         picture (:picture section-data)
+         has-picture? (and picture (not= picture ""))
          visible? (not= 0 (get section-data :visible 1))]
      (when visible?
        [:div.report-preview-section
         {:class (name section-key)
          :style (cond-> {:min-height height :position "relative"}
-                  back-color (assoc :background-color back-color))}
+                  back-color (assoc :background-color back-color)
+                  has-picture?
+                  (assoc :background-image (str "url(" picture ")")
+                         :background-size (case (:picture-size-mode section-data)
+                                            "stretch" "100% 100%" "zoom" "contain" "auto")
+                         :background-repeat "no-repeat"
+                         :background-position "center"))}
         (for [[idx ctrl] (map-indexed vector controls)]
           ^{:key idx}
           [render-report-control ctrl record expr-context])]))))

@@ -216,6 +216,12 @@ function Export-SectionToObject {
     $backColor = Safe-GetProperty $section "BackColor"
     if ($null -ne $backColor -and $backColor -ge 0) { $obj.backColor = [long]$backColor }
 
+    # Picture (section-level background image)
+    $picture = Safe-GetProperty $section "Picture"
+    if ($picture) { $obj.picture = $picture }
+    $pictureSizeMode = Safe-GetProperty $section "PictureSizeMode"
+    if ($null -ne $pictureSizeMode) { $obj.pictureSizeMode = [int]$pictureSizeMode }
+
     # Section events
     $events = @(
         @("OnFormat", "hasFormatEvent"),
@@ -302,6 +308,12 @@ try {
             $reportObj[$evt[1]] = $true
         }
     }
+
+    # Report-level picture (background image)
+    $picture = Safe-GetProperty $report "Picture"
+    if ($picture) { $reportObj.picture = $picture }
+    $pictureSizeMode = Safe-GetProperty $report "PictureSizeMode"
+    if ($null -ne $pictureSizeMode) { $reportObj.pictureSizeMode = [int]$pictureSizeMode }
 
     # Grouping and sorting
     $grouping = @()

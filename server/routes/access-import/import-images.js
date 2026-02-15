@@ -78,7 +78,7 @@ module.exports = function(router, pool) {
         byObject[key].push(img);
       }
 
-      // 3. For each object, load definition, patch image controls, save new version
+      // 3. For each object, load definition, patch images, save new version
       const updated = [];
 
       for (const [key, imgs] of Object.entries(byObject)) {
@@ -102,25 +102,34 @@ module.exports = function(router, pool) {
 
           let modified = false;
 
-          // Build lookup: controlName -> data URI
-          const imageMap = {};
           for (const img of imgs) {
-            imageMap[img.controlName] = `data:${img.mimeType};base64,${img.base64}`;
-          }
+            const dataURI = `data:${img.mimeType};base64,${img.base64}`;
 
-          // Scan all sections for matching image/object-frame controls
-          for (const [sectionKey, section] of Object.entries(definition)) {
-            if (!section || !Array.isArray(section.controls)) continue;
-            for (const ctrl of section.controls) {
-              const ctrlName = ctrl.name || ctrl.id || '';
-              if (imageMap[ctrlName]) {
-                ctrl.picture = imageMap[ctrlName];
+            if (img.controlName) {
+              // Control-level: scan sections for matching image/object-frame controls
+              for (const [sectionKey, section] of Object.entries(definition)) {
+                if (!section || !Array.isArray(section.controls)) continue;
+                for (const ctrl of section.controls) {
+                  const ctrlName = ctrl.name || ctrl.id || '';
+                  if (ctrlName === img.controlName) {
+                    ctrl.picture = dataURI;
+                    modified = true;
+                    updated.push({ objectType, objectName, controlName: ctrlName });
+                  }
+                }
+              }
+            } else if (img.level === 'form' || img.level === 'report') {
+              // Object-level: set picture on the top-level definition
+              definition.picture = dataURI;
+              modified = true;
+              updated.push({ objectType, objectName, level: img.level });
+            } else if (img.level === 'section' && img.sectionName) {
+              // Section-level: set picture on the section object
+              const secKey = img.sectionName;
+              if (definition[secKey] && typeof definition[secKey] === 'object') {
+                definition[secKey].picture = dataURI;
                 modified = true;
-                updated.push({
-                  objectType,
-                  objectName,
-                  controlName: ctrlName
-                });
+                updated.push({ objectType, objectName, level: 'section', sectionName: secKey });
               }
             }
           }
@@ -207,8 +216,35 @@ module.exports = function(router, pool) {
         for (const row of rows) {
           let def;
           try { def = JSON.parse(row.definition); } catch { continue; }
+
+          // Object-level picture (form/report background)
+          if (def.picture !== undefined) {
+            images.push({
+              name: `${row.name} (${objectType} background)`,
+              objectType,
+              objectName: row.name,
+              level: objectType,
+              imported: !!(def.picture && def.picture.startsWith('data:'))
+            });
+          }
+
           for (const [key, section] of Object.entries(def)) {
-            if (!section || !Array.isArray(section.controls)) continue;
+            if (!section || typeof section !== 'object') continue;
+
+            // Section-level picture
+            if (section.picture !== undefined) {
+              images.push({
+                name: `${row.name} / ${key} (section background)`,
+                objectType,
+                objectName: row.name,
+                level: 'section',
+                sectionName: key,
+                imported: !!(section.picture && section.picture.startsWith('data:'))
+              });
+            }
+
+            // Control-level images
+            if (!Array.isArray(section.controls)) continue;
             for (const ctrl of section.controls) {
               if (ctrl.type === 'image' || ctrl.type === ':image' ||
                   ctrl.type === 'object-frame' || ctrl.type === ':object-frame') {

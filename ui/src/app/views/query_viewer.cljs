@@ -1,6 +1,7 @@
 (ns app.views.query-viewer
   "Query viewer - results, SQL, and design views"
   (:require [reagent.core :as r]
+            [clojure.string :as str]
             [app.state :as state]
             [app.state-query :as state-query]))
 
@@ -84,9 +85,18 @@
   []
   (let [sql (get-in @state/app-state [:query-viewer :sql] "")
         query-info (get-in @state/app-state [:query-viewer :query-info])
+        is-new? (:is-new? query-info)
+        pending-name (get-in @state/app-state [:query-viewer :pending-name])
         loading? (get-in @state/app-state [:query-viewer :loading?])
         error (get-in @state/app-state [:query-viewer :error])]
     [:div.query-sql-view
+     (when is-new?
+       [:div.query-name-input
+        [:label "View name: "]
+        [:input {:type "text"
+                 :value (or pending-name "")
+                 :placeholder "my_query_name"
+                 :on-change #(state-query/update-query-name! (.. % -target -value))}]])
      [:div.sql-editor-container
       [:textarea.sql-editor
        {:value sql
@@ -109,6 +119,11 @@
        {:on-click #(state-query/run-query!)
         :disabled loading?}
        (if loading? "Running..." "Run Query")]
+      [:button.secondary-btn
+       {:on-click #(state-query/save-query-via-llm!)
+        :disabled (or (str/blank? sql)
+                      (and is-new? (str/blank? pending-name)))}
+       "Save"]
       [:span.hint "Ctrl+Enter to run"]]]))
 
 ;; ============================================================

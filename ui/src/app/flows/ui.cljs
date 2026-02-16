@@ -276,3 +276,29 @@
     :fn (fn [ctx]
           (state/load-access-databases! (:locations ctx))
           ctx)}])
+
+;; ============================================================
+;; APP MODE & LOG SELECTION
+;; ============================================================
+
+(defn set-app-mode-flow
+  "Switch between :import, :run, and :logs modes.
+   Original: state.cljs/set-app-mode!
+
+   Context requires: {:mode keyword}"
+  []
+  [{:step :do
+    :fn (fn [ctx]
+          (state/set-app-mode! (:mode ctx))
+          ctx)}])
+
+(defn select-log-entry-flow
+  "Select a log entry in the sidebar for detail view.
+   Original: state.cljs/select-log-entry!
+
+   Context requires: {:entry map}"
+  []
+  [{:step :do
+    :fn (fn [ctx]
+          (state/select-log-entry! (:entry ctx))
+          ctx)}])

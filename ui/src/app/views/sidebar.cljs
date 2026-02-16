@@ -228,7 +228,7 @@
             ^{:key entry-id}
             [:li.log-entry-item
              {:class (when selected? "selected")
-              :on-click #(state/select-log-entry! entry)}
+              :on-click #(f/run-fire-and-forget! (ui-flow/select-log-entry-flow) {:entry entry})}
              [:span.log-entry-type (type-icon (:source_object_type entry))]
              [:span.log-entry-name (:source_object_name entry)]
              [:span.log-entry-meta

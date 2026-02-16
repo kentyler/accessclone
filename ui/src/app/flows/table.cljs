@@ -193,3 +193,31 @@
     :fn (fn [ctx]
           (state-table/refresh-table-data!)
           ctx)}])
+
+;; ============================================================
+;; CLIPBOARD OPERATIONS
+;; ============================================================
+
+(def cut-table-cell-flow
+  "Cut the selected table cell to clipboard.
+   Original: state_table.cljs/cut-table-cell!"
+  [{:step :do
+    :fn (fn [ctx]
+          (state-table/cut-table-cell!)
+          ctx)}])
+
+(def copy-table-cell-flow
+  "Copy the selected table cell to clipboard.
+   Original: state_table.cljs/copy-table-cell!"
+  [{:step :do
+    :fn (fn [ctx]
+          (state-table/copy-table-cell!)
+          ctx)}])
+
+(def paste-table-cell-flow
+  "Paste clipboard into the selected table cell.
+   Original: state_table.cljs/paste-table-cell!"
+  [{:step :do
+    :fn (fn [ctx]
+          (state-table/paste-table-cell!)
+          ctx)}])

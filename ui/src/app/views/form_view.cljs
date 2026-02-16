@@ -56,10 +56,10 @@
       #(js/alert (str "Unknown action: " (:action on-click-prop))))
 
     (and (map? on-click-prop) (:function on-click-prop))
-    #(state-form/call-session-function! (:function on-click-prop))
+    #(f/run-fire-and-forget! (form-flow/call-session-function-flow) {:function-name (:function on-click-prop)})
 
     (and (string? on-click-prop) (not (str/blank? on-click-prop)))
-    #(state-form/call-session-function! on-click-prop)
+    #(f/run-fire-and-forget! (form-flow/call-session-function-flow) {:function-name on-click-prop})
 
     :else nil))
 
@@ -136,7 +136,7 @@
           ^{:key idx} [:option {:value bv} display])))))
 
 (defn render-combobox [ctrl field value on-change opts]
-  (when-let [rs (:row-source ctrl)] (state-form/fetch-row-source! rs))
+  (when-let [rs (:row-source ctrl)] (f/run-fire-and-forget! (form-flow/fetch-row-source-flow) {:row-source rs}))
   (fn [ctrl field value on-change {:keys [allow-edits? tab-idx]}]
     [:select.view-select
      (cond-> {:value (str (or value "")) :disabled (not allow-edits?)
@@ -164,7 +164,7 @@
     [:div.view-image-placeholder "\uD83D\uDDBC No Image"]))
 
 (defn render-listbox [ctrl field value on-change opts]
-  (when-let [rs (:row-source ctrl)] (state-form/fetch-row-source! rs))
+  (when-let [rs (:row-source ctrl)] (f/run-fire-and-forget! (form-flow/fetch-row-source-flow) {:row-source rs}))
   (fn [ctrl field value on-change {:keys [allow-edits? tab-idx]}]
     [:select.view-listbox
      (cond-> {:multiple true :size (or (:list-rows ctrl) 5)
@@ -269,14 +269,16 @@
      [:div.subform-toolbar
       (when allow-additions?
         [:button {:title "New Record"
-                  :on-click #(state-form/new-subform-record!
-                               source-form link-child-fields link-master-fields current-record)}
+                  :on-click #(f/run-fire-and-forget! (form-flow/new-subform-record-flow)
+                               {:source-form source-form :link-child-fields link-child-fields
+                                :link-master-fields link-master-fields :current-record current-record})}
          "+"])
       (when (and allow-deletions? @selected)
         [:button.subform-delete-btn
          {:title "Delete Record"
           :on-click #(when (js/confirm "Delete this record?")
-                       (state-form/delete-subform-record! source-form (:row @selected))
+                       (f/run-fire-and-forget! (form-flow/delete-subform-record-flow)
+                         {:source-form source-form :row (:row @selected)})
                        (reset! selected nil)
                        (reset! editing nil))}
          "\u2715"])])])
@@ -367,7 +369,7 @@
         selected (r/atom nil)
         editing (r/atom nil)
         edit-value (r/atom "")]
-    (when source-form (state-form/fetch-subform-definition! source-form))
+    (when source-form (f/run-fire-and-forget! (form-flow/fetch-subform-definition-flow) {:source-form source-form}))
     (fn [ctrl _field _value _on-change _opts]
       (let [source-form (or (:source-form ctrl) (:source_form ctrl))
             link-child (or (:link-child-fields ctrl) (:link_child_fields ctrl))
@@ -378,7 +380,9 @@
             {:keys [allow-edits? allow-additions? allow-deletions? child-rs]}
             (subform-definition-props definition)
             _ (when (and source-form child-rs (seq link-child) (seq link-master))
-                (state-form/fetch-subform-records! source-form child-rs link-child link-master current-record))
+                (f/run-fire-and-forget! (form-flow/fetch-subform-records-flow)
+                  {:source-form source-form :child-rs child-rs :link-child link-child
+                   :link-master link-master :current-record current-record}))
             records (when source-form
                       (get-in @state/app-state [:form-editor :subform-cache source-form :records]))
             commit-edit! (fn []
@@ -387,7 +391,8 @@
                                                     (get (nth records row) col) ""))
                                    new-val @edit-value]
                                (when (not= old-val new-val)
-                                 (state-form/save-subform-cell! source-form row col new-val)))
+                                 (f/run-fire-and-forget! (form-flow/save-subform-cell-flow)
+                                  {:source-form source-form :row row :col col :new-val new-val})))
                              (reset! editing nil)))]
         [:div.view-subform
          [subform-toolbar source-form definition allow-additions? allow-deletions?
@@ -466,9 +471,9 @@
       [:div.context-menu
        {:style {:left (:x menu) :top (:y menu)}
         :on-mouse-leave #(t/dispatch! :hide-form-context-menu)}
-       [context-menu-item "Cut" (and has-rec? can-edit? can-del?) state-form/cut-form-record!]
-       [context-menu-item "Copy" has-rec? state-form/copy-form-record!]
-       [context-menu-item "Paste" (and has-clip? can-add?) state-form/paste-form-record!]
+       [context-menu-item "Cut" (and has-rec? can-edit? can-del?) #(f/run-fire-and-forget! form-flow/cut-form-record-flow)]
+       [context-menu-item "Copy" has-rec? #(f/run-fire-and-forget! form-flow/copy-form-record-flow)]
+       [context-menu-item "Paste" (and has-clip? can-add?) #(f/run-fire-and-forget! form-flow/paste-form-record-flow)]
        [:div.menu-divider]
        [context-menu-item "New Record" can-add? #(t/dispatch! :new-record)]
        [context-menu-item "Delete Record" (and has-rec? can-del?)
@@ -674,7 +679,7 @@
         record-pos (or (:record-position fe) {:current 0 :total 0})
         record-source (:record-source current)
         continuous? (= (or (:default-view current) "Single Form") "Continuous Forms")
-        on-change (fn [field value] (state-form/update-record-field! field value))
+        on-change (fn [field value] (f/run-fire-and-forget! (form-flow/update-record-field-flow) {:field field :value value}))
         on-select (fn [idx] (f/run-fire-and-forget! form-flow/navigate-to-record-flow {:position (inc idx)}))
         opts (form-view-opts current)
         scroll-bars (or (:scroll-bars current) :both)

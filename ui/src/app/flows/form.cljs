@@ -6,6 +6,7 @@
                                           build-data-query-params record->api-map
                                           detect-pk-field pk-value-for-record
                                           normalize-control]]
+            [app.state-form :as state-form]
             [app.effects.http :as http]
             [app.transforms.core :as t]
             [clojure.string :as str]
@@ -283,3 +284,132 @@
             :name :sync-form-state
             :opts-fn (fn [ctx] {:json-params {:sessionId session-id :entries (:entries ctx)}})
             :as :response}]}])
+
+;; ============================================================
+;; ROW-SOURCE & SUBFORM OPERATIONS
+;; ============================================================
+
+(defn fetch-row-source-flow
+  "Fetch row-source data for a combo/list box.
+   Original: state_form.cljs/fetch-row-source!
+
+   Context requires: {:row-source string}"
+  []
+  [{:step :do
+    :fn (fn [ctx]
+          (state-form/fetch-row-source! (:row-source ctx))
+          ctx)}])
+
+(defn fetch-subform-definition-flow
+  "Fetch definition for a subform control.
+   Original: state_form.cljs/fetch-subform-definition!
+
+   Context requires: {:source-form string}"
+  []
+  [{:step :do
+    :fn (fn [ctx]
+          (state-form/fetch-subform-definition! (:source-form ctx))
+          ctx)}])
+
+(defn fetch-subform-records-flow
+  "Fetch records for a subform control.
+   Original: state_form.cljs/fetch-subform-records!
+
+   Context requires: {:source-form :child-rs :link-child :link-master :current-record}"
+  []
+  [{:step :do
+    :fn (fn [ctx]
+          (state-form/fetch-subform-records!
+            (:source-form ctx) (:child-rs ctx)
+            (:link-child ctx) (:link-master ctx) (:current-record ctx))
+          ctx)}])
+
+(defn save-subform-cell-flow
+  "Save a single cell edit in a subform.
+   Original: state_form.cljs/save-subform-cell!
+
+   Context requires: {:source-form :row :col :new-val}"
+  []
+  [{:step :do
+    :fn (fn [ctx]
+          (state-form/save-subform-cell!
+            (:source-form ctx) (:row ctx) (:col ctx) (:new-val ctx))
+          ctx)}])
+
+(defn new-subform-record-flow
+  "Add a new record to a subform.
+   Original: state_form.cljs/new-subform-record!
+
+   Context requires: {:source-form :link-child-fields :link-master-fields :current-record}"
+  []
+  [{:step :do
+    :fn (fn [ctx]
+          (state-form/new-subform-record!
+            (:source-form ctx) (:link-child-fields ctx)
+            (:link-master-fields ctx) (:current-record ctx))
+          ctx)}])
+
+(defn delete-subform-record-flow
+  "Delete a record from a subform.
+   Original: state_form.cljs/delete-subform-record!
+
+   Context requires: {:source-form :row}"
+  []
+  [{:step :do
+    :fn (fn [ctx]
+          (state-form/delete-subform-record! (:source-form ctx) (:row ctx))
+          ctx)}])
+
+;; ============================================================
+;; CLIPBOARD OPERATIONS
+;; ============================================================
+
+(def cut-form-record-flow
+  "Cut the current form record to clipboard.
+   Original: state_form.cljs/cut-form-record!"
+  [{:step :do
+    :fn (fn [ctx]
+          (state-form/cut-form-record!)
+          ctx)}])
+
+(def copy-form-record-flow
+  "Copy the current form record to clipboard.
+   Original: state_form.cljs/copy-form-record!"
+  [{:step :do
+    :fn (fn [ctx]
+          (state-form/copy-form-record!)
+          ctx)}])
+
+(def paste-form-record-flow
+  "Paste record from clipboard into the form.
+   Original: state_form.cljs/paste-form-record!"
+  [{:step :do
+    :fn (fn [ctx]
+          (state-form/paste-form-record!)
+          ctx)}])
+
+;; ============================================================
+;; FIELD UPDATE & SESSION FUNCTIONS
+;; ============================================================
+
+(defn update-record-field-flow
+  "Update a single field in the current record.
+   Original: state_form.cljs/update-record-field!
+
+   Context requires: {:field :value}"
+  []
+  [{:step :do
+    :fn (fn [ctx]
+          (state-form/update-record-field! (:field ctx) (:value ctx))
+          ctx)}])
+
+(defn call-session-function-flow
+  "Call a session function (button on-click handler).
+   Original: state_form.cljs/call-session-function!
+
+   Context requires: {:function-name string}"
+  []
+  [{:step :do
+    :fn (fn [ctx]
+          (state-form/call-session-function! (:function-name ctx))
+          ctx)}])

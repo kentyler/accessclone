@@ -311,9 +311,9 @@
         :on-mouse-leave #(t/dispatch! :hide-table-context-menu)}
        [menu-action "New Record" #(f/run-fire-and-forget! table-flow/new-table-record-flow)]
        [:div.menu-divider]
-       [menu-action "Cut" state-table/cut-table-cell!]
-       [menu-action "Copy" state-table/copy-table-cell!]
-       [menu-action "Paste" state-table/paste-table-cell!]
+       [menu-action "Cut" #(f/run-fire-and-forget! table-flow/cut-table-cell-flow)]
+       [menu-action "Copy" #(f/run-fire-and-forget! table-flow/copy-table-cell-flow)]
+       [menu-action "Paste" #(f/run-fire-and-forget! table-flow/paste-table-cell-flow)]
        [:div.menu-divider]
        [menu-action "Delete Record"
         #(when (js/confirm "Delete this record?") (f/run-fire-and-forget! table-flow/delete-table-record-flow))

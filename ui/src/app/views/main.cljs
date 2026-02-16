@@ -83,7 +83,7 @@
       [:input {:type "radio"
                :name "app-mode"
                :checked (= mode :import)
-               :on-change #(do (state/set-app-mode! :import)
+               :on-change #(do (f/run-fire-and-forget! (ui-flow/set-app-mode-flow) {:mode :import})
                                (access-db-viewer/restore-import-state!))}]
       "Import"]
      [:label.mode-option
@@ -91,14 +91,14 @@
       [:input {:type "radio"
                :name "app-mode"
                :checked (= mode :run)
-               :on-change #(state/set-app-mode! :run)}]
+               :on-change #(f/run-fire-and-forget! (ui-flow/set-app-mode-flow) {:mode :run})}]
       "Run"]
      [:label.mode-option
       {:class (when (= mode :logs) "active")}
       [:input {:type "radio"
                :name "app-mode"
                :checked (= mode :logs)
-               :on-change #(state/set-app-mode! :logs)}]
+               :on-change #(f/run-fire-and-forget! (ui-flow/set-app-mode-flow) {:mode :logs})}]
       "Logs"]]))
 
 (defn header []

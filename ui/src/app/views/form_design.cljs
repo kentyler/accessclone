@@ -4,6 +4,9 @@
             [app.state :as state]
             [app.transforms.core :as t]
             [app.state-form :as state-form]
+            [app.flows.core :as f]
+            [app.flows.form :as form-flow]
+            [app.flows.navigation :as nav]
             [app.views.form-utils :as form-utils]
             [app.views.control-palette :as palette]))
 
@@ -284,13 +287,14 @@
       [:div.context-menu
        {:style {:left (:x ctx-menu) :top (:y ctx-menu)}}
        [ctx-menu-item "Save" #(if (= (state-form/get-view-mode) :view)
-                                (state-form/save-current-record!) (state-form/save-form!))]
-       [ctx-menu-item "Close" state-form/close-current-tab!]
-       [ctx-menu-item "Close All" state-form/close-all-tabs!]
+                                (f/run-fire-and-forget! form-flow/save-current-record-flow)
+                                (f/run-fire-and-forget! form-flow/save-form-flow))]
+       [ctx-menu-item "Close" #(f/run-fire-and-forget! nav/close-current-tab-flow)]
+       [ctx-menu-item "Close All" #(f/run-fire-and-forget! nav/close-all-tabs-flow)]
        [:div.context-menu-separator]
-       [ctx-menu-item "Form View" #(state-form/set-view-mode! :view)
+       [ctx-menu-item "Form View" #(f/run-fire-and-forget! form-flow/set-view-mode-flow {:mode :view})
         (when (= (state-form/get-view-mode) :view) "active")]
-       [ctx-menu-item "Design View" #(state-form/set-view-mode! :design)
+       [ctx-menu-item "Design View" #(f/run-fire-and-forget! form-flow/set-view-mode-flow {:mode :design})
         (when (= (state-form/get-view-mode) :design) "active")]])))
 
 (defn- calc-controls-width

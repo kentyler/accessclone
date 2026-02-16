@@ -4,6 +4,9 @@
             [app.state :as state]
             [app.transforms.core :as t]
             [app.state-form :as state-form]
+            [app.flows.core :as f]
+            [app.flows.form :as form-flow]
+            [app.flows.navigation :as nav]
             [app.views.form-utils :as fu]
             [app.views.expressions :as expr]
             [clojure.string :as str]))
@@ -45,11 +48,11 @@
   (cond
     (and (map? on-click-prop) (:action on-click-prop))
     (case (keyword (:action on-click-prop))
-      :save-record   #(state-form/save-current-record!)
+      :save-record   #(f/run-fire-and-forget! form-flow/save-current-record-flow)
       :new-record    #(t/dispatch! :new-record)
-      :delete-record #(when (js/confirm "Delete this record?") (state-form/delete-current-record!))
-      :close-form    #(state-form/close-current-tab!)
-      :refresh       #(state-form/set-view-mode! :view)
+      :delete-record #(when (js/confirm "Delete this record?") (f/run-fire-and-forget! form-flow/delete-current-record-flow))
+      :close-form    #(f/run-fire-and-forget! nav/close-current-tab-flow)
+      :refresh       #(f/run-fire-and-forget! form-flow/set-view-mode-flow {:mode :view})
       #(js/alert (str "Unknown action: " (:action on-click-prop))))
 
     (and (map? on-click-prop) (:function on-click-prop))
@@ -65,15 +68,15 @@
   [text-lower button-text]
   (cond
     (or (= text-lower "close") (str/includes? text-lower "close form"))
-    #(state-form/close-current-tab!)
+    #(f/run-fire-and-forget! nav/close-current-tab-flow)
     (or (= text-lower "save") (str/includes? text-lower "save record"))
-    #(state-form/save-current-record!)
+    #(f/run-fire-and-forget! form-flow/save-current-record-flow)
     (or (= text-lower "new record") (= text-lower "new") (str/includes? text-lower "add new"))
     #(t/dispatch! :new-record)
     (or (= text-lower "delete") (= text-lower "delete record"))
-    #(when (js/confirm "Delete this record?") (state-form/delete-current-record!))
+    #(when (js/confirm "Delete this record?") (f/run-fire-and-forget! form-flow/delete-current-record-flow))
     (or (= text-lower "refresh") (= text-lower "requery"))
-    #(state-form/set-view-mode! :view)
+    #(f/run-fire-and-forget! form-flow/set-view-mode-flow {:mode :view})
     :else
     #(js/alert (str "Button clicked: " button-text))))
 
@@ -469,7 +472,7 @@
        [:div.menu-divider]
        [context-menu-item "New Record" can-add? #(t/dispatch! :new-record)]
        [context-menu-item "Delete Record" (and has-rec? can-del?)
-        #(when (js/confirm "Delete this record?") (state-form/delete-current-record!)) "danger"]])))
+        #(when (js/confirm "Delete this record?") (f/run-fire-and-forget! form-flow/delete-current-record-flow)) "danger"]])))
 
 ;; ============================================================
 ;; RECORD SELECTOR & SECTIONS
@@ -573,19 +576,19 @@
         at-last? (>= cur total)]
     [:div.record-nav-bar
      [:span.nav-label "Record:"]
-     [nav-btn "First" (or no-recs? at-first?) #(state-form/navigate-to-record! 1) "|◀"]
-     [nav-btn "Previous" (or no-recs? at-first?) #(state-form/navigate-to-record! (dec cur)) "◀"]
+     [nav-btn "First" (or no-recs? at-first?) #(f/run-fire-and-forget! form-flow/navigate-to-record-flow {:position 1}) "|◀"]
+     [nav-btn "Previous" (or no-recs? at-first?) #(f/run-fire-and-forget! form-flow/navigate-to-record-flow {:position (dec cur)}) "◀"]
      [:span.record-counter (if (pos? total) (str cur " of " total) "0 of 0")]
-     [nav-btn "Next" (or no-recs? at-last?) #(state-form/navigate-to-record! (inc cur)) "▶"]
-     [nav-btn "Last" (or no-recs? at-last?) #(state-form/navigate-to-record! total) "▶|"]
+     [nav-btn "Next" (or no-recs? at-last?) #(f/run-fire-and-forget! form-flow/navigate-to-record-flow {:position (inc cur)}) "▶"]
+     [nav-btn "Last" (or no-recs? at-last?) #(f/run-fire-and-forget! form-flow/navigate-to-record-flow {:position total}) "▶|"]
      [nav-btn "New Record" (not allow-additions?) #(t/dispatch! :new-record) "▶*"]
      [:button.nav-btn.delete-btn
       {:title "Delete Record" :disabled (or no-recs? (not allow-deletions?))
-       :on-click #(when (js/confirm "Delete this record?") (state-form/delete-current-record!))} "✕"]
+       :on-click #(when (js/confirm "Delete this record?") (f/run-fire-and-forget! form-flow/delete-current-record-flow))} "✕"]
      [:span.nav-separator]
      [:button.nav-btn.save-btn
       {:title "Save Record" :class (when record-dirty? "dirty")
-       :disabled (not record-dirty?) :on-click state-form/save-current-record!}
+       :disabled (not record-dirty?) :on-click #(f/run-fire-and-forget! form-flow/save-current-record-flow)}
       "Save"]]))
 
 (defn- canvas-context-menu
@@ -597,16 +600,16 @@
                           (fn [e] (.stopPropagation e) (t/dispatch! :hide-context-menu) (action)))]
         [:div.context-menu
          {:style {:left (:x ctx-menu) :top (:y ctx-menu)}}
-         [:div.context-menu-item {:on-click (dismiss-and state-form/save-current-record!)} "Save"]
-         [:div.context-menu-item {:on-click (dismiss-and state-form/close-current-tab!)} "Close"]
-         [:div.context-menu-item {:on-click (dismiss-and state-form/close-all-tabs!)} "Close All"]
+         [:div.context-menu-item {:on-click (dismiss-and #(f/run-fire-and-forget! form-flow/save-current-record-flow))} "Save"]
+         [:div.context-menu-item {:on-click (dismiss-and #(f/run-fire-and-forget! nav/close-current-tab-flow))} "Close"]
+         [:div.context-menu-item {:on-click (dismiss-and #(f/run-fire-and-forget! nav/close-all-tabs-flow))} "Close All"]
          [:div.context-menu-separator]
          [:div.context-menu-item
           {:class (when (= (state-form/get-view-mode) :view) "active")
-           :on-click (dismiss-and #(state-form/set-view-mode! :view))} "Form View"]
+           :on-click (dismiss-and #(f/run-fire-and-forget! form-flow/set-view-mode-flow {:mode :view}))} "Form View"]
          [:div.context-menu-item
           {:class (when (= (state-form/get-view-mode) :design) "active")
-           :on-click (dismiss-and #(state-form/set-view-mode! :design))} "Design View"]]))))
+           :on-click (dismiss-and #(f/run-fire-and-forget! form-flow/set-view-mode-flow {:mode :design}))} "Design View"]]))))
 
 (defn- continuous-form-body
   "Render the continuous form body with header, scrolling detail rows, and footer."
@@ -672,7 +675,7 @@
         record-source (:record-source current)
         continuous? (= (or (:default-view current) "Single Form") "Continuous Forms")
         on-change (fn [field value] (state-form/update-record-field! field value))
-        on-select (fn [idx] (state-form/navigate-to-record! (inc idx)))
+        on-select (fn [idx] (f/run-fire-and-forget! form-flow/navigate-to-record-flow {:position (inc idx)}))
         opts (form-view-opts current)
         scroll-bars (or (:scroll-bars current) :both)
         has-data? (and record-source

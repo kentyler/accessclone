@@ -2,7 +2,7 @@
   "UI flows — database loading, object loading, UI state persistence.
 
    Decomposes async functions from state.cljs into transform+effect sequences."
-  (:require [app.state :refer [app-state api-base db-headers session-id]]
+  (:require [app.state :as state :refer [app-state api-base db-headers session-id]]
             [app.effects.http :as http]
             [app.transforms.core :as t]
             [cljs.core.async :refer [go <!]]))
@@ -249,3 +249,30 @@
             :fn (fn [ctx]
                   (swap! app-state assoc :config (get-in ctx [:response :data]))
                   ctx)}]}])
+
+;; ============================================================
+;; SAVE CONFIG
+;; ============================================================
+
+(def save-config-flow
+  "Save app configuration to server.
+   Original: state.cljs/save-config!"
+  [{:step :do
+    :fn (fn [ctx]
+          (state/save-config!)
+          ctx)}])
+
+;; ============================================================
+;; ACCESS DATABASE SCAN
+;; ============================================================
+
+(defn load-access-databases-flow
+  "Scan for Access database files on disk.
+   Original: state.cljs/load-access-databases!
+
+   Context requires: {:locations string-or-nil}"
+  []
+  [{:step :do
+    :fn (fn [ctx]
+          (state/load-access-databases! (:locations ctx))
+          ctx)}])

@@ -3,6 +3,7 @@
 
    Decomposes async functions from state_query.cljs into transform+effect sequences."
   (:require [app.state :as state :refer [app-state api-base db-headers]]
+            [app.state-query :as state-query]
             [app.effects.http :as http]
             [app.transforms.core :as t]
             [clojure.string :as str]
@@ -96,4 +97,31 @@
               (state/log-event! "error" "Query execution failed" "run-query")
               (swap! app-state assoc-in [:query-viewer :error]
                      (get-in ctx [:query-response :data :error] "Query failed"))))
+          ctx)}])
+
+;; ============================================================
+;; VIEW MODE
+;; ============================================================
+
+(defn set-query-view-mode-flow
+  "Switch query view mode — load design data if entering :design.
+   Original: state_query.cljs/set-query-view-mode!
+
+   Context requires: {:mode :results|:sql|:design}"
+  []
+  [{:step :do
+    :fn (fn [ctx]
+          (state-query/set-query-view-mode! (:mode ctx))
+          ctx)}])
+
+;; ============================================================
+;; SAVE VIA LLM
+;; ============================================================
+
+(def save-query-via-llm-flow
+  "Send current SQL to LLM for review and save via chat tool.
+   Original: state_query.cljs/save-query-via-llm!"
+  [{:step :do
+    :fn (fn [ctx]
+          (state-query/save-query-via-llm!)
           ctx)}])

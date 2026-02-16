@@ -3,7 +3,9 @@
   (:require [reagent.core :as r]
             [app.state :as state]
             [app.transforms.core :as t]
-            [app.state-table :as state-table]))
+            [app.state-table :as state-table]
+            [app.flows.core :as f]
+            [app.flows.table :as table-flow]))
 
 ;; ============================================================
 ;; TYPE MAPPING CONSTANTS
@@ -307,14 +309,14 @@
       [:div.context-menu
        {:style {:left (:x menu) :top (:y menu)}
         :on-mouse-leave #(t/dispatch! :hide-table-context-menu)}
-       [menu-action "New Record" state-table/new-table-record!]
+       [menu-action "New Record" #(f/run-fire-and-forget! table-flow/new-table-record-flow)]
        [:div.menu-divider]
        [menu-action "Cut" state-table/cut-table-cell!]
        [menu-action "Copy" state-table/copy-table-cell!]
        [menu-action "Paste" state-table/paste-table-cell!]
        [:div.menu-divider]
        [menu-action "Delete Record"
-        #(when (js/confirm "Delete this record?") (state-table/delete-table-record!))
+        #(when (js/confirm "Delete this record?") (f/run-fire-and-forget! table-flow/delete-table-record-flow))
         :danger]])))
 
 ;; ============================================================
@@ -325,11 +327,11 @@
   "Handle keyboard events in an editing cell."
   [e]
   (case (.-key e)
-    "Enter" (do (state-table/save-table-cell! (.. e -target -value))
+    "Enter" (do (f/run-fire-and-forget! table-flow/save-table-cell-flow {:new-value (.. e -target -value)})
                 (t/dispatch! :stop-editing-cell))
     "Escape" (t/dispatch! :stop-editing-cell)
     "Tab" (do (.preventDefault e)
-              (state-table/save-table-cell! (.. e -target -value))
+              (f/run-fire-and-forget! table-flow/save-table-cell-flow {:new-value (.. e -target -value)})
               (t/dispatch! :stop-editing-cell)
               (t/dispatch! :move-to-next-cell (.-shiftKey e)))
     nil))
@@ -341,7 +343,7 @@
    [:input.cell-input
     {:type "text" :auto-focus true
      :default-value (if (nil? value) "" (str value))
-     :on-blur #(do (state-table/save-table-cell! (.. % -target -value))
+     :on-blur #(do (f/run-fire-and-forget! table-flow/save-table-cell-flow {:new-value (.. % -target -value)})
                    (t/dispatch! :stop-editing-cell))
      :on-key-down cell-key-handler}]])
 
@@ -428,10 +430,10 @@
     [:<>
      [:button.toolbar-btn
       {:class (when (= view-mode :design) "active")
-       :on-click #(state-table/set-table-view-mode! :design)} "Design"]
+       :on-click #(f/run-fire-and-forget! (table-flow/set-table-view-mode-flow) {:mode :design})} "Design"]
      [:button.toolbar-btn
       {:class (when (= view-mode :datasheet) "active")
-       :on-click #(state-table/set-table-view-mode! :datasheet)} "Datasheet"]]))
+       :on-click #(f/run-fire-and-forget! (table-flow/set-table-view-mode-flow) {:mode :datasheet})} "Datasheet"]]))
 
 (defn- toolbar-design-actions
   "Design mode field actions (PK toggle, delete)."
@@ -452,10 +454,12 @@
     :design [:<>
              [:button.secondary-btn {:disabled (not dirty?) :on-click #(t/dispatch! :revert-design)} "Undo All"]
              [:button.primary-btn {:disabled (not dirty?)
-                                   :on-click #(if new-table? (state-table/save-new-table!) (state-table/save-table-design!))} "Save"]]
+                                   :on-click #(if new-table?
+                                                (f/run-fire-and-forget! table-flow/save-new-table-flow)
+                                                (f/run-fire-and-forget! table-flow/save-table-design-flow))} "Save"]]
     :datasheet [:<>
-                [:button.primary-btn {:on-click #(state-table/new-table-record!)} "+ New"]
-                [:button.secondary-btn {:on-click #(state-table/refresh-table-data!)} "Refresh"]]
+                [:button.primary-btn {:on-click #(f/run-fire-and-forget! table-flow/new-table-record-flow)} "+ New"]
+                [:button.secondary-btn {:on-click #(f/run-fire-and-forget! table-flow/refresh-table-data-flow)} "Refresh"]]
     nil))
 
 (defn table-toolbar
@@ -490,7 +494,7 @@
         (let [table (first (filter #(= (:id %) (:id active-tab))
                                    (get-in @state/app-state [:objects :tables])))]
           (when (and table (not= (:id table) current-table-id))
-            (state-table/load-table-for-viewing! table))))
+            (f/run-fire-and-forget! (table-flow/load-table-for-viewing-flow) {:table table}))))
       [:div.table-viewer
        [table-toolbar]
        (case view-mode

@@ -2,7 +2,9 @@
   "Module viewer - displays VBA source; translation happens in chat panel"
   (:require [reagent.core :as r]
             [app.state :as state]
-            [app.transforms.core :as t]))
+            [app.transforms.core :as t]
+            [app.flows.core :as f]
+            [app.flows.module :as module-flow]))
 
 ;; ============================================================
 ;; VBA SOURCE - Read-only display
@@ -19,7 +21,7 @@
       [:span "VBA Source"]
       (when vba-source
         [:button.btn-secondary.btn-sm
-         {:on-click state/translate-module!
+         {:on-click #(f/run-fire-and-forget! module-flow/translate-module-flow)
           :disabled translating?}
          (if translating? "Translating..." "Translate to ClojureScript")])]
      [:div.code-container
@@ -44,7 +46,7 @@
       (when dirty?
         [:div.panel-actions
          [:button.btn-primary.btn-sm
-          {:on-click state/save-module-cljs!}
+          {:on-click #(f/run-fire-and-forget! module-flow/save-module-cljs-flow)}
           "Save"]])]
      (cond
        translating?
@@ -90,7 +92,7 @@
       [:span.info-label "Status:"]
       [:select.status-select
        {:value status
-        :on-change #(state/set-module-status! (.. % -target -value))}
+        :on-change #(f/run-fire-and-forget! module-flow/save-module-status-flow {:status (.. % -target -value)})}
        (for [[val label] status-options]
          ^{:key val} [:option {:value val} label])]]
      (when (= status "needs-review")
@@ -140,7 +142,7 @@
      [:div.toolbar-right
       (when (and is-vba? dirty?)
         [:button.btn-primary
-         {:on-click state/save-module-cljs!}
+         {:on-click #(f/run-fire-and-forget! module-flow/save-module-cljs-flow)}
          "Save Translation"])]]))
 
 ;; ============================================================
@@ -158,7 +160,7 @@
       (let [module (first (filter #(= (:id %) (:id active-tab))
                                   (get-in @state/app-state [:objects :modules])))]
         (when (and module (not= (:id module) current-module-id))
-          (state/load-module-for-viewing! module)))
+          (f/run-fire-and-forget! (module-flow/load-module-for-viewing-flow) {:module module})))
       [:div.module-viewer
        [module-toolbar]
        (if loading?

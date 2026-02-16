@@ -4,6 +4,9 @@
             [app.state :as state]
             [app.transforms.core :as t]
             [app.state-report :as state-report]
+            [app.flows.core :as f]
+            [app.flows.report :as report-flow]
+            [app.flows.chat :as chat-flow]
             [app.views.report-properties :as report-properties]
             [app.views.report-design :as report-design]
             [app.views.report-view :as report-view]
@@ -16,7 +19,7 @@
                         (clojure.string/join "\n" (map #(str "- " (:location %) ": " (:message %)) errors))
                         "\n\nHow can I fix these issues?")]
     (t/dispatch! :set-chat-input error-text)
-    (state/send-chat-message!)))
+    (f/run-fire-and-forget! chat-flow/send-chat-message-flow)))
 
 (defn report-lint-errors-panel
   "Display report lint errors with Ask AI button"
@@ -53,12 +56,12 @@
       [:button.toolbar-btn
        {:class (when (= view-mode :design) "active")
         :title "Design View"
-        :on-click #(state-report/set-report-view-mode! :design)}
+        :on-click #(f/run-fire-and-forget! (report-flow/set-report-view-mode-flow) {:mode :design})}
        "Design"]
       [:button.toolbar-btn
        {:class (when (= view-mode :preview) "active")
         :title "Preview"
-        :on-click #(state-report/set-report-view-mode! :preview)}
+        :on-click #(f/run-fire-and-forget! (report-flow/set-report-view-mode-flow) {:mode :preview})}
        "Preview"]
       (when (= view-mode :design)
         [:<>
@@ -79,7 +82,7 @@
        "Undo"]
       [:button.primary-btn
        {:disabled (not dirty?)
-        :on-click state-report/save-report!}
+        :on-click #(f/run-fire-and-forget! report-flow/save-report-flow)}
        "Save"]]]))
 
 (defn report-editor
@@ -93,7 +96,7 @@
       (let [report (first (filter #(= (:id %) (:id active-tab))
                                   (get-in @state/app-state [:objects :reports])))]
         (when (and report (not= (:id report) editing-report-id))
-          (state-report/load-report-for-editing! report)))
+          (f/run-fire-and-forget! (report-flow/load-report-for-editing-flow) {:report report})))
       (let [current-def (get-in @state/app-state [:report-editor :current])
             is-edn? (= "edn" (:_format current-def))]
         [:div.form-editor

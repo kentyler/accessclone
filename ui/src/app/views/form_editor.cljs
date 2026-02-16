@@ -4,6 +4,10 @@
             [app.state :as state]
             [app.transforms.core :as t]
             [app.state-form :as state-form]
+            [app.flows.core :as f]
+            [app.flows.form :as form-flow]
+            [app.flows.chat :as chat-flow]
+            [app.flows.navigation :as nav]
             [app.views.form-properties :as form-properties]
             [app.views.form-design :as form-design]
             [app.views.form-view :as form-view]
@@ -22,7 +26,7 @@
                         (clojure.string/join "\n" (map #(str "- " (:location %) ": " (:message %)) errors))
                         "\n\nHow can I fix these issues?")]
     (t/dispatch! :set-chat-input error-text)
-    (state/send-chat-message!)))
+    (f/run-fire-and-forget! chat-flow/send-chat-message-flow)))
 
 (defn lint-errors-panel
   "Display lint errors with Ask AI button"
@@ -59,12 +63,12 @@
       [:button.toolbar-btn
        {:class (when (= view-mode :design) "active")
         :title "Design View"
-        :on-click #(state-form/set-view-mode! :design)}
+        :on-click #(f/run-fire-and-forget! form-flow/set-view-mode-flow {:mode :design})}
        "Design"]
       [:button.toolbar-btn
        {:class (when (= view-mode :view) "active")
         :title "Form View"
-        :on-click #(state-form/set-view-mode! :view)}
+        :on-click #(f/run-fire-and-forget! form-flow/set-view-mode-flow {:mode :view})}
        "View"]
       (when (= view-mode :design)
         (let [hdr-visible? (not= 0 (get-in @state/app-state [:form-editor :current :header :visible] 1))]
@@ -81,7 +85,7 @@
        "Undo"]
       [:button.primary-btn
        {:disabled (not dirty?)
-        :on-click state-form/save-form!}
+        :on-click #(f/run-fire-and-forget! form-flow/save-form-flow)}
        "Save"]]]))
 
 (defn popup-context-menu
@@ -96,20 +100,20 @@
                      (.stopPropagation e)
                      (t/dispatch! :hide-context-menu)
                      (if (= (state-form/get-view-mode) :view)
-                       (state-form/save-current-record!)
-                       (state-form/save-form!)))}
+                       (f/run-fire-and-forget! form-flow/save-current-record-flow)
+                       (f/run-fire-and-forget! form-flow/save-form-flow)))}
         "Save"]
        [:div.context-menu-item
         {:on-click (fn [e]
                      (.stopPropagation e)
                      (t/dispatch! :hide-context-menu)
-                     (state-form/close-current-tab!))}
+                     (f/run-fire-and-forget! nav/close-current-tab-flow))}
         "Close"]
        [:div.context-menu-item
         {:on-click (fn [e]
                      (.stopPropagation e)
                      (t/dispatch! :hide-context-menu)
-                     (state-form/close-all-tabs!))}
+                     (f/run-fire-and-forget! nav/close-all-tabs-flow))}
         "Close All"]
        [:div.context-menu-separator]
        [:div.context-menu-item
@@ -117,14 +121,14 @@
          :on-click (fn [e]
                      (.stopPropagation e)
                      (t/dispatch! :hide-context-menu)
-                     (state-form/set-view-mode! :view))}
+                     (f/run-fire-and-forget! form-flow/set-view-mode-flow {:mode :view}))}
         "Form View"]
        [:div.context-menu-item
         {:class (when (= (state-form/get-view-mode) :design) "active")
          :on-click (fn [e]
                      (.stopPropagation e)
                      (t/dispatch! :hide-context-menu)
-                     (state-form/set-view-mode! :design))}
+                     (f/run-fire-and-forget! form-flow/set-view-mode-flow {:mode :design}))}
         "Design View"]])))
 
 (defn- popup-view [current-def modal?]
@@ -139,7 +143,7 @@
                           (.stopPropagation e)
                           (t/dispatch! :show-context-menu (.-clientX e) (.-clientY e)))}
       [:span.popup-title (or (:caption current-def) (:name current-def) "Form")]
-      [:button.popup-close {:on-click #(state-form/close-current-tab!)} "\u2715"]]
+      [:button.popup-close {:on-click #(f/run-fire-and-forget! nav/close-current-tab-flow)} "\u2715"]]
      [form-view/form-view]]
     [popup-context-menu]]])
 
@@ -167,7 +171,7 @@
       (let [form (first (filter #(= (:id %) (:id active-tab))
                                 (get-in @state/app-state [:objects :forms])))]
         (when (and form (not= (:id form) editing-form-id))
-          (state-form/load-form-for-editing! form)))
+          (f/run-fire-and-forget! (form-flow/load-form-for-editing-flow) {:form form})))
       [:div.form-editor
        [form-toolbar]
        (when (= view-mode :design) [palette/control-palette])

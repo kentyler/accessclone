@@ -4,6 +4,8 @@
             [app.state :as state]
             [app.transforms.core :as t]
             [app.state-form :as state-form]
+            [app.flows.core :as f]
+            [app.flows.navigation :as nav]
             [app.views.form-utils :as form-utils]))
 
 ;; Map event property keys to the has-*-event flag keys stored by the importer
@@ -49,7 +51,7 @@
         form-name (:name form-obj)
         module (when form-name (find-form-module form-name))]
     (if module
-      (state/open-object! :modules (:id module))
+      (f/run-fire-and-forget! (nav/open-object-flow) {:type :modules :id (:id module)})
       (let [modules (get-in @state/app-state [:objects :modules])
             available (str/join ", " (map :name modules))]
         (t/dispatch! :set-error

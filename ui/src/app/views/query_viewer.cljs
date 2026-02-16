@@ -4,7 +4,9 @@
             [clojure.string :as str]
             [app.state :as state]
             [app.transforms.core :as t]
-            [app.state-query :as state-query]))
+            [app.state-query :as state-query]
+            [app.flows.core :as f]
+            [app.flows.query :as query-flow]))
 
 ;; ============================================================
 ;; RESULTS VIEW - Datasheet showing query output
@@ -108,7 +110,7 @@
                        (when (and (= (.-key e) "Enter")
                                   (or (.-ctrlKey e) (.-metaKey e)))
                          (.preventDefault e)
-                         (state-query/run-query!)))}]]
+                         (f/run-fire-and-forget! query-flow/run-query-flow)))}]]
 
      (when error
        [:div.query-error
@@ -117,11 +119,11 @@
 
      [:div.sql-toolbar
       [:button.primary-btn
-       {:on-click #(state-query/run-query!)
+       {:on-click #(f/run-fire-and-forget! query-flow/run-query-flow)
         :disabled loading?}
        (if loading? "Running..." "Run Query")]
       [:button.secondary-btn
-       {:on-click #(state-query/save-query-via-llm!)
+       {:on-click #(f/run-fire-and-forget! query-flow/save-query-via-llm-flow)
         :disabled (or (str/blank? sql)
                       (and is-new? (str/blank? pending-name)))}
        "Save"]
@@ -322,21 +324,21 @@
       [:button.toolbar-btn
        {:class (when (= view-mode :results) "active")
         :title "Results View"
-        :on-click #(state-query/set-query-view-mode! :results)}
+        :on-click #(f/run-fire-and-forget! (query-flow/set-query-view-mode-flow) {:mode :results})}
        "Results"]
       [:button.toolbar-btn
        {:class (when (= view-mode :design) "active")
         :title "Design View"
-        :on-click #(state-query/set-query-view-mode! :design)}
+        :on-click #(f/run-fire-and-forget! (query-flow/set-query-view-mode-flow) {:mode :design})}
        "Design"]
       [:button.toolbar-btn
        {:class (when (= view-mode :sql) "active")
         :title "SQL View"
-        :on-click #(state-query/set-query-view-mode! :sql)}
+        :on-click #(f/run-fire-and-forget! (query-flow/set-query-view-mode-flow) {:mode :sql})}
        "SQL"]]
      [:div.toolbar-right
       [:button.secondary-btn
-       {:on-click #(state-query/run-query!)
+       {:on-click #(f/run-fire-and-forget! query-flow/run-query-flow)
         :disabled loading?}
        "Run"]]]))
 
@@ -355,7 +357,7 @@
       (let [query (first (filter #(= (:id %) (:id active-tab))
                                  (get-in @state/app-state [:objects :queries])))]
         (when (and query (not= (:id query) current-query-id))
-          (state-query/load-query-for-viewing! query)))
+          (f/run-fire-and-forget! (query-flow/load-query-for-viewing-flow) {:query query})))
       [:div.query-viewer
        [query-toolbar]
        (case view-mode

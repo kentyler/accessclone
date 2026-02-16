@@ -1,7 +1,9 @@
 (ns app.views.macro-viewer
   "Macro viewer - displays Access macro XML; translation happens in chat panel"
   (:require [reagent.core :as r]
-            [app.state :as state]))
+            [app.state :as state]
+            [app.flows.core :as f]
+            [app.flows.module :as module-flow]))
 
 ;; ============================================================
 ;; MACRO XML - Read-only display
@@ -36,7 +38,7 @@
       (when dirty?
         [:div.panel-actions
          [:button.btn-primary.btn-sm
-          {:on-click state/save-macro-cljs!}
+          {:on-click #(f/run-fire-and-forget! module-flow/save-macro-cljs-flow)}
           "Save"]])]
      (if cljs-source
        [:div.code-container
@@ -76,7 +78,7 @@
       [:span.info-label "Status:"]
       [:select.status-select
        {:value status
-        :on-change #(state/set-macro-status! (.. % -target -value))}
+        :on-change #(f/run-fire-and-forget! module-flow/save-macro-status-flow {:status (.. % -target -value)})}
        (for [[val label] status-options]
          ^{:key val} [:option {:value val} label])]]]))
 
@@ -117,7 +119,7 @@
      [:div.toolbar-right
       (when dirty?
         [:button.btn-primary
-         {:on-click state/save-macro-cljs!}
+         {:on-click #(f/run-fire-and-forget! module-flow/save-macro-cljs-flow)}
          "Save Translation"])]]))
 
 ;; ============================================================
@@ -135,7 +137,7 @@
       (let [macro (first (filter #(= (:id %) (:id active-tab))
                                  (get-in @state/app-state [:objects :macros])))]
         (when (and macro (not= (:id macro) current-macro-id))
-          (state/load-macro-for-viewing! macro)))
+          (f/run-fire-and-forget! (module-flow/load-macro-for-viewing-flow) {:macro macro})))
       [:div.module-viewer
        [macro-toolbar]
        (if loading?

@@ -3,6 +3,7 @@
 
    Decomposes async functions from state_table.cljs into transform+effect sequences."
   (:require [app.state :as state :refer [app-state api-base db-headers]]
+            [app.state-table :as state-table]
             [app.effects.http :as http]
             [app.transforms.core :as t]
             [cljs.core.async :refer [go <!]]))
@@ -149,3 +150,46 @@
                 (swap! app-state assoc-in [:table-viewer :design-errors]
                        [{:message (get-in response [:data :error] "Failed to create table")}]))
               ctx)))}])
+
+;; ============================================================
+;; VIEW MODE
+;; ============================================================
+
+(defn set-table-view-mode-flow
+  "Switch table view mode — refresh data or init design editing.
+   Original: state_table.cljs/set-table-view-mode!
+
+   Context requires: {:mode :datasheet|:design}"
+  []
+  [{:step :do
+    :fn (fn [ctx]
+          (state-table/set-table-view-mode! (:mode ctx))
+          ctx)}])
+
+;; ============================================================
+;; RECORD OPERATIONS
+;; ============================================================
+
+(def new-table-record-flow
+  "Add a new empty record to the table.
+   Original: state_table.cljs/new-table-record!"
+  [{:step :do
+    :fn (fn [ctx]
+          (state-table/new-table-record!)
+          ctx)}])
+
+(def delete-table-record-flow
+  "Delete the selected table record.
+   Original: state_table.cljs/delete-table-record!"
+  [{:step :do
+    :fn (fn [ctx]
+          (state-table/delete-table-record!)
+          ctx)}])
+
+(def refresh-table-data-flow
+  "Refresh the current table's data from the server.
+   Original: state_table.cljs/refresh-table-data!"
+  [{:step :do
+    :fn (fn [ctx]
+          (state-table/refresh-table-data!)
+          ctx)}])

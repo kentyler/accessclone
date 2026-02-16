@@ -5,6 +5,10 @@
             [app.state :as state]
             [app.transforms.core :as t]
             [app.state-form :as state-form]
+            [app.flows.core :as f]
+            [app.flows.navigation :as nav]
+            [app.flows.ui :as ui-flow]
+            [app.flows.chat :as chat-flow]
             [app.views.sidebar :as sidebar]
             [app.views.tabs :as tabs]
             [app.views.form-editor :as form-editor]
@@ -47,7 +51,7 @@
            [:button.primary-btn
             {:on-click (fn []
                          (t/dispatch! :set-grid-size @local-grid-size)
-                         (state/save-config!)
+                         (f/run-fire-and-forget! ui-flow/save-config-flow)
                          (t/dispatch! :close-options-dialog))}
             "Save"]]]]))))
 
@@ -61,7 +65,7 @@
      [:select.database-dropdown
       {:value (or (:database_id current) "")
        :disabled loading?
-       :on-change #(state/switch-database! (.. % -target -value))}
+       :on-change #(f/run-fire-and-forget! (nav/switch-database-flow) {:database-id (.. % -target -value)})}
       (for [db databases]
         ^{:key (:database_id db)}
         [:option {:value (:database_id db)}
@@ -128,7 +132,7 @@
    [:p "Select an object from the sidebar to open it, or create a new form."]
    [:div.quick-actions
     [:button.primary-btn
-     {:on-click #(state-form/create-new-form!)}
+     {:on-click #(f/run-fire-and-forget! nav/create-new-form-flow)}
      "Create New Form"]]])
 
 (defn main-area []
@@ -199,9 +203,9 @@
                     (when (and (= (.-key e) "Enter")
                                (not (.-shiftKey e)))
                       (.preventDefault e)
-                      (state/send-chat-message!)))}]
+                      (f/run-fire-and-forget! chat-flow/send-chat-message-flow)))}]
    [:button.chat-send
-    {:on-click state/send-chat-message!
+    {:on-click #(f/run-fire-and-forget! chat-flow/send-chat-message-flow)
      :disabled (or loading? (empty? (clojure.string/trim input)))}
     "Send"]])
 

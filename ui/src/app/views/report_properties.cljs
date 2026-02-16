@@ -4,6 +4,8 @@
             [app.state :as state]
             [app.transforms.core :as t]
             [app.state-report :as state-report]
+            [app.flows.core :as f]
+            [app.flows.navigation :as nav]
             [app.views.report-utils :as ru]))
 
 ;; ============================================================
@@ -59,7 +61,7 @@
                  (first (filter #(= (str/lower-case (:name %)) module-name)
                                 (get-in @state/app-state [:objects :modules]))))]
     (if module
-      (state/open-object! :modules (:id module))
+      (f/run-fire-and-forget! (nav/open-object-flow) {:type :modules :id (:id module)})
       (t/dispatch! :set-error (str "Module not found: " (or module-name "unknown"))))))
 
 ;; ============================================================

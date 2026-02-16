@@ -7,6 +7,9 @@
             [app.state-table :as state-table]
             [app.state-report :as state-report]
             [app.state-query :as state-query]
+            [app.flows.core :as f]
+            [app.flows.navigation :as nav]
+            [app.flows.ui :as ui-flow]
             [app.views.access-database-viewer :as access-db-viewer]))
 
 ;; Object types available in the dropdown (like Access navigation pane)
@@ -39,37 +42,37 @@
     (case object-type
       :forms
       [:button.new-object-btn
-       {:on-click #(state-form/create-new-form!)}
+       {:on-click #(f/run-fire-and-forget! nav/create-new-form-flow)}
        [:span.icon "+"]
        [:span "New Form"]]
 
       :tables
       [:button.new-object-btn
-       {:on-click #(state-table/start-new-table!)}
+       {:on-click #(f/run-fire-and-forget! nav/start-new-table-flow)}
        [:span.icon "+"]
        [:span "New Table"]]
 
       :reports
       [:button.new-object-btn
-       {:on-click #(state-report/create-new-report!)}
+       {:on-click #(f/run-fire-and-forget! nav/create-new-report-flow)}
        [:span.icon "+"]
        [:span "New Report"]]
 
       :modules
       [:button.new-object-btn
-       {:on-click #(state/create-new-module!)}
+       {:on-click #(f/run-fire-and-forget! nav/create-new-module-flow)}
        [:span.icon "+"]
        [:span "New Module"]]
 
       :queries
       [:button.new-object-btn
-       {:on-click #(state-query/create-new-query!)}
+       {:on-click #(f/run-fire-and-forget! nav/create-new-query-flow)}
        [:span.icon "+"]
        [:span "New Query"]]
 
       :sql-functions
       [:button.new-object-btn
-       {:on-click #(state/create-new-function!)}
+       {:on-click #(f/run-fire-and-forget! nav/create-new-function-flow)}
        [:span.icon "+"]
        [:span "New Function"]]
 
@@ -80,7 +83,7 @@
   [{:keys [id name type]} active?]
   [:li.object-item
    {:class (when active? "active")
-    :on-click #(state/open-object! type id)}
+    :on-click #(f/run-fire-and-forget! (nav/open-object-flow) {:type type :id id})}
    [:span.object-name name]])
 
 (defn object-list
@@ -114,7 +117,7 @@
         submit-browse! (fn []
                          (let [path (clojure.string/trim @browse-path)]
                            (when (seq path)
-                             (state/load-access-databases! path))))]
+                             (f/run-fire-and-forget! (ui-flow/load-access-databases-flow) {:locations path}))))]
     (fn []
       (let [databases (sort-by #(clojure.string/lower-case (or (:name %) ""))
                                (get-in @state/app-state [:objects :access_databases] []))
@@ -135,7 +138,7 @@
           [:a {:href "#"
                :on-click (fn [e]
                            (.preventDefault e)
-                           (state/load-access-databases!))}
+                           (f/run-fire-and-forget! (ui-flow/load-access-databases-flow) {}))}
            "Or scan all locations"]]
          [:ul.object-list
           (if (empty? databases)

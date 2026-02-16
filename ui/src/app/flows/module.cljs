@@ -205,3 +205,27 @@
                                    (get-in response [:data :version])))
                           (state/log-error! "Failed to save macro translation" "save-macro-cljs"))
                         ctx))))}]}])
+
+;; ============================================================
+;; STATUS UPDATES
+;; ============================================================
+
+(def save-module-status-flow
+  "Set module translation status.
+   Original: state.cljs/set-module-status!
+
+   Context requires: {:status string}"
+  [{:step :do
+    :fn (fn [ctx]
+          (state/set-module-status! (:status ctx))
+          ctx)}])
+
+(def save-macro-status-flow
+  "Set macro translation status.
+   Original: state.cljs/set-macro-status!
+
+   Context requires: {:status string}"
+  [{:step :do
+    :fn (fn [ctx]
+          (state/set-macro-status! (:status ctx))
+          ctx)}])

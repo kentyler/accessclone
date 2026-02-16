@@ -6,6 +6,7 @@
             [app.views.form-properties :as form-properties]
             [app.views.form-design :as form-design]
             [app.views.form-view :as form-view]
+            [app.views.control-palette :as palette]
             [app.views.table-viewer :as table-viewer]
             [app.views.query-viewer :as query-viewer]
             [app.views.module-viewer :as module-viewer]
@@ -168,6 +169,7 @@
           (state-form/load-form-for-editing! form)))
       [:div.form-editor
        [form-toolbar]
+       (when (= view-mode :design) [palette/control-palette])
        [lint-errors-panel]
        [form-editor-body view-mode (get-in @state/app-state [:form-editor :current])]])))
 

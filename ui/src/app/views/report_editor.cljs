@@ -5,7 +5,8 @@
             [app.state-report :as state-report]
             [app.views.report-properties :as report-properties]
             [app.views.report-design :as report-design]
-            [app.views.report-view :as report-view]))
+            [app.views.report-view :as report-view]
+            [app.views.control-palette :as palette]))
 
 (defn ask-ai-to-fix-report-errors!
   "Send report lint errors to AI for suggestions"
@@ -96,6 +97,7 @@
             is-edn? (= "edn" (:_format current-def))]
         [:div.form-editor
          [report-toolbar]
+         (when (= view-mode :design) [palette/control-palette :report])
          [report-lint-errors-panel]
          (cond
            ;; EDN format - show raw

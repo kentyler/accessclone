@@ -3,7 +3,8 @@
   (:require [reagent.core :as r]
             [app.state :as state]
             [app.state-report :as state-report]
-            [app.views.report-utils :as ru]))
+            [app.views.report-utils :as ru]
+            [app.views.control-palette :as palette]))
 
 (defn field-item
   "A single draggable field item"
@@ -66,6 +67,22 @@
         new-controls (vec (conj controls label-control new-control))]
     (state-report/set-report-definition!
      (assoc-in current [section :controls] new-controls))))
+
+(defn- add-palette-control!
+  "Place a new control from the palette tool at click coordinates in a report section."
+  [control-type section x y ctrl-key?]
+  (let [current (get-in @state/app-state [:report-editor :current])
+        section (or section :detail)
+        controls (ru/get-section-controls current section)
+        snapped-x (ru/snap-to-grid x ctrl-key?)
+        snapped-y (ru/snap-to-grid y ctrl-key?)
+        new-ctrl (palette/control-defaults control-type snapped-x snapped-y)
+        new-controls (conj (vec controls) new-ctrl)
+        new-idx (dec (count new-controls))]
+    (state-report/set-report-definition!
+     (assoc-in current [section :controls] new-controls))
+    (state-report/select-report-control! {:section section :idx new-idx})
+    (reset! palette/palette-tool nil)))
 
 (defn move-control!
   "Move an existing control to a new position in a report section"
@@ -148,17 +165,21 @@
      :ctrl-key? (.-ctrlKey e)
      :control-idx (.getData (.-dataTransfer e) "application/x-control-idx")
      :from-section (keyword (.getData (.-dataTransfer e) "application/x-section"))
-     :field-data (.getData (.-dataTransfer e) "application/x-field")}))
+     :field-data (.getData (.-dataTransfer e) "application/x-field")
+     :palette-type (.getData (.-dataTransfer e) "application/x-palette-type")}))
 
 (defn- handle-section-drop!
   "Handle a drop event on a report section."
   [section e]
   (.preventDefault e)
-  (let [{:keys [x y raw-x raw-y ctrl-key? control-idx from-section field-data]}
+  (let [{:keys [x y raw-x raw-y ctrl-key? control-idx from-section field-data palette-type]}
         (parse-drop-data e)]
     (cond
       (and control-idx (not= control-idx ""))
       (move-control! (js/parseInt control-idx 10) x y ctrl-key? (or from-section section))
+
+      (and palette-type (not= palette-type ""))
+      (add-palette-control! (keyword palette-type) section raw-x raw-y ctrl-key?)
 
       (and field-data (not= field-data ""))
       (let [parsed (js->clj (js/JSON.parse field-data) :keywordize-keys true)]
@@ -202,15 +223,23 @@
     [:div.form-section {:class (name section)}
      [:div.section-divider
       {:class "resizable" :title (str "Drag to resize " section-label)
+       :on-click (fn [e] (.stopPropagation e)
+                   (state-report/select-report-control! {:section section}))
        :on-mouse-down #(start-resize! section %)}
       [:span.section-label section-label]]
      [:div.section-body
       {:class (when section-selected? "selected")
        :style (section-body-style height grid-size section-data)
        :on-drag-over #(.preventDefault %)
-       :on-click #(when (or (.. % -target -classList (contains "section-body"))
-                            (.. % -target -classList (contains "controls-container")))
-                    (state-report/select-report-control! {:section section}))
+       :on-click (fn [e]
+                   (when (or (.. e -target -classList (contains "section-body"))
+                             (.. e -target -classList (contains "controls-container")))
+                     (if-let [tool @palette/palette-tool]
+                       (let [rect (.getBoundingClientRect (.-currentTarget e))
+                             x (- (.-clientX e) (.-left rect))
+                             y (- (.-clientY e) (.-top rect))]
+                         (add-palette-control! tool section x y (.-ctrlKey e)))
+                       (state-report/select-report-control! {:section section}))))
        :on-drop #(handle-section-drop! section %)}
       (if (empty? controls)
         [:div.section-empty (if (= section :detail) "Drag fields here" "")]
@@ -232,11 +261,15 @@
       :on-mouse-up (fn [_] (stop-resize!))
       :on-mouse-leave (fn [_] (stop-resize!))
       :on-key-down (fn [e]
-                     (when (and selected (:idx selected)
-                                (or (= (.-key e) "Delete")
-                                    (= (.-key e) "Backspace")))
-                       (.preventDefault e)
-                       (state-report/delete-report-control! (:section selected) (:idx selected))))}
+                     (cond
+                       (= (.-key e) "Escape")
+                       (reset! palette/palette-tool nil)
+
+                       (and selected (:idx selected)
+                            (or (= (.-key e) "Delete")
+                                (= (.-key e) "Backspace")))
+                       (do (.preventDefault e)
+                           (state-report/delete-report-control! (:section selected) (:idx selected)))))}
      [:div.canvas-header
       [:div.form-selector
        {:class (when (nil? selected) "selected")

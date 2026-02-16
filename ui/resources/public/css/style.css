@@ -492,6 +492,57 @@ body {
   border-color: var(--gray-300);
 }
 
+/* Control Palette - Design View toolbar */
+.control-palette {
+  display: flex;
+  align-items: center;
+  padding: 0.25rem 0.75rem;
+  background: var(--gray-50);
+  border-bottom: 1px solid var(--gray-200);
+  flex-shrink: 0;
+  gap: 2px;
+}
+
+.palette-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  background: white;
+  border: 1px solid var(--gray-200);
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  line-height: 1;
+  color: var(--gray-700);
+}
+
+.palette-btn:hover {
+  background: var(--gray-100);
+  border-color: var(--gray-300);
+}
+
+.palette-btn.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+}
+
+.palette-icon {
+  pointer-events: none;
+}
+
+.palette-separator {
+  display: inline-block;
+  width: 1px;
+  height: 20px;
+  background: var(--gray-300);
+  margin: 0 3px;
+  flex-shrink: 0;
+}
+
 .editor-body {
   display: flex;
   flex: 1;
@@ -3842,6 +3893,7 @@ body {
 /* Print styles for report preview */
 @media print {
   .form-toolbar,
+  .control-palette,
   .editor-right,
   .sidebar,
   .header,

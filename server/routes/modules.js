@@ -45,7 +45,7 @@ function createRouter(pool) {
       const databaseId = req.databaseId;
 
       const result = await pool.query(
-        `SELECT name, vba_source, cljs_source, description, status, review_notes, version, created_at
+        `SELECT name, vba_source, cljs_source, description, status, review_notes, intents, version, created_at
          FROM shared.modules
          WHERE database_id = $1 AND name = $2 AND is_current = true`,
         [databaseId, req.params.name]
@@ -72,7 +72,7 @@ function createRouter(pool) {
     try {
       const databaseId = req.databaseId;
       const moduleName = req.params.name;
-      const { vba_source, cljs_source, description, status, review_notes } = req.body;
+      const { vba_source, cljs_source, description, status, review_notes, intents } = req.body;
 
       await client.query('BEGIN');
 
@@ -95,10 +95,10 @@ function createRouter(pool) {
 
       // Insert new version as current
       await client.query(
-        `INSERT INTO shared.modules (database_id, name, vba_source, cljs_source, description, status, review_notes, version, is_current)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)`,
+        `INSERT INTO shared.modules (database_id, name, vba_source, cljs_source, description, status, review_notes, intents, version, is_current)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)`,
         [databaseId, moduleName, vba_source || null, cljs_source || null, description || null,
-         status || 'pending', review_notes || null, newVersion]
+         status || 'pending', review_notes || null, intents ? JSON.stringify(intents) : null, newVersion]
       );
 
       await client.query('COMMIT');

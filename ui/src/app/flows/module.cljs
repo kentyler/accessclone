@@ -45,6 +45,7 @@
                                                :review-notes (:review_notes data)
                                                :version (:version data)
                                                :created-at (:created_at data)})
+                          :intents (:intents data)
                           :loading? false})
                   (state/maybe-auto-analyze!))
                 (swap! app-state assoc-in [:module-viewer :loading?] false))
@@ -129,6 +130,98 @@
                         (state/set-error! (str "Translation blocked — import these objects first: "
                                                (str/join "; " parts))))
                       (state/log-error! (str "Translation failed: " error-msg) "translate-module"))))
+                ctx))))}])
+
+;; ============================================================
+;; INTENT EXTRACTION
+;; ============================================================
+
+(def extract-intents-flow
+  "POST /api/chat/extract-intents → store intents in state → add summary to chat.
+   Extracts structured intents from VBA source using LLM."
+  [{:step :do
+    :fn (fn [ctx]
+          (let [module-info (get-in @app-state [:module-viewer :module-info])]
+            (t/dispatch! :set-extracting-intents true)
+            (when-not (:chat-panel-open? @app-state)
+              (t/dispatch! :toggle-chat-panel))
+            (assoc ctx :module-info module-info)))}
+   {:step :do
+    :fn (fn [ctx]
+          (let [mi (:module-info ctx)]
+            (go
+              (let [response (<! (http/post!
+                                   (str api-base "/api/chat/extract-intents")
+                                   :headers (db-headers)
+                                   :json-params {:vba_source (:vba-source mi)
+                                                 :module_name (:name mi)
+                                                 :app_objects (state/get-app-objects)
+                                                 :database_id (:database_id (:current-database @app-state))}))]
+                (t/dispatch! :set-extracting-intents false)
+                (if (:ok? response)
+                  (let [data (:data response)
+                        intents (:intents data)
+                        mapped (:mapped data)
+                        stats (:stats data)]
+                    (t/dispatch! :set-module-intents {:intents intents :mapped mapped :stats stats})
+                    ;; Add summary to chat
+                    (t/dispatch! :add-chat-message "assistant"
+                                 (str "Extracted " (:total stats) " intents from "
+                                      (count (:procedures intents)) " procedures:\n"
+                                      "- " (:mechanical stats) " mechanical (deterministic)\n"
+                                      "- " (:llm_fallback stats) " need LLM assistance\n"
+                                      "- " (:gap stats) " gaps (unmappable)\n\n"
+                                      "Click \"Generate Code\" to produce ClojureScript.")))
+                  (let [missing (get-in response [:data :missing])
+                        error-msg (get-in response [:data :error] "Unknown error")]
+                    (if missing
+                      (let [parts (keep (fn [[type-key names]]
+                                          (when (seq names)
+                                            (str (name type-key) ": " (str/join ", " names))))
+                                        missing)]
+                        (state/set-error! (str "Intent extraction blocked — import these objects first: "
+                                               (str/join "; " parts))))
+                      (state/log-error! (str "Intent extraction failed: " error-msg) "extract-intents"))))
+                ctx))))}])
+
+(def generate-wiring-flow
+  "POST /api/chat/generate-wiring → store CLJS → set dirty → add to chat.
+   Generates ClojureScript wiring from previously extracted intents."
+  [{:step :do
+    :fn (fn [ctx]
+          (let [module-info (get-in @app-state [:module-viewer :module-info])
+                intents-data (get-in @app-state [:module-viewer :intents])]
+            (swap! app-state assoc-in [:module-viewer :translating?] true)
+            (when-not (:chat-panel-open? @app-state)
+              (t/dispatch! :toggle-chat-panel))
+            (assoc ctx :module-info module-info :intents-data intents-data)))}
+   {:step :do
+    :fn (fn [ctx]
+          (let [mi (:module-info ctx)
+                intents-data (:intents-data ctx)]
+            (go
+              (let [response (<! (http/post!
+                                   (str api-base "/api/chat/generate-wiring")
+                                   :headers (db-headers)
+                                   :json-params {:mapped_intents (:mapped intents-data)
+                                                 :module_name (:name mi)
+                                                 :vba_source (:vba-source mi)
+                                                 :database_id (:database_id (:current-database @app-state))}))]
+                (swap! app-state assoc-in [:module-viewer :translating?] false)
+                (if (:ok? response)
+                  (let [cljs-source (get-in response [:data :cljs_source])
+                        stats (get-in response [:data :stats])]
+                    (t/dispatch! :update-module-cljs-source cljs-source)
+                    (when cljs-source
+                      (t/dispatch! :add-chat-message "assistant"
+                                   (str "Generated ClojureScript from intents:\n"
+                                        "- " (:mechanical_count stats) " mechanical templates\n"
+                                        "- " (:fallback_count stats) " LLM-assisted\n"
+                                        "- " (:gap_count stats) " gaps (marked as comments)\n\n"
+                                        cljs-source))))
+                  (state/log-error! (str "Code generation failed: "
+                                         (get-in response [:data :error] "Unknown error"))
+                                    "generate-wiring"))
                 ctx))))}])
 
 ;; ============================================================

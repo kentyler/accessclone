@@ -1,7 +1,7 @@
 (ns app.transforms.module
   "Pure module transforms — (state, args) -> state.
-   4 transforms covering ClojureScript source editing, module status,
-   review notes, and dirty flag.")
+   6 transforms covering ClojureScript source editing, module status,
+   review notes, dirty flag, intents, and extracting state.")
 
 (defn update-module-cljs-source [state new-source]
   (-> state
@@ -27,3 +27,9 @@
 
 (defn set-module-cljs-dirty [state dirty?]
   (assoc-in state [:module-viewer :cljs-dirty?] dirty?))
+
+(defn set-module-intents [state intents]
+  (assoc-in state [:module-viewer :intents] intents))
+
+(defn set-extracting-intents [state extracting?]
+  (assoc-in state [:module-viewer :extracting-intents?] extracting?))

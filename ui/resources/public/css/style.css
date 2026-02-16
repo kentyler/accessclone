@@ -3058,11 +3058,141 @@ body {
   font-style: italic;
 }
 
+.module-vba-panel .panel-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.module-vba-panel .btn-sm {
+  padding: 0.125rem 0.5rem;
+  font-size: 0.75rem;
+}
+
 .translating-indicator {
   padding: 2rem;
   text-align: center;
   color: var(--primary-500);
   font-style: italic;
+}
+
+/* Intent Summary Panel */
+.intent-summary-panel {
+  border: 1px solid var(--gray-200);
+  border-radius: 4px;
+  margin: 0.5rem 0;
+  background: var(--gray-50);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.intent-summary-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.375rem 0.75rem;
+  background: var(--gray-100);
+  border-bottom: 1px solid var(--gray-200);
+  font-size: 0.8125rem;
+}
+
+.intent-summary-stats {
+  color: var(--gray-500);
+  font-size: 0.75rem;
+}
+
+.intent-stats-bar {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.75rem;
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.stat-bar-mechanical { color: #2e7d32; }
+.stat-bar-llm { color: #f57f17; }
+.stat-bar-gap { color: #c62828; }
+
+.intent-procedures {
+  padding: 0.25rem 0;
+}
+
+.procedure-summary {
+  border-bottom: 1px solid var(--gray-100);
+}
+
+.procedure-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.75rem;
+  cursor: pointer;
+  font-size: 0.8125rem;
+}
+
+.procedure-header:hover {
+  background: var(--gray-100);
+}
+
+.expand-icon {
+  font-size: 0.625rem;
+  width: 0.75rem;
+  color: var(--gray-500);
+}
+
+.procedure-name {
+  font-weight: 500;
+  font-family: monospace;
+}
+
+.procedure-trigger {
+  color: var(--gray-500);
+  font-size: 0.75rem;
+}
+
+.procedure-stats {
+  margin-left: auto;
+  display: flex;
+  gap: 0.5rem;
+  font-size: 0.6875rem;
+}
+
+.stat-mechanical { color: #2e7d32; }
+.stat-llm { color: #f57f17; }
+.stat-gap { color: #c62828; }
+
+.procedure-intents {
+  padding: 0.25rem 0 0.25rem 1.5rem;
+  font-size: 0.75rem;
+}
+
+.intent-item {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.125rem 0;
+}
+
+.intent-type {
+  font-family: monospace;
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+
+.intent-badge {
+  padding: 0 0.25rem;
+  border-radius: 3px;
+  font-size: 0.625rem;
+  text-transform: uppercase;
+}
+
+.badge-mechanical { background: #e8f5e9; color: #2e7d32; }
+.badge-llm { background: #fff8e1; color: #f57f17; }
+.badge-gap { background: #ffebee; color: #c62828; }
+.badge-unknown { background: var(--gray-200); color: var(--gray-600); }
+
+.intent-detail {
+  color: var(--gray-500);
+  font-size: 0.6875rem;
 }
 
 /* Popup Forms */

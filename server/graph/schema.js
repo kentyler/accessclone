@@ -132,6 +132,7 @@ CREATE INDEX IF NOT EXISTS idx_modules_current ON shared.modules(database_id, na
 -- Add status/review_notes columns if missing (for existing installs)
 ALTER TABLE shared.modules ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'pending';
 ALTER TABLE shared.modules ADD COLUMN IF NOT EXISTS review_notes TEXT;
+ALTER TABLE shared.modules ADD COLUMN IF NOT EXISTS intents JSONB;
 
 -- ============================================================
 -- Macros - Access macro XML storage with optional ClojureScript translation

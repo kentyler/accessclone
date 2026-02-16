@@ -440,5 +440,110 @@ Return ONLY the ClojureScript code, no markdown code fences, no explanations. In
     }
   });
 
+  // Load intent extraction dependencies
+  const { extractIntents, validateIntents } = require('../../lib/vba-intent-extractor');
+  const { mapIntentsToTransforms, countClassifications } = require('../../lib/vba-intent-mapper');
+  const { generateWiring } = require('../../lib/vba-wiring-generator');
+
+  /**
+   * POST /api/chat/extract-intents
+   * Extract structured intents from VBA source and map to transforms/flows
+   */
+  router.post('/extract-intents', async (req, res) => {
+    const { vba_source, module_name, app_objects, database_id } = req.body;
+
+    if (!vba_source) {
+      return res.status(400).json({ error: 'vba_source is required' });
+    }
+
+    // Hard block: refuse if import is incomplete
+    const databaseId = database_id || req.headers['x-database-id'];
+    if (databaseId) {
+      const completeness = await checkImportCompleteness(pool, databaseId);
+      if (completeness?.has_discovery && !completeness.complete) {
+        return res.status(400).json({
+          error: 'Cannot extract intents until all Access objects are imported.',
+          missing: completeness.missing,
+          missing_count: completeness.missing_count
+        });
+      }
+    }
+
+    const apiKey = secrets.anthropic?.api_key || process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: 'Anthropic API key not configured in secrets.json' });
+    }
+
+    try {
+      // Step 1: Extract intents via LLM
+      const intentResult = await extractIntents(
+        vba_source, module_name || 'unknown',
+        { app_objects },
+        apiKey
+      );
+
+      // Step 2: Validate
+      const validation = validateIntents(intentResult);
+
+      // Step 3: Map to transforms/flows
+      const mapped = mapIntentsToTransforms(intentResult);
+
+      // Aggregate stats
+      let totalMechanical = 0, totalFallback = 0, totalGap = 0;
+      for (const proc of mapped.procedures) {
+        totalMechanical += proc.stats?.mechanical || 0;
+        totalFallback += proc.stats?.llm_fallback || 0;
+        totalGap += proc.stats?.gap || 0;
+      }
+
+      res.json({
+        intents: intentResult,
+        mapped,
+        validation,
+        stats: {
+          total: totalMechanical + totalFallback + totalGap,
+          mechanical: totalMechanical,
+          llm_fallback: totalFallback,
+          gap: totalGap
+        }
+      });
+    } catch (err) {
+      console.error('Error extracting intents:', err);
+      logError(pool, 'POST /api/chat/extract-intents', 'Intent extraction failed', err, { databaseId });
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * POST /api/chat/generate-wiring
+   * Generate ClojureScript wiring from mapped intents
+   */
+  router.post('/generate-wiring', async (req, res) => {
+    const { mapped_intents, module_name, vba_source, database_id } = req.body;
+
+    if (!mapped_intents) {
+      return res.status(400).json({ error: 'mapped_intents is required' });
+    }
+
+    const apiKey = secrets.anthropic?.api_key || process.env.ANTHROPIC_API_KEY;
+
+    try {
+      const result = await generateWiring(mapped_intents, module_name || 'unknown', {
+        vbaSource: vba_source,
+        apiKey,
+        useFallback: !!apiKey
+      });
+
+      res.json({
+        cljs_source: result.cljs_source,
+        stats: result.stats
+      });
+    } catch (err) {
+      console.error('Error generating wiring:', err);
+      logError(pool, 'POST /api/chat/generate-wiring', 'Wiring generation failed', err, { databaseId: database_id });
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 };

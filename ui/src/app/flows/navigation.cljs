@@ -12,6 +12,28 @@
 ;; OPEN / CLOSE TABS
 ;; ============================================================
 
+(defn set-active-tab-flow
+  "Switch to an already-open tab.
+   Original: state.cljs/set-active-tab!
+
+   Context requires: {:type keyword :id any}"
+  []
+  [{:step :do
+    :fn (fn [ctx]
+          (state/set-active-tab! (:type ctx) (:id ctx))
+          ctx)}])
+
+(defn close-tab-flow
+  "Close a specific tab by type and id.
+   Original: state.cljs/close-tab!
+
+   Context requires: {:type keyword :id any}"
+  []
+  [{:step :do
+    :fn (fn [ctx]
+          (state/close-tab! (:type ctx) (:id ctx))
+          ctx)}])
+
 (defn open-object-flow
   "Open an object in a new tab (or switch to existing).
    Original: state.cljs/open-object!

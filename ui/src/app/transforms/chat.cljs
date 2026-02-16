@@ -5,6 +5,9 @@
 (defn toggle-chat-panel [state]
   (update state :chat-panel-open? not))
 
+(defn open-chat-panel [state]
+  (assoc state :chat-panel-open? true))
+
 (defn set-chat-input [state text]
   (assoc state :chat-input text))
 

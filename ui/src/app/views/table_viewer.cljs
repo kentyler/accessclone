@@ -3,7 +3,6 @@
   (:require [reagent.core :as r]
             [app.state :as state]
             [app.transforms.core :as t]
-            [app.state-table :as state-table]
             [app.flows.core :as f]
             [app.flows.table :as table-flow]))
 

@@ -43,8 +43,9 @@
    :show-context-menu       ui/show-context-menu
    :hide-context-menu       ui/hide-context-menu
 
-   ;; Chat domain (4)
+   ;; Chat domain (5)
    :toggle-chat-panel       chat/toggle-chat-panel
+   :open-chat-panel         chat/open-chat-panel
    :set-chat-input          chat/set-chat-input
    :add-chat-message        chat/add-chat-message
    :set-chat-loading        chat/set-chat-loading

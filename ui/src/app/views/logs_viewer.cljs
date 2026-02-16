@@ -1,6 +1,8 @@
 (ns app.views.logs-viewer
   "Logs mode center pane — import detail and issue list"
-  (:require [app.state :as state]))
+  (:require [app.state :as state]
+            [app.flows.core :as f]
+            [app.flows.logs :as logs-flow]))
 
 (defn- format-timestamp [ts]
   (when ts
@@ -29,7 +31,7 @@
       [:label.issue-resolve-btn
        [:input {:type "checkbox"
                 :checked (boolean resolved?)
-                :on-change #(state/toggle-issue-resolved! (:id issue) resolved?)}]
+                :on-change #(f/run-fire-and-forget! (logs-flow/toggle-issue-resolved-flow) {:issue-id (:id issue) :currently-resolved? resolved?})}]
        (if resolved? "Resolved" "Resolve")]]
      [:div.issue-message (:message issue)]
      (when (:suggestion issue)

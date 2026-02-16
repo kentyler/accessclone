@@ -1,19 +1,21 @@
 (ns app.views.tabs
   "Tab bar for open objects"
   (:require [reagent.core :as r]
-            [app.state :as state]))
+            [app.state :as state]
+            [app.flows.core :as f]
+            [app.flows.navigation :as nav]))
 
 (defn tab
   "Single tab component"
   [{:keys [type id name]} active?]
   [:div.tab
    {:class (when active? "active")
-    :on-click #(state/set-active-tab! type id)}
+    :on-click #(f/run-fire-and-forget! (nav/set-active-tab-flow) {:type type :id id})}
    [:span.tab-name name]
    [:button.tab-close
     {:on-click (fn [e]
                  (.stopPropagation e)
-                 (state/close-tab! type id))
+                 (f/run-fire-and-forget! (nav/close-tab-flow) {:type type :id id}))
      :title "Close tab"}
     "\u00D7"]])
 

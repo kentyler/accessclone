@@ -1,7 +1,7 @@
 (ns app.transforms.form
   "Pure form transforms — (state, args) -> state.
-   16 transforms covering form definition, lint, context menu, records,
-   controls, caches, clipboard, and header/footer toggle."
+   17 transforms covering form definition, lint, context menu, records,
+   controls, caches, clipboard, header/footer toggle, and properties tab."
   (:require [clojure.string :as str]))
 
 ;; ============================================================
@@ -150,3 +150,10 @@
             (assoc-in [:form-editor :dirty?]
                       (not= new-def (get-in state [:form-editor :original])))))
       state)))
+
+;; ============================================================
+;; PROPERTIES TAB
+;; ============================================================
+
+(defn set-form-properties-tab [state tab]
+  (assoc-in state [:form-editor :properties-tab] tab))

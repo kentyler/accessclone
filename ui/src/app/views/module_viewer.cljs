@@ -1,7 +1,8 @@
 (ns app.views.module-viewer
   "Module viewer - displays VBA source; translation happens in chat panel"
   (:require [reagent.core :as r]
-            [app.state :as state]))
+            [app.state :as state]
+            [app.transforms.core :as t]))
 
 ;; ============================================================
 ;; VBA SOURCE - Read-only display
@@ -98,11 +99,7 @@
         [:textarea.review-notes-input
          {:value (or (:review-notes module-info) "")
           :placeholder "Why does this need review?"
-          :on-change #(do (swap! state/app-state assoc-in
-                                 [:module-viewer :module-info :review-notes]
-                                 (.. % -target -value))
-                          (swap! state/app-state assoc-in
-                                 [:module-viewer :cljs-dirty?] true))
+          :on-change #(t/dispatch! :update-module-review-notes (.. % -target -value))
           :rows 2}]])]))
 
 ;; ============================================================

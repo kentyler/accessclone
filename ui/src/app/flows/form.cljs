@@ -27,22 +27,20 @@
    ;; Fetch definition if not already present
    {:step :branch
     :test (fn [ctx] (nil? (get-in ctx [:form :definition])))
-    :then [{:step :effect
-            :descriptor {:type :http
-                         :method :get
-                         :url (str api-base "/api/forms/"
-                                   (get-in ctx [:form :filename]))
-                         :headers (db-headers)}
-            :as :form-response}
-           {:step :do
+    :then [{:step :do
             :fn (fn [ctx]
-                  (if (get-in ctx [:form-response :ok?])
-                    (assoc ctx :definition
-                           (dissoc (get-in ctx [:form-response :data]) :id :name))
-                    (do (state/log-error!
-                          (str "Failed to load form: " (get-in ctx [:form :filename]))
-                          "load-form-for-editing")
-                        (assoc ctx :abort? true))))}]}
+                  (go
+                    (let [response (<! (http/get!
+                                         (str api-base "/api/forms/"
+                                              (get-in ctx [:form :filename]))
+                                         :headers (db-headers)))]
+                      (if (:ok? response)
+                        (assoc ctx :definition
+                               (dissoc (:data response) :id :name))
+                        (do (state/log-error!
+                              (str "Failed to load form: " (get-in ctx [:form :filename]))
+                              "load-form-for-editing")
+                            (assoc ctx :abort? true))))))}]}
    ;; Setup editor with normalized definition
    {:step :branch
     :test (fn [ctx] (not (:abort? ctx)))

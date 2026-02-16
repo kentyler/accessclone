@@ -16,7 +16,8 @@
             [app.transforms.query :as query]
             [app.transforms.module :as module]
             [app.transforms.macro :as macro]
-            [app.transforms.logs :as logs]))
+            [app.transforms.logs :as logs]
+            [app.transforms.sql-function :as sql-function]))
 
 ;; ============================================================
 ;; TRANSFORM REGISTRY
@@ -48,7 +49,7 @@
    :add-chat-message        chat/add-chat-message
    :set-chat-loading        chat/set-chat-loading
 
-   ;; Form domain (16)
+   ;; Form domain (17)
    :set-form-definition     form/set-form-definition
    :clear-lint-errors       form/clear-lint-errors
    :set-lint-errors         form/set-lint-errors
@@ -66,7 +67,9 @@
    :copy-form-record        form/copy-form-record
    :toggle-form-header-footer form/toggle-form-header-footer
 
-   ;; Report domain (8)
+   :set-form-properties-tab   form/set-form-properties-tab
+
+   ;; Report domain (9)
    :set-report-definition     report/set-report-definition
    :clear-report-lint-errors  report/clear-report-lint-errors
    :set-report-lint-errors    report/set-report-lint-errors
@@ -75,8 +78,9 @@
    :delete-report-control     report/delete-report-control
    :add-group-level           report/add-group-level
    :remove-group-level        report/remove-group-level
+   :set-report-properties-tab report/set-report-properties-tab
 
-   ;; Table domain (12)
+   ;; Table domain (19)
    :select-table-field       table/select-table-field
    :select-table-cell        table/select-table-cell
    :select-table-row         table/select-table-row
@@ -89,14 +93,28 @@
    :cut-table-cell           table/cut-table-cell
    :set-new-table-name       table/set-new-table-name
    :revert-design            table/revert-design
+   :select-design-field      table/select-design-field
+   :update-design-field      table/update-design-field
+   :add-design-field         table/add-design-field
+   :remove-design-field      table/remove-design-field
+   :toggle-design-pk         table/toggle-design-pk
+   :update-table-description table/update-table-description
+   :init-design-editing      table/init-design-editing
 
    ;; Query domain (2)
    :update-query-sql        query/update-query-sql
    :update-query-name       query/update-query-name
 
-   ;; Module domain (2)
+   ;; SQL Function domain (3)
+   :update-fn-source          sql-function/update-fn-source
+   :update-fn-name            sql-function/update-fn-name
+   :track-sql-function        sql-function/track-sql-function
+
+   ;; Module domain (4)
    :update-module-cljs-source module/update-module-cljs-source
    :set-module-status         module/set-module-status
+   :update-module-review-notes module/update-module-review-notes
+   :set-module-cljs-dirty     module/set-module-cljs-dirty
 
    ;; Macro domain (1)
    :set-macro-status        macro/set-macro-status

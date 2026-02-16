@@ -108,12 +108,12 @@
     (or (= field-type "Short Text") (= (:type field) "character varying"))
     [editable-property-row "Field Size"
      (or (:maxLength field) 255)
-     #(state-table/update-design-field! field-idx :maxLength %)
+     #(t/dispatch! :update-design-field field-idx :maxLength %)
      {:type :number}]
     (= field-type "Number")
     [editable-property-row "Field Size"
      (or (:fieldSize field) "Long Integer")
-     #(state-table/update-design-field! field-idx :fieldSize %)
+     #(t/dispatch! :update-design-field field-idx :fieldSize %)
      {:options number-field-sizes}]
     :else
     [property-row "Field Size" (field-size-display field)]))
@@ -123,17 +123,17 @@
   [field-idx field]
   [:<>
    [editable-property-row "Caption" (:description field)
-    #(state-table/update-design-field! field-idx :description %)]
+    #(t/dispatch! :update-design-field field-idx :description %)]
    [editable-property-row "Default Value" (:default field)
-    #(state-table/update-design-field! field-idx :default %)]
+    #(t/dispatch! :update-design-field field-idx :default %)]
    [property-row "Validation Rule" (:checkConstraint field)]
    [property-row "Validation Text" nil true]
    [editable-property-row "Required" (if (:nullable field) "No" "Yes")
-    #(state-table/update-design-field! field-idx :nullable (= % "No"))
+    #(t/dispatch! :update-design-field field-idx :nullable (= % "No"))
     {:options ["No" "Yes"]}]
    [property-row "Allow Zero Length" nil true]
    [editable-property-row "Indexed" (indexed-display field)
-    #(state-table/update-design-field! field-idx :indexed
+    #(t/dispatch! :update-design-field field-idx :indexed
        (case % "Yes (Duplicates OK)" "yes" "Yes (No Duplicates)" "unique" nil))
     {:options ["No" "Yes (Duplicates OK)" "Yes (No Duplicates)"]}]])
 
@@ -166,7 +166,7 @@
      [:div.field-properties-body
       [editable-property-row "Description"
        description
-       #(state-table/update-table-description! %)]
+       #(t/dispatch! :update-table-description %)]
       [property-row "Primary Key"
        (or (:name (first (filter :isPrimaryKey fields))) "")]
       [property-row "Column Count" (str (count fields))]]]))
@@ -180,8 +180,8 @@
   [idx prop value placeholder]
   [:input.design-field-input
    {:type "text" :value (or value "") :placeholder (or placeholder "")
-    :on-click #(do (.stopPropagation %) (state-table/select-design-field! idx))
-    :on-change #(state-table/update-design-field! idx prop (.. % -target -value))}])
+    :on-click #(do (.stopPropagation %) (t/dispatch! :select-design-field idx))
+    :on-change #(t/dispatch! :update-design-field idx prop (.. % -target -value))}])
 
 (defn- design-type-select
   "Type dropdown for design grid."
@@ -189,7 +189,7 @@
   (let [dt (display-type field)]
     [:select.design-type-select
      {:value dt :on-click #(.stopPropagation %)
-      :on-change #(state-table/update-design-field! idx :type (.. % -target -value))}
+      :on-change #(t/dispatch! :update-design-field idx :type (.. % -target -value))}
      (for [t data-type-options] ^{:key t} [:option {:value t} t])
      (when-not (some #{dt} data-type-options)
        [:option {:value (:type field)} (:type field)])]))
@@ -199,7 +199,7 @@
   [idx field selected?]
   [:tr {:class (str (when (:isPrimaryKey field) "pk-row ")
                     (when selected? "selected-field"))
-        :on-click #(state-table/select-design-field! idx)}
+        :on-click #(t/dispatch! :select-design-field idx)}
    [:td.col-name
     (when (:isPrimaryKey field) [:span.pk-icon {:title "Primary Key"} "\uD83D\uDD11"])
     (when (:isForeignKey field) [:span.fk-icon {:title (str "Foreign Key to " (:foreignTable field))} "\uD83D\uDD17"])
@@ -211,7 +211,7 @@
      {:title "Delete field"
       :on-click #(do (.stopPropagation %)
                      (when (js/confirm (str "Delete field \"" (:name field) "\"?"))
-                       (state-table/remove-design-field! idx)))}
+                       (t/dispatch! :remove-design-field idx)))}
      "\u00D7"]]])
 
 (defn new-field-ghost-row
@@ -223,7 +223,7 @@
      {:type "text"
       :value ""
       :placeholder "Click to add..."
-      :on-focus #(do (state-table/add-design-field!)
+      :on-focus #(do (t/dispatch! :add-design-field)
                      ;; The new row component will render, so blur this ghost
                      (.. % -target blur))}]]
    [:td.col-type ""]
@@ -277,7 +277,7 @@
   []
   (let [table-info (get-in @state/app-state [:table-viewer :table-info])
         _ (when (and (nil? (get-in @state/app-state [:table-viewer :design-fields])) table-info)
-            (state-table/init-design-editing!))
+            (t/dispatch! :init-design-editing))
         fields (get-in @state/app-state [:table-viewer :design-fields] [])
         selected-idx (get-in @state/app-state [:table-viewer :selected-field])
         selected-field (when (number? selected-idx) (get fields selected-idx))]
@@ -439,11 +439,11 @@
   [:<>
    [:button.toolbar-btn
     {:title "Toggle Primary Key"
-     :on-click #(state-table/toggle-design-pk! selected-idx)} "PK"]
+     :on-click #(t/dispatch! :toggle-design-pk selected-idx)} "PK"]
    [:button.toolbar-btn
     {:title "Delete Field"
      :on-click #(when (js/confirm "Delete this field?")
-                  (state-table/remove-design-field! selected-idx))} "Delete Field"]])
+                  (t/dispatch! :remove-design-field selected-idx))} "Delete Field"]])
 
 (defn- toolbar-right-buttons
   "Right side toolbar buttons based on view mode."

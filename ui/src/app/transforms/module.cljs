@@ -1,6 +1,7 @@
 (ns app.transforms.module
   "Pure module transforms — (state, args) -> state.
-   2 transforms covering ClojureScript source editing and module status.")
+   4 transforms covering ClojureScript source editing, module status,
+   review notes, and dirty flag.")
 
 (defn update-module-cljs-source [state new-source]
   (-> state
@@ -18,3 +19,11 @@
        (assoc-in [:module-viewer :module-info :status] status)
        (assoc-in [:module-viewer :module-info :review-notes] review-notes)
        (assoc-in [:module-viewer :cljs-dirty?] true))))
+
+(defn update-module-review-notes [state notes]
+  (-> state
+      (assoc-in [:module-viewer :module-info :review-notes] notes)
+      (assoc-in [:module-viewer :cljs-dirty?] true)))
+
+(defn set-module-cljs-dirty [state dirty?]
+  (assoc-in state [:module-viewer :cljs-dirty?] dirty?))

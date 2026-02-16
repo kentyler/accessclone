@@ -274,7 +274,7 @@
         ^{:key tab}
         [:button.tab-btn
          {:class (when (= tab active-tab) "active")
-          :on-click #(swap! state/app-state assoc-in [:form-editor :properties-tab] tab)}
+          :on-click #(t/dispatch! :set-form-properties-tab tab)}
          (case tab
            :format "Format"
            :data "Data"

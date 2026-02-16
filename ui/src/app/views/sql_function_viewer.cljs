@@ -5,10 +5,10 @@
             [clojure.string :as str]))
 
 (defn- update-fn-source! [new-source]
-  (swap! state/app-state assoc-in [:sql-function-viewer :info :source] new-source))
+  (t/dispatch! :update-fn-source new-source))
 
 (defn- update-fn-name! [new-name]
-  (swap! state/app-state assoc-in [:sql-function-viewer :info :name] new-name))
+  (t/dispatch! :update-fn-name new-name))
 
 (defn- save-function-via-llm!
   "Send the current function SQL to the LLM, asking it to review and save via update_query tool"
@@ -37,7 +37,7 @@
                                 (get-in @state/app-state [:objects :sql-functions])))]
         ;; Track which function is loaded
         (when (and func (not= (:id func) current-id))
-          (swap! state/app-state assoc :sql-function-viewer {:fn-id (:id func) :info func}))
+          (t/dispatch! :track-sql-function func))
         (let [info (or (get-in @state/app-state [:sql-function-viewer :info]) func)
               is-new? (:is-new? info)]
           [:div.sql-function-viewer

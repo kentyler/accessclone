@@ -32,20 +32,19 @@
                   :selected-field nil})
           (state/maybe-auto-analyze!)
           ctx)}
-   {:step :effect
-    :descriptor {:type :http :method :get
-                 :url (str api-base "/api/data/" (get-in ctx [:table :name]))
-                 :headers (db-headers)
-                 :query-params {:limit 1000}}
-    :as :data-response}
    {:step :do
     :fn (fn [ctx]
-          (swap! app-state assoc-in [:table-viewer :loading?] false)
-          (if (get-in ctx [:data-response :ok?])
-            (swap! app-state assoc-in [:table-viewer :records]
-                   (vec (get-in ctx [:data-response :data :data] [])))
-            (state/log-error! "Failed to load table data" "load-table"))
-          ctx)}])
+          (go
+            (let [response (<! (http/get!
+                                 (str api-base "/api/data/" (get-in ctx [:table :name]))
+                                 :headers (db-headers)
+                                 :query-params {:limit 1000}))]
+              (swap! app-state assoc-in [:table-viewer :loading?] false)
+              (if (:ok? response)
+                (swap! app-state assoc-in [:table-viewer :records]
+                       (vec (get-in response [:data :data] [])))
+                (state/log-error! "Failed to load table data" "load-table"))
+              ctx)))}])
 
 ;; ============================================================
 ;; CELL SAVE

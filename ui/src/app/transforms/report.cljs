@@ -1,6 +1,7 @@
 (ns app.transforms.report
   "Pure report transforms — (state, args) -> state.
-   8 transforms covering report definition, lint, controls, and group bands.")
+   9 transforms covering report definition, lint, controls, group bands,
+   and properties tab.")
 
 ;; ============================================================
 ;; REPORT DEFINITION & LINT
@@ -85,3 +86,10 @@
             (assoc-in [:report-editor :dirty?]
                       (not= new-def (get-in state [:report-editor :original])))))
       state)))
+
+;; ============================================================
+;; PROPERTIES TAB
+;; ============================================================
+
+(defn set-report-properties-tab [state tab]
+  (assoc-in state [:report-editor :properties-tab] tab))

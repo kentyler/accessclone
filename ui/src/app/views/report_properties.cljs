@@ -343,7 +343,7 @@
         ^{:key tab}
         [:button.tab-btn
          {:class (when (= tab active-tab) "active")
-          :on-click #(swap! state/app-state assoc-in [:report-editor :properties-tab] tab)}
+          :on-click #(t/dispatch! :set-report-properties-tab tab)}
          (case tab :format "Format" :data "Data" :event "Event" :other "Other" :all "All")])]
      [:div.property-sheet-content
       (if (= active-tab :all)

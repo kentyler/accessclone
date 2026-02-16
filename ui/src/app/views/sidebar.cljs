@@ -2,6 +2,7 @@
   "Access-style collapsible sidebar with object navigation"
   (:require [reagent.core :as r]
             [app.state :as state]
+            [app.transforms.core :as t]
             [app.state-form :as state-form]
             [app.state-table :as state-table]
             [app.state-report :as state-report]
@@ -25,7 +26,7 @@
     [:div.object-type-selector
      [:select
       {:value (name (or selected :forms))
-       :on-change #(state/set-sidebar-object-type!
+       :on-change #(t/dispatch! :set-sidebar-object-type
                     (keyword (.. % -target -value)))}
       (for [{:keys [id label]} object-types]
         ^{:key id}
@@ -158,7 +159,7 @@
   []
   (let [collapsed? (:sidebar-collapsed? @state/app-state)]
     [:button.collapse-toggle
-     {:on-click state/toggle-sidebar!
+     {:on-click #(t/dispatch! :toggle-sidebar)
       :title (if collapsed? "Expand sidebar" "Collapse sidebar")}
      (if collapsed? "\u25B6" "\u25C0")]))
 
@@ -195,7 +196,7 @@
      [:div.logs-filter-bar
       [:select
        {:value (or (:object-type logs-filter) "")
-        :on-change #(state/set-logs-filter! :object-type
+        :on-change #(t/dispatch! :set-logs-filter :object-type
                       (let [v (.. % -target -value)]
                         (when (seq v) v)))}
        [:option {:value ""} "All types"]
@@ -208,7 +209,7 @@
       [:label.logs-issues-toggle
        [:input {:type "checkbox"
                 :checked (= (:status logs-filter) "issues-only")
-                :on-change #(state/set-logs-filter! :status
+                :on-change #(t/dispatch! :set-logs-filter :status
                               (if (.. % -target -checked) "issues-only" nil))}]
        "Issues only"]]
      ;; Entry list

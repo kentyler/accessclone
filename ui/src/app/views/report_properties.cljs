@@ -2,6 +2,7 @@
   "Property sheet panel for the report editor"
   (:require [clojure.string :as str]
             [app.state :as state]
+            [app.transforms.core :as t]
             [app.state-report :as state-report]
             [app.views.report-utils :as ru]))
 
@@ -59,7 +60,7 @@
                                 (get-in @state/app-state [:objects :modules]))))]
     (if module
       (state/open-object! :modules (:id module))
-      (state/set-error! (str "Module not found: " (or module-name "unknown"))))))
+      (t/dispatch! :set-error (str "Module not found: " (or module-name "unknown"))))))
 
 ;; ============================================================
 ;; PROPERTY DEFINITIONS
@@ -310,12 +311,12 @@
                       :else #(if (event-flag-keys %)
                                (resolve-event-value current %)
                                (get current %)))
-     :on-change (cond is-control? #(state-report/update-report-control! section-key idx %1 %2)
-                      is-section? #(state-report/set-report-definition! (assoc-in current [section-key %1] %2))
-                      :else #(state-report/set-report-definition! (assoc current %1 %2)))
+     :on-change (cond is-control? #(t/dispatch! :update-report-control section-key idx %1 %2)
+                      is-section? #(t/dispatch! :set-report-definition (assoc-in current [section-key %1] %2))
+                      :else #(t/dispatch! :set-report-definition (assoc current %1 %2)))
      :grouping-data (when (and is-group? group-idx) (get-in current [:grouping group-idx]))
      :on-group-change (when (and is-group? group-idx)
-                        (fn [k v] (state-report/set-report-definition!
+                        (fn [k v] (t/dispatch! :set-report-definition
                                     (assoc-in current [:grouping group-idx k] v))))}))
 
 (defn- grouping-section

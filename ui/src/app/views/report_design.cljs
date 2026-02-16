@@ -2,6 +2,7 @@
   "Report design surface - drag-drop editor for report controls"
   (:require [reagent.core :as r]
             [app.state :as state]
+            [app.transforms.core :as t]
             [app.state-report :as state-report]
             [app.views.report-utils :as ru]
             [app.views.control-palette :as palette]))
@@ -65,7 +66,7 @@
                        :width 150
                        :height 18}
         new-controls (vec (conj controls label-control new-control))]
-    (state-report/set-report-definition!
+    (t/dispatch! :set-report-definition
      (assoc-in current [section :controls] new-controls))))
 
 (defn- add-palette-control!
@@ -79,9 +80,9 @@
         new-ctrl (palette/control-defaults control-type snapped-x snapped-y)
         new-controls (conj (vec controls) new-ctrl)
         new-idx (dec (count new-controls))]
-    (state-report/set-report-definition!
+    (t/dispatch! :set-report-definition
      (assoc-in current [section :controls] new-controls))
-    (state-report/select-report-control! {:section section :idx new-idx})
+    (t/dispatch! :select-report-control {:section section :idx new-idx})
     (reset! palette/palette-tool nil)))
 
 (defn move-control!
@@ -93,7 +94,7 @@
         snapped-x (ru/snap-to-grid new-x ctrl-key?)
         snapped-y (ru/snap-to-grid new-y ctrl-key?)]
     (when (< control-idx (count controls))
-      (state-report/set-report-definition!
+      (t/dispatch! :set-report-definition
        (assoc-in current [section :controls]
                  (update controls control-idx
                          (fn [ctrl]
@@ -113,7 +114,7 @@
          :draggable true
          :on-click (fn [e]
                      (.stopPropagation e)
-                     (state-report/select-report-control! {:section section :idx idx}))
+                     (t/dispatch! :select-report-control {:section section :idx idx}))
          :on-drag-start (fn [e]
                           (let [rect (.getBoundingClientRect (.-target e))
                                 offset-x (- (.-clientX e) (.-left rect))
@@ -127,7 +128,7 @@
         [:button.control-delete
          {:on-click (fn [e]
                       (.stopPropagation e)
-                      (state-report/delete-report-control! section idx))
+                      (t/dispatch! :delete-report-control section idx))
           :title "Delete"}
          "\u00D7"]])]))
 
@@ -144,7 +145,7 @@
           current-height (ru/get-section-height report-def section)
           new-height (max 20 (+ current-height delta))]
       (reset! resize-state {:section section :start-y current-y})
-      (state-report/set-report-definition!
+      (t/dispatch! :set-report-definition
        (assoc-in report-def [section :height] new-height)))))
 
 (defn stop-resize! []
@@ -224,7 +225,7 @@
      [:div.section-divider
       {:class "resizable" :title (str "Drag to resize " section-label)
        :on-click (fn [e] (.stopPropagation e)
-                   (state-report/select-report-control! {:section section}))
+                   (t/dispatch! :select-report-control {:section section}))
        :on-mouse-down #(start-resize! section %)}
       [:span.section-label section-label]]
      [:div.section-body
@@ -239,7 +240,7 @@
                              x (- (.-clientX e) (.-left rect))
                              y (- (.-clientY e) (.-top rect))]
                          (add-palette-control! tool section x y (.-ctrlKey e)))
-                       (state-report/select-report-control! {:section section}))))
+                       (t/dispatch! :select-report-control {:section section}))))
        :on-drop #(handle-section-drop! section %)}
       (if (empty? controls)
         [:div.section-empty (if (= section :detail) "Drag fields here" "")]
@@ -269,13 +270,13 @@
                             (or (= (.-key e) "Delete")
                                 (= (.-key e) "Backspace")))
                        (do (.preventDefault e)
-                           (state-report/delete-report-control! (:section selected) (:idx selected)))))}
+                           (t/dispatch! :delete-report-control (:section selected) (:idx selected)))))}
      [:div.canvas-header
       [:div.form-selector
        {:class (when (nil? selected) "selected")
         :on-click (fn [e]
                     (.stopPropagation e)
-                    (state-report/select-report-control! nil))
+                    (t/dispatch! :select-report-control nil))
         :title "Select report to edit properties"}]
       [:span "Report Design View"]]
      [:div.canvas-body.sections-container

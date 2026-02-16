@@ -1,6 +1,7 @@
 (ns app.views.sql-function-viewer
   "SQL Function viewer - display of PostgreSQL function source, editable for new functions"
   (:require [app.state :as state]
+            [app.transforms.core :as t]
             [clojure.string :as str]))
 
 (defn- update-fn-source! [new-source]
@@ -20,7 +21,7 @@
       (when-not (:chat-panel-open? @state/app-state)
         (swap! state/app-state assoc :chat-panel-open? true))
       ;; Set chat input with save instruction and send
-      (state/set-chat-input!
+      (t/dispatch! :set-chat-input
        (str "Please save this as a PostgreSQL function named \"" fn-name "\". "
             "Review the SQL for any issues, then use the update_query tool with ddl_type \"function\" to create it. "
             "Here is the SQL:\n\n" source))

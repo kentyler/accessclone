@@ -2,6 +2,7 @@
   "Form editor/designer - replaces Access design view"
   (:require [clojure.string]
             [app.state :as state]
+            [app.transforms.core :as t]
             [app.state-form :as state-form]
             [app.views.form-properties :as form-properties]
             [app.views.form-design :as form-design]
@@ -20,7 +21,7 @@
   (let [error-text (str "My form has these validation errors:\n"
                         (clojure.string/join "\n" (map #(str "- " (:location %) ": " (:message %)) errors))
                         "\n\nHow can I fix these issues?")]
-    (state/set-chat-input! error-text)
+    (t/dispatch! :set-chat-input error-text)
     (state/send-chat-message!)))
 
 (defn lint-errors-panel
@@ -32,7 +33,7 @@
        [:div.lint-errors-header
         [:span.lint-errors-title "Form Validation Errors"]
         [:button.lint-errors-close
-         {:on-click state-form/clear-lint-errors!}
+         {:on-click #(t/dispatch! :clear-lint-errors)}
          "\u00D7"]]
        [:ul.lint-errors-list
         (for [[idx error] (map-indexed vector errors)]
@@ -45,7 +46,7 @@
          {:on-click #(ask-ai-to-fix-errors! errors)}
          "Ask AI to Help Fix"]
         [:button.secondary-btn
-         {:on-click state-form/clear-lint-errors!}
+         {:on-click #(t/dispatch! :clear-lint-errors)}
          "Dismiss"]]])))
 
 (defn form-toolbar
@@ -70,13 +71,13 @@
           [:button.toolbar-btn
            {:class (when hdr-visible? "active")
             :title "Toggle Form Header/Footer"
-            :on-click #(state-form/toggle-form-header-footer!)}
+            :on-click #(t/dispatch! :toggle-form-header-footer)}
            "Header/Footer"]))]
      [:div.toolbar-right
       [:button.secondary-btn
        {:disabled (not dirty?)
         :on-click #(let [original (get-in @state/app-state [:form-editor :original])]
-                     (state-form/set-form-definition! original))}
+                     (t/dispatch! :set-form-definition original))}
        "Undo"]
       [:button.primary-btn
        {:disabled (not dirty?)
@@ -93,7 +94,7 @@
        [:div.context-menu-item
         {:on-click (fn [e]
                      (.stopPropagation e)
-                     (state/hide-context-menu!)
+                     (t/dispatch! :hide-context-menu)
                      (if (= (state-form/get-view-mode) :view)
                        (state-form/save-current-record!)
                        (state-form/save-form!)))}
@@ -101,13 +102,13 @@
        [:div.context-menu-item
         {:on-click (fn [e]
                      (.stopPropagation e)
-                     (state/hide-context-menu!)
+                     (t/dispatch! :hide-context-menu)
                      (state-form/close-current-tab!))}
         "Close"]
        [:div.context-menu-item
         {:on-click (fn [e]
                      (.stopPropagation e)
-                     (state/hide-context-menu!)
+                     (t/dispatch! :hide-context-menu)
                      (state-form/close-all-tabs!))}
         "Close All"]
        [:div.context-menu-separator]
@@ -115,14 +116,14 @@
         {:class (when (= (state-form/get-view-mode) :view) "active")
          :on-click (fn [e]
                      (.stopPropagation e)
-                     (state/hide-context-menu!)
+                     (t/dispatch! :hide-context-menu)
                      (state-form/set-view-mode! :view))}
         "Form View"]
        [:div.context-menu-item
         {:class (when (= (state-form/get-view-mode) :design) "active")
          :on-click (fn [e]
                      (.stopPropagation e)
-                     (state/hide-context-menu!)
+                     (t/dispatch! :hide-context-menu)
                      (state-form/set-view-mode! :design))}
         "Design View"]])))
 
@@ -130,13 +131,13 @@
   [:div.editor-body.view-mode
    [:div.popup-overlay
     {:class (when modal? "modal")
-     :on-click #(state/hide-context-menu!)}
+     :on-click #(t/dispatch! :hide-context-menu)}
     [:div.popup-window
      [:div.popup-title-bar
       {:on-context-menu (fn [e]
                           (.preventDefault e)
                           (.stopPropagation e)
-                          (state/show-context-menu! (.-clientX e) (.-clientY e)))}
+                          (t/dispatch! :show-context-menu (.-clientX e) (.-clientY e)))}
       [:span.popup-title (or (:caption current-def) (:name current-def) "Form")]
       [:button.popup-close {:on-click #(state-form/close-current-tab!)} "\u2715"]]
      [form-view/form-view]]

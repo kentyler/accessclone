@@ -3,6 +3,7 @@
   (:require [reagent.core :as r]
             [clojure.string :as str]
             [app.state :as state]
+            [app.transforms.core :as t]
             [app.state-form :as state-form]
             [app.views.sidebar :as sidebar]
             [app.views.tabs :as tabs]
@@ -34,20 +35,20 @@
     (fn []
       (when (:options-dialog-open? @state/app-state)
         [:div.dialog-overlay
-         {:on-click #(state/close-options-dialog!)}
+         {:on-click #(t/dispatch! :close-options-dialog)}
          [:div.dialog
           {:on-click #(.stopPropagation %)}
           [:div.dialog-header
            [:h3 "Options"]
-           [:button.dialog-close {:on-click #(state/close-options-dialog!)} "\u00D7"]]
+           [:button.dialog-close {:on-click #(t/dispatch! :close-options-dialog)} "\u00D7"]]
           [:div.dialog-body [grid-size-selector local-grid-size]]
           [:div.dialog-footer
-           [:button.secondary-btn {:on-click #(state/close-options-dialog!)} "Cancel"]
+           [:button.secondary-btn {:on-click #(t/dispatch! :close-options-dialog)} "Cancel"]
            [:button.primary-btn
             {:on-click (fn []
-                         (state/set-grid-size! @local-grid-size)
+                         (t/dispatch! :set-grid-size @local-grid-size)
                          (state/save-config!)
-                         (state/close-options-dialog!))}
+                         (t/dispatch! :close-options-dialog))}
             "Save"]]]]))))
 
 (defn database-selector
@@ -107,14 +108,14 @@
        [:span "Tools"]
        [:div.menu-dropdown
         [:button.menu-option
-         {:on-click #(state/open-options-dialog!)}
+         {:on-click #(t/dispatch! :open-options-dialog)}
          "Options..."]]]]]]])
 
 (defn error-banner []
   (when-let [error (:error @state/app-state)]
     [:div.error-banner
      [:span error]
-     [:button {:on-click state/clear-error!} "Dismiss"]]))
+     [:button {:on-click #(t/dispatch! :clear-error)} "Dismiss"]]))
 
 (defn loading-indicator []
   (when (:loading? @state/app-state)
@@ -193,7 +194,7 @@
     {:value input
      :placeholder placeholder
      :disabled loading?
-     :on-change #(state/set-chat-input! (.. % -target -value))
+     :on-change #(t/dispatch! :set-chat-input (.. % -target -value))
      :on-key-down (fn [e]
                     (when (and (= (.-key e) "Enter")
                                (not (.-shiftKey e)))
@@ -221,7 +222,7 @@
           [:aside.chat-panel {:class (when-not open? "collapsed")}
            [:div.chat-header
             [:span.chat-title "Assistant"]
-            [:button.chat-toggle {:on-click state/toggle-chat-panel!}
+            [:button.chat-toggle {:on-click #(t/dispatch! :toggle-chat-panel)}
              (if open? "\u00BB" "\u00AB")]]
            (when open?
              [:<>

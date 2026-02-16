@@ -2,6 +2,7 @@
   "Report editor/designer - replaces Access report design view"
   (:require [clojure.string]
             [app.state :as state]
+            [app.transforms.core :as t]
             [app.state-report :as state-report]
             [app.views.report-properties :as report-properties]
             [app.views.report-design :as report-design]
@@ -14,7 +15,7 @@
   (let [error-text (str "My report has these validation errors:\n"
                         (clojure.string/join "\n" (map #(str "- " (:location %) ": " (:message %)) errors))
                         "\n\nHow can I fix these issues?")]
-    (state/set-chat-input! error-text)
+    (t/dispatch! :set-chat-input error-text)
     (state/send-chat-message!)))
 
 (defn report-lint-errors-panel
@@ -26,7 +27,7 @@
        [:div.lint-errors-header
         [:span.lint-errors-title "Report Validation Errors"]
         [:button.lint-errors-close
-         {:on-click state-report/clear-report-lint-errors!}
+         {:on-click #(t/dispatch! :clear-report-lint-errors)}
          "\u00D7"]]
        [:ul.lint-errors-list
         (for [[idx error] (map-indexed vector errors)]
@@ -39,7 +40,7 @@
          {:on-click #(ask-ai-to-fix-report-errors! errors)}
          "Ask AI to Help Fix"]
         [:button.secondary-btn
-         {:on-click state-report/clear-report-lint-errors!}
+         {:on-click #(t/dispatch! :clear-report-lint-errors)}
          "Dismiss"]]])))
 
 (defn report-toolbar
@@ -63,18 +64,18 @@
         [:<>
          [:button.toolbar-btn
           {:title "Add Group Level"
-           :on-click #(state-report/add-group-level!)}
+           :on-click #(t/dispatch! :add-group-level)}
           "+ Group"]
          [:button.toolbar-btn
           {:title "Remove Group Level"
            :disabled (empty? (get-in @state/app-state [:report-editor :current :grouping]))
-           :on-click #(state-report/remove-group-level!)}
+           :on-click #(t/dispatch! :remove-group-level)}
           "- Group"]])]
      [:div.toolbar-right
       [:button.secondary-btn
        {:disabled (not dirty?)
         :on-click #(let [original (get-in @state/app-state [:report-editor :original])]
-                     (state-report/set-report-definition! original))}
+                     (t/dispatch! :set-report-definition original))}
        "Undo"]
       [:button.primary-btn
        {:disabled (not dirty?)

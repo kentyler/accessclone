@@ -3,6 +3,7 @@
   (:require [reagent.core :as r]
             [clojure.string :as str]
             [app.state :as state]
+            [app.transforms.core :as t]
             [app.state-query :as state-query]))
 
 ;; ============================================================
@@ -96,12 +97,12 @@
         [:input {:type "text"
                  :value (or pending-name "")
                  :placeholder "my_query_name"
-                 :on-change #(state-query/update-query-name! (.. % -target -value))}]])
+                 :on-change #(t/dispatch! :update-query-name (.. % -target -value))}]])
      [:div.sql-editor-container
       [:textarea.sql-editor
        {:value sql
         :placeholder (str "SELECT * FROM " (:name query-info))
-        :on-change #(state-query/update-query-sql! (.. % -target -value))
+        :on-change #(t/dispatch! :update-query-sql (.. % -target -value))
         :on-key-down (fn [e]
                        ;; Ctrl+Enter or Cmd+Enter to run
                        (when (and (= (.-key e) "Enter")

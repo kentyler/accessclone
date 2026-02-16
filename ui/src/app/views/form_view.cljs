@@ -2,6 +2,7 @@
   "Form view mode - live data entry with record navigation"
   (:require [reagent.core :as r]
             [app.state :as state]
+            [app.transforms.core :as t]
             [app.state-form :as state-form]
             [app.views.form-utils :as fu]
             [app.views.expressions :as expr]
@@ -45,7 +46,7 @@
     (and (map? on-click-prop) (:action on-click-prop))
     (case (keyword (:action on-click-prop))
       :save-record   #(state-form/save-current-record!)
-      :new-record    #(state-form/new-record!)
+      :new-record    #(t/dispatch! :new-record)
       :delete-record #(when (js/confirm "Delete this record?") (state-form/delete-current-record!))
       :close-form    #(state-form/close-current-tab!)
       :refresh       #(state-form/set-view-mode! :view)
@@ -68,7 +69,7 @@
     (or (= text-lower "save") (str/includes? text-lower "save record"))
     #(state-form/save-current-record!)
     (or (= text-lower "new record") (= text-lower "new") (str/includes? text-lower "add new"))
-    #(state-form/new-record!)
+    #(t/dispatch! :new-record)
     (or (= text-lower "delete") (= text-lower "delete record"))
     #(when (js/confirm "Delete this record?") (state-form/delete-current-record!))
     (or (= text-lower "refresh") (= text-lower "requery"))
@@ -441,14 +442,14 @@
 
 (defn show-record-menu [e]
   (.preventDefault e)
-  (state-form/show-form-context-menu! (.-clientX e) (.-clientY e)))
+  (t/dispatch! :show-form-context-menu (.-clientX e) (.-clientY e)))
 
 (defn- context-menu-item
   "Render a single context menu item with enabled/disabled logic."
   [label enabled? on-click & [class]]
   [:div.menu-item
    {:class (str (when class (str class " ")) (when-not enabled? "disabled"))
-    :on-click #(when enabled? (on-click) (state-form/hide-form-context-menu!))}
+    :on-click #(when enabled? (on-click) (t/dispatch! :hide-form-context-menu))}
    label])
 
 (defn form-record-context-menu []
@@ -461,12 +462,12 @@
     (when (:visible menu)
       [:div.context-menu
        {:style {:left (:x menu) :top (:y menu)}
-        :on-mouse-leave #(state-form/hide-form-context-menu!)}
+        :on-mouse-leave #(t/dispatch! :hide-form-context-menu)}
        [context-menu-item "Cut" (and has-rec? can-edit? can-del?) state-form/cut-form-record!]
        [context-menu-item "Copy" has-rec? state-form/copy-form-record!]
        [context-menu-item "Paste" (and has-clip? can-add?) state-form/paste-form-record!]
        [:div.menu-divider]
-       [context-menu-item "New Record" can-add? state-form/new-record!]
+       [context-menu-item "New Record" can-add? #(t/dispatch! :new-record)]
        [context-menu-item "Delete Record" (and has-rec? can-del?)
         #(when (js/confirm "Delete this record?") (state-form/delete-current-record!)) "danger"]])))
 
@@ -541,7 +542,7 @@
 (defn tentative-new-row [form-def show-selectors?]
   [:div.view-section.detail.continuous-row.tentative-row
    {:style {:height (fu/get-section-height form-def :detail)}
-    :on-click #(state-form/new-record!)}
+    :on-click #(t/dispatch! :new-record)}
    (when show-selectors? [record-selector false true])
    [:div.view-controls-container]])
 
@@ -554,7 +555,7 @@
    {:on-context-menu (fn [e]
                        (.preventDefault e)
                        (.stopPropagation e)
-                       (state/show-context-menu! (.-clientX e) (.-clientY e)))}
+                       (t/dispatch! :show-context-menu (.-clientX e) (.-clientY e)))}
    [:span "Form View"]
    (when continuous? [:span.view-type-badge " (Continuous)"])
    (when-not record-source [:span.no-source-warning " (No record source selected)"])])
@@ -577,7 +578,7 @@
      [:span.record-counter (if (pos? total) (str cur " of " total) "0 of 0")]
      [nav-btn "Next" (or no-recs? at-last?) #(state-form/navigate-to-record! (inc cur)) "▶"]
      [nav-btn "Last" (or no-recs? at-last?) #(state-form/navigate-to-record! total) "▶|"]
-     [nav-btn "New Record" (not allow-additions?) state-form/new-record! "▶*"]
+     [nav-btn "New Record" (not allow-additions?) #(t/dispatch! :new-record) "▶*"]
      [:button.nav-btn.delete-btn
       {:title "Delete Record" :disabled (or no-recs? (not allow-deletions?))
        :on-click #(when (js/confirm "Delete this record?") (state-form/delete-current-record!))} "✕"]
@@ -593,7 +594,7 @@
   (let [ctx-menu (:context-menu @state/app-state)]
     (when (:visible? ctx-menu)
       (let [dismiss-and (fn [action]
-                          (fn [e] (.stopPropagation e) (state/hide-context-menu!) (action)))]
+                          (fn [e] (.stopPropagation e) (t/dispatch! :hide-context-menu) (action)))]
         [:div.context-menu
          {:style {:left (:x ctx-menu) :top (:y ctx-menu)}}
          [:div.context-menu-item {:on-click (dismiss-and state-form/save-current-record!)} "Save"]
@@ -679,7 +680,7 @@
                            (and continuous? (:allow-additions? opts))))]
     [:div.form-canvas.view-mode
      {:style (when-let [bc (:back-color current)] {:background-color bc})
-      :on-click #(do (state-form/hide-form-context-menu!) (state/hide-context-menu!))}
+      :on-click #(do (t/dispatch! :hide-form-context-menu) (t/dispatch! :hide-context-menu))}
      [form-canvas-header continuous? record-source]
      [:div.canvas-body.view-mode-body
       {:style (cond-> {}

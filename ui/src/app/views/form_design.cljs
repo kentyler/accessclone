@@ -2,6 +2,7 @@
   "Form design surface - drag-drop editor for form controls"
   (:require [reagent.core :as r]
             [app.state :as state]
+            [app.transforms.core :as t]
             [app.state-form :as state-form]
             [app.views.form-utils :as form-utils]
             [app.views.control-palette :as palette]))
@@ -69,7 +70,7 @@
                        :width 150
                        :height 18}
         new-controls (vec (conj controls label-control new-control))]
-    (state-form/set-form-definition!
+    (t/dispatch! :set-form-definition
      (assoc-in current [section :controls] new-controls))))
 
 (defn- add-palette-control!
@@ -84,9 +85,9 @@
         new-ctrl (palette/control-defaults control-type snapped-x snapped-y)
         new-controls (conj (vec controls) new-ctrl)
         new-idx (dec (count new-controls))]
-    (state-form/set-form-definition!
+    (t/dispatch! :set-form-definition
      (assoc-in current [section :controls] new-controls))
-    (state-form/select-control! {:section section :idx new-idx})
+    (t/dispatch! :select-control {:section section :idx new-idx})
     (reset! palette/palette-tool nil)))
 
 (defn move-control!
@@ -101,7 +102,7 @@
         snapped-x (form-utils/snap-to-grid new-x ctrl-key?)
         snapped-y (form-utils/snap-to-grid new-y ctrl-key?)]
     (when (< control-idx (count controls))
-      (state-form/set-form-definition!
+      (t/dispatch! :set-form-definition
        (assoc-in current [section :controls]
                  (update controls control-idx
                          (fn [ctrl]
@@ -121,7 +122,7 @@
          :draggable true
          :on-click (fn [e]
                      (.stopPropagation e)
-                     (state-form/select-control! {:section section :idx idx}))
+                     (t/dispatch! :select-control {:section section :idx idx}))
          :on-drag-start (fn [e]
                           (let [rect (.getBoundingClientRect (.-target e))
                                 offset-x (- (.-clientX e) (.-left rect))
@@ -135,7 +136,7 @@
         [:button.control-delete
          {:on-click (fn [e]
                       (.stopPropagation e)
-                      (state-form/delete-control! section idx))
+                      (t/dispatch! :delete-control section idx))
           :title "Delete"}
          "\u00D7"]])]))
 
@@ -155,7 +156,7 @@
           current-height (form-utils/get-section-height form-def section)
           new-height (max 20 (+ current-height delta))]
       (reset! resize-state {:section section :start-y current-y})
-      (state-form/set-form-definition!
+      (t/dispatch! :set-form-definition
        (assoc-in form-def [section :height] new-height)))))
 
 (defn stop-resize! []
@@ -242,7 +243,7 @@
       {:class (when can-resize? "resizable")
        :title (if can-resize? (str "Drag to resize " (name (form-utils/get-section-above section))) section-label)
        :on-click (fn [e] (.stopPropagation e)
-                   (state-form/select-control! {:section section}))
+                   (t/dispatch! :select-control {:section section}))
        :on-mouse-down (when can-resize? #(start-resize! section %))}
       [:span.section-label section-label]]
      [:div.section-body
@@ -257,7 +258,7 @@
                              x (- (.-clientX e) (.-left rect))
                              y (- (.-clientY e) (.-top rect))]
                          (add-palette-control! tool section x y (.-ctrlKey e)))
-                       (state-form/select-control! {:section section}))))
+                       (t/dispatch! :select-control {:section section}))))
        :on-drop #(handle-section-drop! section %)}
       (if (empty? controls)
         [:div.section-empty (if (= section :detail) "Drag fields here" "")]
@@ -272,7 +273,7 @@
   [label action & [class]]
   [:div.context-menu-item
    {:class class
-    :on-click (fn [e] (.stopPropagation e) (state/hide-context-menu!) (action))}
+    :on-click (fn [e] (.stopPropagation e) (t/dispatch! :hide-context-menu) (action))}
    label])
 
 (defn- form-context-menu
@@ -317,25 +318,25 @@
     [:div.form-canvas
      {:tab-index 0
       :class (when @resize-state "resizing")
-      :on-click (fn [_] (state/hide-context-menu!))
+      :on-click (fn [_] (t/dispatch! :hide-context-menu))
       :on-mouse-move (fn [e] (when @resize-state (handle-resize! current e)))
       :on-mouse-up (fn [_] (stop-resize!))
       :on-mouse-leave (fn [_] (stop-resize!))
       :on-key-down (fn [e]
-                     (state/hide-context-menu!)
+                     (t/dispatch! :hide-context-menu)
                      (cond
                        (= (.-key e) "Escape")
                        (reset! palette/palette-tool nil)
 
                        (and selected (or (= (.-key e) "Delete") (= (.-key e) "Backspace")))
                        (do (.preventDefault e)
-                           (state-form/delete-control! (:section selected) (:idx selected)))))}
+                           (t/dispatch! :delete-control (:section selected) (:idx selected)))))}
      [:div.canvas-header
       [:div.form-selector
        {:class (when (nil? selected) "selected")
-        :on-click #(do (.stopPropagation %) (state-form/select-control! nil))
+        :on-click #(do (.stopPropagation %) (t/dispatch! :select-control nil))
         :on-context-menu #(do (.preventDefault %) (.stopPropagation %)
-                              (state/show-context-menu! (.-clientX %) (.-clientY %)))
+                              (t/dispatch! :show-context-menu (.-clientX %) (.-clientY %)))
         :title "Select form to edit properties (right-click for menu)"}]
       [:span "Form Design View"]
       [form-context-menu]]

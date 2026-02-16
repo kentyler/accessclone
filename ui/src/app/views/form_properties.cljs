@@ -2,6 +2,7 @@
   "Property sheet panel for the form editor"
   (:require [clojure.string :as str]
             [app.state :as state]
+            [app.transforms.core :as t]
             [app.state-form :as state-form]
             [app.views.form-utils :as form-utils]))
 
@@ -51,7 +52,7 @@
       (state/open-object! :modules (:id module))
       (let [modules (get-in @state/app-state [:objects :modules])
             available (str/join ", " (map :name modules))]
-        (state/set-error!
+        (t/dispatch! :set-error
          (str "No module found for form \"" form-name "\". "
               (if (seq modules)
                 (str "Available: " available)
@@ -260,10 +261,10 @@
                              (resolve-event-value current %)
                              (get current %)))
         on-change (cond
-                    is-control? #(state-form/update-control! section-key idx %1 %2)
-                    is-section? #(state-form/set-form-definition!
+                    is-control? #(t/dispatch! :update-control section-key idx %1 %2)
+                    is-section? #(t/dispatch! :set-form-definition
                                   (assoc-in current [section-key %1] %2))
-                    :else #(state-form/set-form-definition! (assoc current %1 %2)))]
+                    :else #(t/dispatch! :set-form-definition (assoc current %1 %2)))]
     [:div.property-sheet
      [:div.property-sheet-header
       [:span.property-sheet-title "Property Sheet"]

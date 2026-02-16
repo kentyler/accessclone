@@ -2,6 +2,7 @@
   "Table viewer - datasheet and design views"
   (:require [reagent.core :as r]
             [app.state :as state]
+            [app.transforms.core :as t]
             [app.state-table :as state-table]))
 
 ;; ============================================================
@@ -253,7 +254,7 @@
        :value (or name "")
        :placeholder "my_table_name"
        :auto-focus true
-       :on-change #(state-table/set-new-table-name! (.. % -target -value))}]]))
+       :on-change #(t/dispatch! :set-new-table-name (.. % -target -value))}]]))
 
 (defn- design-column-grid
   "Upper pane column grid for design view."
@@ -295,7 +296,7 @@
 
 (defn- menu-action [label action-fn & [class]]
   [(if class :div.menu-item.danger :div.menu-item)
-   {:on-click #(do (action-fn) (state-table/hide-table-context-menu!))}
+   {:on-click #(do (action-fn) (t/dispatch! :hide-table-context-menu))}
    label])
 
 (defn context-menu
@@ -305,7 +306,7 @@
     (when (:visible menu)
       [:div.context-menu
        {:style {:left (:x menu) :top (:y menu)}
-        :on-mouse-leave #(state-table/hide-table-context-menu!)}
+        :on-mouse-leave #(t/dispatch! :hide-table-context-menu)}
        [menu-action "New Record" state-table/new-table-record!]
        [:div.menu-divider]
        [menu-action "Cut" state-table/cut-table-cell!]
@@ -325,12 +326,12 @@
   [e]
   (case (.-key e)
     "Enter" (do (state-table/save-table-cell! (.. e -target -value))
-                (state-table/stop-editing-cell!))
-    "Escape" (state-table/stop-editing-cell!)
+                (t/dispatch! :stop-editing-cell))
+    "Escape" (t/dispatch! :stop-editing-cell)
     "Tab" (do (.preventDefault e)
               (state-table/save-table-cell! (.. e -target -value))
-              (state-table/stop-editing-cell!)
-              (state-table/move-to-next-cell! (.-shiftKey e)))
+              (t/dispatch! :stop-editing-cell)
+              (t/dispatch! :move-to-next-cell (.-shiftKey e)))
     nil))
 
 (defn- editing-cell-input
@@ -341,7 +342,7 @@
     {:type "text" :auto-focus true
      :default-value (if (nil? value) "" (str value))
      :on-blur #(do (state-table/save-table-cell! (.. % -target -value))
-                   (state-table/stop-editing-cell!))
+                   (t/dispatch! :stop-editing-cell))
      :on-key-down cell-key-handler}]])
 
 (defn- display-cell
@@ -349,12 +350,12 @@
   [row-idx col-name value is-selected]
   (let [display-value (cond (nil? value) "" (boolean? value) (if value "Yes" "No") :else (str value))]
     [:td {:class (str (when (nil? value) "null-value ") (when is-selected "selected"))
-          :on-click #(state-table/select-table-cell! row-idx col-name)
-          :on-double-click #(state-table/start-editing-cell! row-idx col-name)
+          :on-click #(t/dispatch! :select-table-cell row-idx col-name)
+          :on-double-click #(t/dispatch! :start-editing-cell row-idx col-name)
           :on-context-menu (fn [e]
                              (.preventDefault e)
-                             (state-table/select-table-cell! row-idx col-name)
-                             (state-table/show-table-context-menu! (.-clientX e) (.-clientY e)))}
+                             (t/dispatch! :select-table-cell row-idx col-name)
+                             (t/dispatch! :show-table-context-menu (.-clientX e) (.-clientY e)))}
      display-value]))
 
 (defn editable-cell
@@ -378,8 +379,8 @@
      [:td.row-number
       {:on-context-menu (fn [e]
                           (.preventDefault e)
-                          (state-table/select-table-row! row-idx)
-                          (state-table/show-table-context-menu! (.-clientX e) (.-clientY e)))}
+                          (t/dispatch! :select-table-row row-idx)
+                          (t/dispatch! :show-table-context-menu (.-clientX e) (.-clientY e)))}
       (inc row-idx)]
      (for [{:keys [name type]} fields]
        ^{:key name}
@@ -407,7 +408,7 @@
         loading? (get-in @state/app-state [:table-viewer :loading?])]
     [:div.table-datasheet-view
      {:on-click #(when (= (.-target %) (.-currentTarget %))
-                   (state-table/hide-table-context-menu!))}
+                   (t/dispatch! :hide-table-context-menu))}
      (cond loading? [:div.loading-data "Loading data..."]
            (empty? fields) [:div.no-columns "No columns defined"]
            :else [datasheet-table fields records])
@@ -449,7 +450,7 @@
   [view-mode dirty? new-table?]
   (case view-mode
     :design [:<>
-             [:button.secondary-btn {:disabled (not dirty?) :on-click #(state-table/revert-design!)} "Undo All"]
+             [:button.secondary-btn {:disabled (not dirty?) :on-click #(t/dispatch! :revert-design)} "Undo All"]
              [:button.primary-btn {:disabled (not dirty?)
                                    :on-click #(if new-table? (state-table/save-new-table!) (state-table/save-table-design!))} "Save"]]
     :datasheet [:<>

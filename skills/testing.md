@@ -37,6 +37,9 @@ cd electron && npm run test:coverage
 | `query-converter.test.js` | 95 | Access SQL → PostgreSQL conversion | Anything in `server/lib/query-converter/` |
 | `lint.test.js` | ~50 | Form/report structural + cross-object validation | `server/routes/lint/`, form/report validation logic |
 | `vba-stub-generator.test.js` | ~15 | VBA declaration parsing, PG function stub generation | `server/lib/vba-stub-generator.js` |
+| `vba-intent-mapper.test.js` | ~24 | Intent vocabulary, classification, mapping, counting | `server/lib/vba-intent-mapper.js` |
+| `vba-intent-extractor.test.js` | ~12 | Intent validation, known types (LLM tests gated behind `ACCESSCLONE_LLM_TESTS=1`) | `server/lib/vba-intent-extractor.js` |
+| `vba-wiring-generator.test.js` | ~35 | Mechanical CLJS templates, namespace gen, event handlers, requires detection | `server/lib/vba-wiring-generator.js` |
 | `db.schema-routing.test.js` | 2 | Multi-database schema isolation via X-Database-ID | Schema routing middleware, database switching |
 
 ### Electron Tests (`electron/__tests__/`)

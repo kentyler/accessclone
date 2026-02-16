@@ -163,7 +163,9 @@ Example — `load-form-for-editing!` decomposes into:
 
 ## VBA Import: Intent-Based Translation
 
-### Current Approach (v1)
+> **IMPLEMENTED** in Phase 4. See `server/lib/vba-intent-extractor.js`, `server/lib/vba-intent-mapper.js`, `server/lib/vba-wiring-generator.js`, and `skills/intent-extraction.md` for the working implementation. The module viewer's "Extract Intents" → "Generate Code" buttons drive this pipeline.
+
+### Previous Approach (v1, still available as "Direct Translate")
 
 VBA code → LLM translates line-by-line → PostgreSQL function → ClojureScript wrapper
 
@@ -172,9 +174,9 @@ Problems:
 - Translation errors are hard to diagnose (is the PG function wrong, or the CLJS wiring?)
 - Each Access database requires unique translation work
 
-### v2 Approach
+### v2 Approach (implemented)
 
-VBA code → **extract intent** → **map to named transforms** → wire transforms
+VBA code → **extract intent** (LLM) → **map to named transforms** (deterministic) → **wire transforms** (mechanical templates + LLM fallback)
 
 ```
 VBA Source:

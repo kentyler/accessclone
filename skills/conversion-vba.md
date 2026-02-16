@@ -1,6 +1,8 @@
 # Conversion VBA Skill
 
-Phase 5 of the conversion process. Translates VBA code from Access to PostgreSQL functions using the session-state pattern.
+> **Note**: For frontend VBA→ClojureScript translation, the preferred approach is now the **intent extraction pipeline** — see `skills/intent-extraction.md` and `skills/conversion-vba-cljs.md`. This file documents the **server-side PostgreSQL function** patterns used when VBA logic maps to database-level functions rather than frontend transforms.
+
+Translates VBA code from Access to PostgreSQL functions using the session-state pattern.
 
 ## Prerequisites
 

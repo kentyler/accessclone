@@ -65,9 +65,16 @@ This is AccessClone, a platform for converting MS Access databases to web applic
 - Only SELECT queries allowed for safety
 
 ### Module Viewer (ui/src/app/views/module_viewer.cljs)
-- Read-only display of PostgreSQL function source code
-- Shows function signature (arguments, return type)
-- All editing done via AI chat
+- Split view: VBA source (left) + ClojureScript translation (right)
+- Two-phase intent-based translation (recommended):
+  1. **Extract Intents** — LLM extracts structured JSON intents from VBA (POST /api/chat/extract-intents)
+  2. **Generate Code** — Mechanical templates + LLM fallback produce ClojureScript (POST /api/chat/generate-wiring)
+- Legacy **Direct Translate** button preserved for one-shot LLM translation
+- Intent summary panel: collapsible, shows procedures with color-coded stats (green=mechanical, yellow=LLM-assisted, red=gap)
+- Info panel: Name, version, imported date, status dropdown
+- `shared.modules` has `intents` JSONB column to persist extracted intent structure
+- Server libs: `vba-intent-mapper.js` (30 intent types, deterministic mapping), `vba-intent-extractor.js` (LLM extraction), `vba-wiring-generator.js` (22 mechanical CLJS templates)
+- Transforms: `set-module-intents`, `set-extracting-intents`; Flows: `extract-intents-flow`, `generate-wiring-flow`
 
 ### Macro Viewer (ui/src/app/views/macro_viewer.cljs)
 - Left panel: Raw macro definition (SaveAsText format, read-only)
@@ -152,7 +159,7 @@ LLM tools in chat: `query_dependencies`, `query_intent`, `propose_intent`
 The chat system prompt includes context based on the active tab:
 - **Forms**: `form_context` with `record_source` + full definition → `summarizeDefinition()` renders compact text (sections, controls with type/field/position)
 - **Reports**: `report_context` with `report_name`, `record_source` + full definition → same `summarizeDefinition()` helper
-- **Modules**: `module_context` with VBA source, CLJS translation, app object inventory
+- **Modules**: `module_context` with VBA source, CLJS translation, app object inventory. Also: `POST /api/chat/extract-intents` for structured intent extraction, `POST /api/chat/generate-wiring` for CLJS generation from intents
 - **Graph tools**: Always available for dependency/intent queries
 
 Auto-analyze: When a report or form is opened with no existing chat transcript, `maybe-auto-analyze!` in state.cljs automatically sends a prompt asking the LLM to describe the object's structure/purpose and flag potential issues. Uses a pending-flag pattern to handle the race between transcript loading and definition loading — whichever async operation completes second triggers the analysis. The generated analysis is saved as the transcript so it won't re-fire on subsequent opens.
@@ -207,6 +214,9 @@ See `/skills/` directory for conversion and design guidance:
 | Query converter (`server/lib/query-converter/`) | `npm test` | `server/__tests__/query-converter.test.js` (95 tests) |
 | Lint / validation (`server/routes/lint/`) | `npm test` | `server/__tests__/lint.test.js` |
 | VBA stubs (`server/lib/vba-stub-generator.js`) | `npm test` | `server/__tests__/vba-stub-generator.test.js` |
+| VBA intent mapper (`server/lib/vba-intent-mapper.js`) | `npm test` | `server/__tests__/vba-intent-mapper.test.js` (~24 tests) |
+| VBA intent extractor (`server/lib/vba-intent-extractor.js`) | `npm test` | `server/__tests__/vba-intent-extractor.test.js` (~12 tests) |
+| VBA wiring generator (`server/lib/vba-wiring-generator.js`) | `npm test` | `server/__tests__/vba-wiring-generator.test.js` (~35 tests) |
 | Schema routing / multi-DB middleware | `npm run test:db` | `server/__tests__/db.schema-routing.test.js` (needs PostgreSQL) |
 | Electron utilities (`electron/lib/`) | `npm test` | `electron/__tests__/*.test.js` |
 

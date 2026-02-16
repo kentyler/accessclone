@@ -105,6 +105,9 @@ Converts Access expressions (used in calculated controls, validation rules) to P
 **VBA Stub Generator** (`server/lib/vba-stub-generator.js`):
 Creates placeholder PostgreSQL functions from VBA module declarations so that views referencing user-defined functions don't fail during import.
 
+**VBA Intent Extraction Pipeline** (`server/lib/vba-intent-*.js` + `vba-wiring-generator.js`):
+Two-phase VBA translation: (1) `vba-intent-extractor.js` sends VBA to Claude Sonnet, gets structured JSON intents; (2) `vba-intent-mapper.js` maps 30 intent types to transforms/flows deterministically; (3) `vba-wiring-generator.js` produces ClojureScript via 22 mechanical templates with LLM fallback for complex patterns (DLookup, loops, RunSQL). 71 tests across 3 files.
+
 **Other server/lib files:**
 - `events.js` — Error/event logging to `shared.events`
 - `access-types.js` — Access type code → PostgreSQL type mapping
@@ -212,7 +215,7 @@ ClojureScript with Reagent (a React wrapper). Single-page app.
 | `report_editor.cljs`, `report_design.cljs`, `report_properties.cljs`, `report_view.cljs`, `report_utils.cljs` | Reports | **Banded** layout — 5 standard bands + dynamic group bands. Preview shows live data with group-break detection. |
 | `table_viewer.cljs` | Tables | Datasheet View (editable grid) + Design View (Access-style split pane with property sheet). |
 | `query_viewer.cljs` | Queries | Results grid + SQL editor. SELECT only. |
-| `module_viewer.cljs` | Modules | Read-only PG function source. VBA alongside translation. |
+| `module_viewer.cljs` | Modules | VBA source + CLJS translation. Two-phase intent extraction (Extract Intents → Generate Code) with legacy Direct Translate. Intent summary panel with color-coded stats. |
 | `macro_viewer.cljs` | Macros | Left: raw macro definition. Right: ClojureScript translation. |
 | `access_database_viewer.cljs` | Import UI | Scans Access DB, shows objects, drives import workflow. |
 | `sidebar.cljs` | Navigation | Object tree grouped by type. Database switcher. |
@@ -230,7 +233,7 @@ Every object type has a chat panel. The system prompt includes full context abou
 **How context is built:**
 - **Forms**: record source + full form definition → `summarizeDefinition()` renders compact text
 - **Reports**: record source + full report definition → same summarizer
-- **Modules**: VBA source + ClojureScript translation + app object inventory
+- **Modules**: VBA source + ClojureScript translation + app object inventory. Also: intent extraction endpoints (`/api/chat/extract-intents`, `/api/chat/generate-wiring`) for structured VBA→intent→CLJS pipeline
 - **Tables/Queries**: schema metadata
 
 **Chat tools** (LLM can call these):
@@ -338,8 +341,11 @@ If the user asks about:
 **"Where are the tests?"**
 > - `server/__tests__/query-converter.test.js` — 95 tests for the query converter
 > - `server/__tests__/vba-stub-generator.test.js` — VBA stub generation tests
+> - `server/__tests__/vba-intent-mapper.test.js` — 24 intent mapping tests
+> - `server/__tests__/vba-intent-extractor.test.js` — 12 intent validation tests
+> - `server/__tests__/vba-wiring-generator.test.js` — 35 CLJS template tests
 > - `electron/__tests__/` — Electron tests
-> - Run with: `cd server && npm test`
+> - Run with: `npm test` (from project root)
 
 **"What's the difference between CLAUDE.md and this guide?"**
 > `CLAUDE.md` is for an AI that's actively **developing** the codebase — it contains implementation details, coding conventions, gotchas, and debugging notes. This guide is for an AI (or human) that's **understanding** the codebase — it focuses on the narrative, how pieces connect, and answering exploratory questions.

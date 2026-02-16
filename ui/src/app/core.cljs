@@ -3,6 +3,7 @@
   (:require [reagent.core :as r]
             [reagent.dom :as rdom]
             [app.state :as state]
+            [app.state-transforms]
             [app.views.main :as main]))
 
 (defn ^:dev/after-load mount-root []

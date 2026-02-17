@@ -84,8 +84,17 @@ This is AccessClone, a platform for converting MS Access databases to web applic
 - Auto-analyze fires on first open, LLM describes structure/purpose
 - Macros stored in `shared.macros` table with append-only versioning
 
-### Access Import — AutoExec Warning
-**IMPORTANT**: Before opening any Access database via COM automation (import scripts, export scripts, diagnose script), check if it has an AutoExec macro. If so, the user must rename it to "xAutoExec" first — otherwise it will fire on open, potentially showing a login dialog or running startup code that hangs the PowerShell process indefinitely.
+### Access Import — AutoExec Handling
+AutoExec macros are now handled automatically by the import pipeline:
+- `disable_autoexec.ps1` uses `DAO.DBEngine.120` (engine-level, no UI trigger) to rename `AutoExec` → `xAutoExec` in `MSysObjects`. The `-Restore` switch reverses it.
+- `GET /api/access-import/database` calls disable before listing, restore after — no manual renaming needed.
+- `convert_mdb.ps1` also handles AutoExec internally during .mdb → .accdb conversion.
+
+### Access Import — .mdb Support
+`.mdb` files (Access 97-2003 format) are automatically converted to `.accdb` when selected in the import UI:
+- `convert_mdb.ps1` disables AutoExec via DAO, converts via `Access.Application.SaveAsNewDatabase` (format 12), restores AutoExec in the original .mdb.
+- Wired into `GET /api/access-import/database` — if the path ends in `.mdb`, conversion runs first. The response includes `convertedFrom` so the frontend knows.
+- The rest of the import pipeline runs unchanged on the resulting `.accdb`.
 
 ### Access Import — PowerShell Script Notes
 - `export_table.ps1` uses a custom `ConvertTo-SafeJson` serializer instead of `ConvertTo-Json` — PowerShell's built-in cmdlet has known bugs with embedded double quotes in large strings (e.g. HTML in memo fields). The custom serializer handles escaping of `"`, `\`, `\r`, `\n`, `\t` correctly.

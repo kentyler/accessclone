@@ -6,7 +6,13 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 
 ## Current State
 
-### Just Shipped (2026-02-16)
+### Just Shipped (2026-02-17)
+- **Automatic .mdb → .accdb conversion**: `convert_mdb.ps1` converts Access 97-2003 .mdb files to .accdb via `Access.Application.SaveAsNewDatabase`. Wired into `GET /api/access-import/database` — user selects an .mdb, pipeline silently converts and runs unchanged. Response includes `convertedFrom` field.
+- **Automatic AutoExec disabling**: `disable_autoexec.ps1` renames AutoExec → xAutoExec via `DAO.DBEngine.120` (engine-level, no macro trigger). Called before/after listing scripts in the `/database` endpoint. No more manual renaming needed.
+- **README rewrite**: "Copy the intent, not the code" philosophy — explains intent extraction pipeline as the core differentiator. Added AI-Assisted Setup section (shell-access vs chat-only tools). Added appendix positioning AccessClone as an AI agent substrate for OpenClaw integration.
+- **INSTRUCTIONS.md rewrite**: Distinguishes shell-access tools (Claude Code, Codex, Cursor) from chat-only tools (ChatGPT, Claude web) with mode-specific guidance throughout all setup steps.
+
+### Previously Shipped (2026-02-16)
 - **Access &-hotkey rendering**: Captions with `&` markers now render the hotkey letter underlined (e.g. `"&Save"` → "**S**ave"). Alt+letter activates the matching control. Implementation: `render-hotkey-text` and `extract-hotkey` in `editor_utils.cljs`, hotkey handler in `form_view.cljs`, `.hotkey` CSS class. Applies to all control types via `display-text` (forms and reports). `strip-access-hotkey` made public for plain-text matching in `resolve-button-action`.
 
 ### Previously Shipped (2026-02-12)
@@ -22,8 +28,9 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 - 4 batch PowerShell scripts in `scripts/access/` (untracked): `export_forms_batch.ps1`, `export_reports_batch.ps1`, `export_modules_batch.ps1`, `export_macros_batch.ps1`
 
 ### Next Up
-- GitHub repo presentation: README.md, LICENSE, repo metadata (see below)
+- Test .mdb → .accdb conversion end-to-end with a real .mdb file
 - Test runtime form state sync end-to-end: open a form, navigate records, verify `form_control_state` populated and dependent views filter correctly
+- OpenClaw skill prototype: export intent graph + form definitions in a format an OpenClaw agent can consume
 
 ---
 

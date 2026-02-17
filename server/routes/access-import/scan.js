@@ -121,6 +121,20 @@ module.exports = function(router, pool) {
         // Non-fatal — proceed with listing
       }
 
+      // Detect Access version
+      let accessVersion = null;
+      try {
+        const detectScript = path.join(scriptsDir, 'detect_version.ps1');
+        const detectOutput = await runPowerShell(detectScript, ['-DatabasePath', dbPath]);
+        const detectResult = JSON.parse(detectOutput);
+        if (!detectResult.error) {
+          accessVersion = detectResult;
+        }
+      } catch (err) {
+        console.error('Error detecting Access version:', err.message);
+        // Non-fatal — proceed without version info
+      }
+
       // Get forms
       let forms = [];
       try {
@@ -212,6 +226,11 @@ module.exports = function(router, pool) {
       // Let the frontend know this was converted from .mdb
       if (convertedFrom) {
         response.convertedFrom = convertedFrom;
+      }
+
+      // Include detected Access version info
+      if (accessVersion) {
+        response.accessVersion = accessVersion;
       }
 
       res.json(response);

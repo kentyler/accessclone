@@ -7,7 +7,7 @@ const path = require('path');
 const { logError } = require('../../lib/events');
 const { clearSchemaCache } = require('../data');
 const { convertAccessExpression, sanitizeName } = require('../../lib/query-converter');
-const { resolveType, quoteIdent } = require('../../lib/access-types');
+const { resolveType, mapAccessType, quoteIdent } = require('../../lib/access-types');
 const { makeLogImport, runPowerShell } = require('./helpers');
 
 module.exports = function(router, pool) {
@@ -64,32 +64,7 @@ module.exports = function(router, pool) {
         return res.status(400).json({ error: 'No importable fields found in table' });
       }
 
-      // 3. Map Access type codes to resolveType-compatible format
-      function mapAccessType(field) {
-        const code = field.type;
-        const isAutoNum = field.isAutoNumber;
-        switch (code) {
-          case 1:  return { type: 'Yes/No' };
-          case 2:  return { type: 'Number', fieldSize: 'Byte' };
-          case 3:  return { type: 'Number', fieldSize: 'Integer' };
-          case 4:  return isAutoNum
-                     ? { type: 'AutoNumber' }
-                     : { type: 'Number', fieldSize: 'Long Integer' };
-          case 5:  return { type: 'Currency' };
-          case 6:  return { type: 'Number', fieldSize: 'Single' };
-          case 7:  return { type: 'Number', fieldSize: 'Double' };
-          case 8:  return { type: 'Date/Time' };
-          case 10: return { type: 'Short Text', maxLength: field.size || 255 };
-          case 12: return { type: 'Long Text' };
-          case 15: return { type: 'Short Text', maxLength: 38 };
-          case 16: return { type: 'Number', fieldSize: 'Long Integer' };
-          case 18: {
-            const rt = field.resultType || 10;
-            return mapAccessType({ ...field, type: rt, isAutoNumber: false });
-          }
-          default: return { type: 'Short Text', maxLength: 255 };
-        }
-      }
+      // mapAccessType is imported from ../../lib/access-types
 
       const pgTableName = sanitizeName(tableName);
 

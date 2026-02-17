@@ -14,9 +14,11 @@ param(
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
-# Types to skip: OLE (11), Binary (17), Attachment (19)
+# Types to skip:
+#   OLE (11), Binary (17), Attachment (19/101),
+#   Complex/multi-valued (102-109) — would need junction table decomposition
 # Note: Calculated (18) is now handled — extracted as PG generated columns
-$skipTypes = @(11, 17, 19)
+$skipTypes = @(11, 17, 19, 101, 102, 103, 104, 105, 106, 107, 108, 109)
 
 # Use .NET's built-in JSON string escaper — handles all edge cases
 # (embedded quotes, backslashes, control chars, Unicode) correctly.
@@ -115,6 +117,26 @@ try {
             }
         } catch {}
 
+        # For Decimal fields (type 20), extract precision and scale.
+        # DAO does NOT expose these — must use ADOX.Catalog (ADO Extensions).
+        # Falls back to Access defaults (precision=18, scale=0) if ADOX unavailable.
+        if ($typeCode -eq 20) {
+            $fieldInfo.precision = 18
+            $fieldInfo.scale = 0
+            try {
+                if (-not $script:adoxCatalog) {
+                    $script:adoxCatalog = New-Object -ComObject ADOX.Catalog
+                    $connStr = "Provider=Microsoft.ACE.OLEDB.12.0;Data Source=$DatabasePath"
+                    $script:adoxCatalog.ActiveConnection = $connStr
+                }
+                $col = $script:adoxCatalog.Tables.Item($TableName).Columns.Item($field.Name)
+                $fieldInfo.precision = [int]$col.Precision
+                $fieldInfo.scale = [int]$col.NumericScale
+            } catch {
+                # ADOX unavailable or failed — keep defaults (18,0)
+            }
+        }
+
         # For calculated columns (type 18), extract expression and result type
         if ($typeCode -eq 18) {
             $fieldInfo.isCalculated = $true
@@ -170,13 +192,19 @@ try {
                 } elseif ($fType -eq 1) {
                     # Yes/No -> boolean
                     $row[$fname] = [bool]$val
-                } elseif ($fType -eq 8) {
-                    # Date/Time -> ISO 8601
+                } elseif ($fType -eq 8 -or $fType -eq 26) {
+                    # Date/Time (8) or DateTimeExtended (26) -> ISO 8601
                     try {
-                        $row[$fname] = ([datetime]$val).ToString("yyyy-MM-ddTHH:mm:ss")
+                        $row[$fname] = ([datetime]$val).ToString("yyyy-MM-ddTHH:mm:ss.fffffff")
                     } catch {
                         $row[$fname] = $null
                     }
+                } elseif ($fType -eq 16) {
+                    # BigInt -> string to avoid JSON precision loss beyond 2^53
+                    $row[$fname] = $val.ToString()
+                } elseif ($fType -eq 20) {
+                    # Decimal -> string to preserve exact precision/scale
+                    $row[$fname] = $val.ToString([System.Globalization.CultureInfo]::InvariantCulture)
                 } elseif ($fType -eq 15) {
                     # GUID -> string
                     $row[$fname] = $val.ToString()
@@ -213,6 +241,12 @@ catch {
     exit 1
 }
 finally {
+    if ($script:adoxCatalog) {
+        try {
+            $script:adoxCatalog.ActiveConnection.Close()
+            [System.Runtime.InteropServices.Marshal]::ReleaseComObject($script:adoxCatalog) | Out-Null
+        } catch {}
+    }
     if ($db) {
         try { $db.Close() } catch {}
     }

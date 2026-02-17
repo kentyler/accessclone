@@ -238,3 +238,46 @@ Contributions are welcome! Please see the [issue templates](.github/ISSUE_TEMPLA
 ## License
 
 [MIT](LICENSE) — Kenneth Tyler, 2026
+
+---
+
+## Appendix: Beyond the Browser — AccessClone as an AI Agent Substrate
+
+The web application described above is one way to use AccessClone's output. There is another.
+
+### The observation
+
+Millions of Access databases encode real business processes — order fulfillment, inventory tracking, customer management, compliance workflows. These processes are currently operated by humans clicking through forms. But the business logic isn't in the clicking. It's in the structure: which fields get validated, what data gets looked up, which forms chain together, what conditions trigger what actions.
+
+AccessClone already extracts all of this into machine-readable form:
+
+| What AccessClone produces | What it represents |
+|---|---|
+| **30 typed intents** (validate-required, open-form-filtered, save-record, dlookup, confirm-action, ...) | The action space — every operation the business process performs |
+| **Dependency graph** (table → column → form → control → intent) | The reasoning substrate — how objects connect and why |
+| **Form definitions as JSON** | Workflow descriptions — inputs, outputs, validation rules, navigation logic |
+| **Queries as PostgreSQL views** | Data access patterns — declarative, composable, standard SQL |
+
+This isn't a web app. It's a structured operational specification of a business process.
+
+### The integration
+
+[OpenClaw](https://openclaw.ai/) is an open-source autonomous AI agent runtime — a long-running service that connects AI models to messaging platforms and gives them the ability to act. It has a modular skill system, runs locally, and is model-agnostic.
+
+An OpenClaw skill backed by AccessClone's structured output could operate a business process autonomously:
+
+```
+Access DB (opaque binary)
+    → AccessClone (extraction)
+        → Structured intents + dependency graph + PG views
+            → OpenClaw skill (execution)
+                → AI agent operates the business process
+```
+
+The agent doesn't need to "figure out" what a form does. It reads the intent graph: `validate-required(field: "CustomerID")` → `save-record` → `show-message("Order saved")`. Each intent maps to a concrete action the agent can execute against the database. The dependency graph tells it what data feeds what process. The form definitions tell it what a human would see — which the agent can describe, summarize, or present through any channel (Slack, WhatsApp, email, API).
+
+### The implication
+
+The bottleneck for automating white-collar work isn't AI capability — it's having structured representations of specific business processes. Access databases *are* structured representations of business processes, but they're trapped in a proprietary format no AI can reason over.
+
+AccessClone is the extraction layer. The browser UI is a development and debugging tool. The real output is machine-operable business logic — ready for an autonomous agent to run.

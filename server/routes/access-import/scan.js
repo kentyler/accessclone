@@ -65,10 +65,12 @@ module.exports = function(router, pool) {
   /**
    * GET /api/access-import/database/:path
    * Get details about a specific Access database (tables, forms, reports)
+   * If path is an .mdb file, silently converts to .accdb first.
+   * AutoExec macros are disabled before any COM automation.
    */
   router.get('/database', async (req, res) => {
     try {
-      const dbPath = req.query.path;
+      let dbPath = req.query.path;
 
       if (!dbPath) {
         return res.status(400).json({ error: 'Database path required' });
@@ -82,6 +84,42 @@ module.exports = function(router, pool) {
       }
 
       const scriptsDir = path.join(__dirname, '..', '..', '..', 'scripts', 'access');
+      let convertedFrom = null;
+
+      // If .mdb, convert to .accdb first (handles AutoExec internally)
+      if (dbPath.toLowerCase().endsWith('.mdb')) {
+        try {
+          const convertScript = path.join(scriptsDir, 'convert_mdb.ps1');
+          const convertOutput = await runPowerShell(convertScript, ['-DatabasePath', dbPath]);
+          const convertResult = JSON.parse(convertOutput);
+          if (convertResult.success) {
+            console.log(`Converted .mdb to .accdb: ${convertResult.outputPath}`);
+            convertedFrom = dbPath;
+            dbPath = convertResult.outputPath;
+          } else {
+            console.error(`Failed to convert .mdb: ${convertResult.error}`);
+            // Fall through and try to list the .mdb directly
+          }
+        } catch (err) {
+          console.error('Error converting .mdb:', err.message);
+          // Fall through and try to list the .mdb directly
+        }
+      }
+
+      // Disable AutoExec before listing (safe for both .mdb and .accdb)
+      let autoExecDisabled = false;
+      try {
+        const disableScript = path.join(scriptsDir, 'disable_autoexec.ps1');
+        const disableOutput = await runPowerShell(disableScript, ['-DatabasePath', dbPath]);
+        const disableResult = JSON.parse(disableOutput);
+        autoExecDisabled = disableResult.found === true;
+        if (autoExecDisabled) {
+          console.log(`Disabled AutoExec macro in ${dbPath}`);
+        }
+      } catch (err) {
+        console.error('Error disabling AutoExec:', err.message);
+        // Non-fatal — proceed with listing
+      }
 
       // Get forms
       let forms = [];
@@ -149,7 +187,18 @@ module.exports = function(router, pool) {
         console.error('Error listing macros:', err.message);
       }
 
-      res.json({
+      // Restore AutoExec after listing
+      if (autoExecDisabled) {
+        try {
+          const disableScript = path.join(scriptsDir, 'disable_autoexec.ps1');
+          await runPowerShell(disableScript, ['-DatabasePath', dbPath, '-Restore']);
+          console.log(`Restored AutoExec macro in ${dbPath}`);
+        } catch (err) {
+          console.error('Error restoring AutoExec:', err.message);
+        }
+      }
+
+      const response = {
         path: dbPath,
         name: path.basename(dbPath),
         forms: forms,
@@ -158,7 +207,14 @@ module.exports = function(router, pool) {
         queries: queries,
         modules: modules,
         macros: macros
-      });
+      };
+
+      // Let the frontend know this was converted from .mdb
+      if (convertedFrom) {
+        response.convertedFrom = convertedFrom;
+      }
+
+      res.json(response);
     } catch (err) {
       console.error('Error getting database details:', err);
       logError(pool, 'GET /api/access-import/database', 'Failed to get database details', err, { details: { path: req.query.path } });

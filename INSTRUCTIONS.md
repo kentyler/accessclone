@@ -1,18 +1,33 @@
 # AccessClone Setup Instructions
 
-> **Note to the user:** If you get stuck on any step below, paste the step and any error messages into an AI assistant (ChatGPT, Claude, etc.) and it can walk you through it. When the AI gives you a command to run, always paste the full output back so it can see what happened and know whether to proceed or troubleshoot.
+These instructions are designed for both human readers and AI assistants. AccessClone converts Microsoft Access databases (.accdb/.mdb) into web applications backed by PostgreSQL.
 
-These instructions are designed for both human readers and AI assistants. If you are an AI agent helping a user install AccessClone, follow the steps below. AccessClone converts Microsoft Access databases (.accdb/.mdb) into web applications backed by PostgreSQL.
+## Which kind of AI assistant are you using?
 
-If you can execute commands directly (e.g. Claude Code, Codex, or another agent with shell access), run the commands yourself instead of asking the user to copy-paste them. The user-facing tips about pasting output back don't apply — you can see the results directly.
+There are two ways an AI assistant can help you with this setup. Knowing which one you have changes the experience:
 
-## Your Approach
+### Option A: Tool with shell access (Claude Code, Codex, Cursor, Windsurf, etc.)
+
+These tools can execute commands directly on your machine. They can scan your system, install software, create databases, and start the server — all without you copying and pasting anything. You just approve each step.
+
+> **If you are an AI agent with shell access:** Run the commands yourself instead of asking the user to copy-paste them. You can see the results directly — the tips below about pasting output back don't apply to you. Proceed through the steps, running commands and checking results as you go.
+
+### Option B: Chat-only assistant (ChatGPT, Claude on the web, etc.)
+
+These tools can read these instructions and guide you step by step, but they cannot run commands on your machine. You'll need to copy commands from the chat, paste them into PowerShell, run them, and then paste the output back so the AI can see what happened and advise you on next steps.
+
+> **If you are an AI agent without shell access:** You cannot run commands — the user must do it. For every command, tell the user exactly what to paste into PowerShell, and remind them to copy the full output back to you so you can check whether it succeeded or needs troubleshooting.
+
+> **Note to the user:** If you're reading this yourself and get stuck on any step, paste the step and any error messages into whichever AI assistant you're using. If your AI can't run commands for you, always paste the full output back so it can see what happened.
+
+## Your Approach (for AI assistants)
 
 - Be patient and clear. The user may not be technical.
 - **Detect first, ask later.** Scan the system before asking questions the user might not know the answer to.
 - Adapt to their situation (existing software, remote databases, etc.)
-- If you can run commands directly, do so. Otherwise, ask the user to run them and remind them to paste the output back.
-- Ask before running commands that modify the system.
+- **Shell-access tools:** Run commands directly. Check results yourself. Only ask the user for decisions (e.g. database name, password), not for command output.
+- **Chat-only tools:** Give the user one command at a time. Explain what it does before they run it. Remind them to paste the full output back after each command.
+- Ask before running commands that modify the system (applies to both modes).
 - If something fails, help diagnose and fix it.
 
 ## What's Needed
@@ -28,9 +43,13 @@ Optional:
 
 ## Step 1: Scan the System
 
-Ask the user to run the included `check-system.ps1` script (right-click > "Run with PowerShell") and paste the output back to you. This checks for Node.js, PostgreSQL services, and PostgreSQL installations.
+**Shell-access tools:** Run `check-system.ps1` directly (or the individual commands below) and read the output yourself.
 
-If the user can't run the script, have them run these individual commands in PowerShell and share the results:
+**Chat-only tools:** Ask the user to run the included `check-system.ps1` script (right-click > "Run with PowerShell") and paste the output back to you.
+
+This checks for Node.js, PostgreSQL services, and PostgreSQL installations.
+
+If the script can't be run, use these individual commands in PowerShell:
 
 ```
 node --version
@@ -45,22 +64,22 @@ Get-Service postgresql*
 winget install OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements
 ```
 
-Tell the user they'll need to close and reopen their terminal after Node.js installs.
+The user will need to close and reopen their terminal after Node.js installs (chat-only tools: remind them of this).
 
 If `winget` is not available, direct them to https://nodejs.org to download the installer.
 
 ### If PostgreSQL is missing:
 
-Ask the user what they'd like to do:
+Ask the user what they'd like to do (shell-access tools can detect an existing installation before asking):
 1. **Install locally** (recommended for getting started)
-2. **Use an existing PostgreSQL server** (local or remote) - just collect host, port, username, password
+2. **Use an existing PostgreSQL server** (local or remote) — collect host, port, username, password
 
 To install locally:
 ```powershell
 winget install PostgreSQL.PostgreSQL --accept-package-agreements --accept-source-agreements
 ```
 
-Important: The installer sets a password for the `postgres` user. Tell the user to remember it. If they didn't see a prompt, the password may need to be reset (see Troubleshooting below).
+Important: The installer sets a password for the `postgres` user. The user must remember it. If they didn't see a prompt, the password may need to be reset (see Troubleshooting below).
 
 ### If PostgreSQL is installed but not running:
 
@@ -71,7 +90,7 @@ Start-Service postgresql-x64-18
 
 ## Step 3: Verify PostgreSQL Connection
 
-Paste this single line into PowerShell (adjust the password and version number):
+Run this command to test the connection (adjust the password and version number):
 
 ```powershell
 $env:PGPASSWORD="<your password>"; & "C:\Program Files\PostgreSQL\<version>\bin\psql.exe" -U postgres -c "SELECT version();"
@@ -81,7 +100,11 @@ If this fails, see Troubleshooting below.
 
 ## Step 4: Locate the AccessClone Folder
 
-Ask the user where they unzipped AccessClone. The folder should contain `server/`, `ui/`, and `scripts/` subdirectories. All subsequent commands should run from this folder.
+**Shell-access tools:** You likely already know the project path (check your current working directory or search for `server/config.js`). Verify the folder structure directly.
+
+**Chat-only tools:** Ask the user where they unzipped AccessClone and have them paste the path.
+
+The folder should contain `server/`, `ui/`, and `scripts/` subdirectories. All subsequent commands should run from this folder.
 
 ```powershell
 # Verify the folder structure
@@ -133,7 +156,11 @@ $env:PGPASSWORD = "<password>"
 node index.js
 ```
 
-The server starts on http://localhost:3001. Have the user open it in their browser.
+The server starts on http://localhost:3001. The user should open this in their browser.
+
+**Shell-access tools:** You can verify the server is running by hitting the API directly (see below). Tell the user the URL to open.
+
+**Chat-only tools:** Tell the user to open http://localhost:3001 in their browser and describe what they see.
 
 To verify the API is working (in a separate terminal):
 ```powershell

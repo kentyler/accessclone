@@ -60,6 +60,70 @@ async function buildSchemaContext(pool, schemaName) {
 }
 
 /**
+ * Build VBA function context for the LLM prompt.
+ * When a PG error says "column X does not exist", search VBA modules
+ * for function declarations matching the missing column name(s) and
+ * return the full function bodies so the LLM can inline them.
+ */
+async function buildVbaContext(pool, databaseId, pgError) {
+  if (!databaseId || !pgError) return '';
+
+  // Extract missing column names from PG error messages
+  const missingCols = [];
+  const colRegex = /column (?:"?[\w]+\.)?(?:"?)([\w]+)"? does not exist/gi;
+  let match;
+  while ((match = colRegex.exec(pgError)) !== null) {
+    missingCols.push(match[1].toLowerCase());
+  }
+  if (missingCols.length === 0) return '';
+
+  // Load all current VBA modules for this database
+  const modResult = await pool.query(
+    `SELECT name, vba_source FROM shared.modules
+     WHERE database_id = $1 AND is_current = true AND vba_source IS NOT NULL`,
+    [databaseId]
+  );
+  if (modResult.rows.length === 0) return '';
+
+  // Search each module for function declarations matching missing column names
+  const matchedFunctions = [];
+  for (const mod of modResult.rows) {
+    const source = mod.vba_source;
+    for (const colName of missingCols) {
+      // Match "Function <name>" (case-insensitive)
+      const funcRegex = new RegExp(
+        `^((?:Public|Private)\\s+)?Function\\s+${colName}\\b[^\\r\\n]*[\\s\\S]*?End\\s+Function`,
+        'gim'
+      );
+      let funcMatch;
+      while ((funcMatch = funcRegex.exec(source)) !== null) {
+        matchedFunctions.push({ moduleName: mod.name, body: funcMatch[0].trim() });
+      }
+    }
+  }
+
+  if (matchedFunctions.length === 0) return '';
+
+  // Group by module
+  const byModule = {};
+  for (const { moduleName, body } of matchedFunctions) {
+    if (!byModule[moduleName]) byModule[moduleName] = [];
+    byModule[moduleName].push(body);
+  }
+
+  const lines = ['VBA FUNCTIONS (referenced as columns in Access queries — inline the expression):'];
+  for (const [modName, bodies] of Object.entries(byModule)) {
+    lines.push(`Module "${modName}":`);
+    for (const body of bodies) {
+      lines.push(body);
+      lines.push('');
+    }
+  }
+
+  return lines.join('\n');
+}
+
+/**
  * Format control mapping for LLM context.
  * Format: "formName.controlName → tableName.columnName"
  */
@@ -78,6 +142,7 @@ function formatControlMapping(controlMapping) {
  * @param {string} opts.apiKey - Anthropic API key
  * @param {Object} opts.pool - pg Pool instance
  * @param {string} opts.schemaName - Target PG schema name
+ * @param {number} opts.databaseId - Target database ID (for VBA module lookup)
  * @param {string} opts.originalAccessSQL - Original Access SQL
  * @param {string} opts.failedPgSQL - The regex-converted SQL that failed
  * @param {string} opts.pgError - The PostgreSQL error message
@@ -85,7 +150,7 @@ function formatControlMapping(controlMapping) {
  * @returns {{ statements: string[], pgObjectType: string, warnings: string[] }}
  */
 async function convertQueryWithLLM({
-  apiKey, pool, schemaName, originalAccessSQL,
+  apiKey, pool, schemaName, databaseId, originalAccessSQL,
   failedPgSQL, pgError, controlMapping
 }) {
   const warnings = [];
@@ -93,6 +158,7 @@ async function convertQueryWithLLM({
   // Build schema context
   const schemaContext = await buildSchemaContext(pool, schemaName);
   const mappingContext = formatControlMapping(controlMapping || {});
+  const vbaContext = await buildVbaContext(pool, databaseId, pgError);
 
   const systemPrompt = `You convert Microsoft Access SQL to PostgreSQL DDL statements.
 
@@ -137,7 +203,7 @@ For unresolved form references, use NULL with a comment explaining what was unre
 
 DATABASE SCHEMA:
 ${schemaContext}
-
+${vbaContext ? '\n' + vbaContext + '\n' : ''}
 Return ONLY the SQL statement(s). No markdown code fences, no explanations, no comments outside the SQL.
 If multiple statements are needed (e.g. helper function + view), separate them with semicolons.`;
 

@@ -154,6 +154,7 @@ module.exports = function(router, pool, secrets) {
             try {
               const llmResult = await convertQueryWithLLM({
                 apiKey, pool, schemaName,
+                databaseId: targetDatabaseId,
                 originalAccessSQL: queryData.sql,
                 failedPgSQL: result.statements.join(';\n'),
                 pgError: regexErr.message,

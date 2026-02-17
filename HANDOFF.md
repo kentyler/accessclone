@@ -6,7 +6,10 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 
 ## Current State
 
-### Just Shipped (2026-02-12)
+### Just Shipped (2026-02-16)
+- **Access &-hotkey rendering**: Captions with `&` markers now render the hotkey letter underlined (e.g. `"&Save"` → "**S**ave"). Alt+letter activates the matching control. Implementation: `render-hotkey-text` and `extract-hotkey` in `editor_utils.cljs`, hotkey handler in `form_view.cljs`, `.hotkey` CSS class. Applies to all control types via `display-text` (forms and reports). `strip-access-hotkey` made public for plain-text matching in `resolve-button-action`.
+
+### Previously Shipped (2026-02-12)
 - **LLM fallback for query conversion** (PR #23): When the regex-based Access→PG converter produces SQL that fails execution, automatically falls back to Claude Sonnet with schema context (tables, views, columns, functions), control mappings, and the PG error message. LLM-assisted conversions flagged in `shared.import_issues` with category `llm-assisted`. Graceful degradation when no API key configured.
 - **VBA stub function generator**: `createStubFunctions()` parses VBA modules for function declarations and creates placeholder PG functions so views can reference user-defined functions. Endpoint: `POST /api/access-import/create-function-stubs`.
 - **Query converter fixes**: EXTRACT(YEAR FROM ...) no longer schema-prefixes the FROM keyword. DAO parameters that are actually form/parent refs (`[Parent].[EmployeeID]`, `[Table].[Column]`) filtered out — queries stay as views instead of becoming functions.

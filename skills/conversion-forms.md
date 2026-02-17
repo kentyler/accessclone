@@ -136,6 +136,9 @@ AccessClone uses `:text` not `:caption`:
 :caption "..."      ; incorrect
 ```
 
+### Preserve &-Hotkey Markers
+Access captions use `&` to designate keyboard hotkeys (e.g. `"&Save"` underlines S). **Preserve these markers as-is** during import — AccessClone renders them with underlined hotkey letters and wires up Alt+letter activation in Form View. Do not strip `&` from captions during conversion.
+
 ### BOM Removal
 PowerShell may add UTF-8 BOM. Remove it:
 ```javascript

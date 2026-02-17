@@ -221,7 +221,7 @@ ClojureScript with Reagent (a React wrapper). Single-page app.
 | `sidebar.cljs` | Navigation | Object tree grouped by type. Database switcher. |
 | `tabs.cljs` | Tab bar | Manages open tabs, reactivation, close. |
 | `main.cljs` | Layout | Top-level layout: sidebar + tabs + content. |
-| `editor_utils.cljs` | Shared | Drag-drop helpers, grid snapping, resize handles. |
+| `editor_utils.cljs` | Shared | Grid snapping, field resolution, value formatting, `display-text` (returns hiccup with &-hotkey underlines), `render-hotkey-text`, `strip-access-hotkey`, `extract-hotkey`. |
 | `expressions.cljs` | Shared | Frontend expression evaluation. |
 | `logs_viewer.cljs` | Diagnostics | Event log viewer. |
 | `sql_function_viewer.cljs` | Functions | PG function source viewer. |

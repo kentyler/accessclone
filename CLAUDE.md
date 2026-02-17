@@ -35,6 +35,7 @@ This is AccessClone, a platform for converting MS Access databases to web applic
 - Close button in forms calls `close-tab!` to close current tab
 - Popup Forms: `:popup 1` renders as floating window; `:modal 1` adds full-screen backdrop (z-index 900)
 - `normalize-form-definition` in state_form.cljs normalizes form data on load: coerces control `:type` to keyword, yes/no props to 0/1 integers (with defaults), and numeric props to numbers — across form-level and all sections
+- **Access &-hotkey rendering**: Captions with `&` markers (e.g. `"Product &Vendors"`) render the hotkey letter underlined via `render-hotkey-text` in `editor_utils.cljs`. `display-text` returns hiccup (not plain strings) so labels/buttons/tabs show underlined hotkeys in both forms and reports. `strip-access-hotkey` (public) returns plain text for action matching. Alt+letter keyboard handler in `form_view.cljs` activates the matching control.
 
 ### Report Editor (ui/src/app/views/report_editor.cljs)
 - Reports are **banded** (unlike forms which have 3 fixed sections: header/detail/footer). A banded report has 5 standard bands plus dynamic group bands that repeat based on data grouping:

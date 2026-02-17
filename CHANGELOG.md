@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **Access &-hotkey rendering** — Captions with `&` markers (e.g. `"Product &Vendors"`) now render the hotkey letter with an underline, matching Access display behavior. Applies to buttons, checkboxes, option buttons, toggle buttons, tab pages, labels, and default controls across both forms and reports.
+- **Alt+letter keyboard shortcuts** — Pressing Alt+letter in Form View activates the control whose caption has the matching `&`-hotkey. Buttons are clicked, inputs are focused. Label hotkeys focus the next control in tab order.
+
 ## [0.2.0] - 2026-02-10
 
 ### Added

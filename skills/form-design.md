@@ -336,6 +336,35 @@ Use `:expression` for computed values:
 
 ---
 
+## Access &-Hotkey Markers
+
+Captions can include `&` before a letter to designate a keyboard shortcut, matching Access behavior:
+
+- `"&Save"` renders as "**S**ave" with S underlined
+- `"Product &Vendors"` renders as "Product **V**endors" with V underlined
+- `"&&"` renders as a literal `&` character
+
+In Form View, pressing **Alt+letter** activates the control with the matching hotkey:
+- Buttons are clicked
+- Inputs/combo boxes are focused
+- Labels focus the next control in tab order (the associated input)
+
+Hotkeys work on all caption-bearing controls: buttons, checkboxes, option buttons, toggle buttons, tab pages, and labels.
+
+```clojure
+{:type :button :caption "&Save" :x 20 :y 180 :width 80 :height 30
+ :on-click :save-record}
+;; Renders "Save" with S underlined; Alt+S clicks the button
+
+{:type :label :text "&Name" :x 20 :y 20 :width 100 :height 18}
+{:type :text-box :field "name" :x 20 :y 40 :width 200 :height 24}
+;; Alt+N focuses the text-box below the label
+```
+
+The `&` markers are preserved in stored form definitions and rendered at display time by `render-hotkey-text` in `editor_utils.cljs`.
+
+---
+
 ## Button Actions
 
 ### Standard Actions

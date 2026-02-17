@@ -12,13 +12,8 @@
 (def resolve-control-field eu/resolve-control-field)
 (def resolve-field-value eu/resolve-field-value)
 (def display-text eu/display-text)
-(def format-value eu/format-value)
 
 ;; --- Report-specific constants ---
-
-;; Standard report sections in display order
-(def standard-sections
-  [:report-header :page-header :detail :page-footer :report-footer])
 
 (def section-display-names
   {:report-header "Report Header"

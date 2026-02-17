@@ -169,6 +169,23 @@
             :else
             (recur (rest chars) (conj result c) false)))))))
 
+(defn- strip-access-hotkey
+  "Strip Access &-hotkey markers from caption text.
+   In Access, '&V' underlines V as a keyboard shortcut."
+  [s]
+  (str/replace s #"&(.)" "$1"))
+
+(defn- coerce-display-text
+  "Ensure a value is a display-safe string. Vectors (e.g. tab page names)
+   are joined with commas."
+  [v]
+  (cond
+    (nil? v)     nil
+    (string? v)  (strip-access-hotkey v)
+    (vector? v)  (str/join ", " (map #(if (string? %) (strip-access-hotkey %) (str %)) v))
+    (seq? v)     (str/join ", " (map #(if (string? %) (strip-access-hotkey %) (str %)) v))
+    :else        (str v)))
+
 (defn display-text
   "Get display content from a control. Returns an img element for image controls
    with picture data, otherwise text."
@@ -177,4 +194,7 @@
     [:img {:src (:picture ctrl)
            :style {:width "100%" :height "100%" :object-fit "contain"}
            :draggable false}]
-    (or (:text ctrl) (:label ctrl) (:caption ctrl) "")))
+    (or (coerce-display-text (:text ctrl))
+        (coerce-display-text (:label ctrl))
+        (coerce-display-text (:caption ctrl))
+        "")))

@@ -244,7 +244,7 @@
         is-section? (and (some? section-key) (nil? idx))
         is-form? (and (not is-control?) (not is-section?))
         selection-type (cond
-                         is-control? (name (:type selected-control))
+                         is-control? (if-let [t (:type selected-control)] (name t) "unknown")
                          is-section? (get section-display-names section-key (name section-key))
                          :else "Form")
         property-defs (cond

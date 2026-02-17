@@ -109,7 +109,7 @@
      (for [[idx ctrl] (map-indexed vector controls)]
        ^{:key idx}
        [:div.form-control
-        {:class [(name (:type ctrl))
+        {:class [(if-let [t (:type ctrl)] (name t) "unknown")
                  (when (and (= section selected-section) (= idx selected-idx)) "selected")]
          :draggable true
          :on-click (fn [e]

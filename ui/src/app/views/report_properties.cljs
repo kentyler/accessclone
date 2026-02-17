@@ -298,7 +298,7 @@
     {:is-control? is-control? :is-section? is-section? :is-group? is-group?
      :section-key section-key :idx idx :group-idx group-idx
      :selected-control selected-control :section-data section-data
-     :selection-type (cond is-control? (name (:type selected-control))
+     :selection-type (cond is-control? (if-let [t (:type selected-control)] (name t) "unknown")
                            is-section? (ru/section-display-name section-key)
                            :else "Report")
      :property-defs (cond is-control? control-property-defs

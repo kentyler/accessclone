@@ -214,8 +214,9 @@
 
 (defn- tab-page-caption [page-name all-controls]
   (let [pg (first (filter #(and (= :page (:type %)) (= (:name %) page-name))
-                          (or all-controls [])))]
-    (or (:caption pg) page-name)))
+                          (or all-controls [])))
+        raw (or (:caption pg) page-name)]
+    (if (string? raw) (clojure.string/replace raw #"&(.)" "$1") (str raw))))
 
 (defn render-tab-control [ctrl _field _value _on-change _opts]
   (let [active-tab (r/atom 0)]

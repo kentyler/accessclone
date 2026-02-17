@@ -14,13 +14,15 @@ AccessClone imports your Access database — tables, queries, forms, reports, mo
 
 Millions of business applications run on Microsoft Access. They work — but they're trapped on Windows desktops, limited to single users, and increasingly difficult to maintain. Rewriting from scratch means losing years of accumulated business logic.
 
-AccessClone takes a different approach: **import everything, preserve everything, then modernize incrementally.**
+Most migration tools try to translate code line by line — VBA to C#, Access SQL to T-SQL. That carries over every quirk and workaround from the original implementation. AccessClone takes a different approach: **copy the intent, not the code.**
+
+Instead of translating VBA line by line, AccessClone extracts *what the code means to do* — "validate this field, save the record, show a confirmation" — and maps those intents to clean, idiomatic implementations on the new platform. The business logic survives. The Access-isms don't.
 
 - **Tables & data** import with full fidelity — types, constraints, indexes, and rows
-- **Queries** import as PostgreSQL views and functions
+- **Queries** convert from Access SQL to PostgreSQL views and functions (regex engine + LLM fallback)
 - **Forms** render in the browser with the same layout, controls, and record navigation
 - **Reports** render with banded sections, grouping, and live data preview
-- **Modules** (VBA) are preserved alongside AI-assisted translation to PostgreSQL functions
+- **Modules** (VBA) go through intent extraction — AI reads the code, identifies 30 known intent types (open form, validate field, save record, etc.), and maps them to deterministic templates. No line-by-line translation.
 - **AI chat** analyzes each object, answers questions, and helps with conversion
 
 ## Features
@@ -41,12 +43,20 @@ Tables, queries, forms, reports, and modules all import through the UI with one-
 - Live data preview with group-break detection
 - Design View with resizable band sections
 
+### Intent-Based VBA Migration
+VBA modules aren't translated line by line. Instead, a three-stage pipeline preserves business logic cleanly:
+1. **Extract** — AI reads VBA and produces structured intents (validate-required, open-form, save-record, confirm-action, etc.)
+2. **Map** — Each intent is classified: mechanical (deterministic template), LLM-assisted (DLookup, RunSQL, loops), or gap (needs human review)
+3. **Generate** — Mechanical intents produce code from templates. LLM-assisted intents get targeted AI generation. Gaps are flagged, not guessed at.
+
+The result: clean, idiomatic code with clear traceability back to the original VBA.
+
 ### AI-Powered Chat Assistant
 Every object has a built-in chat panel. The AI sees the full definition and data context:
 - Auto-analyzes forms, reports, and modules on first open
 - Search, analyze, and navigate records through natural language
 - Query the dependency graph — "What tables does this form use?"
-- Translate VBA to PostgreSQL functions interactively
+- Extract intents from VBA and generate wiring code interactively
 
 ### Multi-Database Support
 Register and switch between multiple PostgreSQL databases from a single instance.
@@ -58,7 +68,16 @@ Understand how objects connect before making changes.
 
 ## Quick Start
 
-### Prerequisites
+### AI-Assisted Setup
+
+The fastest way to get started is to give [INSTRUCTIONS.md](INSTRUCTIONS.md) to an AI assistant. It's written as a runbook for both humans and AI:
+
+- **If you use Claude Code, Codex, Cursor, or Windsurf** — the AI can run every command for you. Just point it at the file and approve each step.
+- **If you use ChatGPT, Claude on the web, or similar** — paste the file into the chat. The AI will walk you through each command, and you paste the output back for it to check.
+
+### Manual Setup
+
+#### Prerequisites
 
 **To run the application:**
 - Node.js 18+
@@ -69,7 +88,7 @@ Understand how objects connect before making changes.
 **Additionally, for UI development:**
 - Java 11+ (required by shadow-cljs to compile ClojureScript)
 
-### 1. Install Dependencies
+#### 1. Install Dependencies
 
 Run PowerShell as Administrator:
 
@@ -77,13 +96,13 @@ Run PowerShell as Administrator:
 .\install.ps1
 ```
 
-### 2. Set Up a Database
+#### 2. Set Up a Database
 
 ```powershell
 .\setup.ps1 -DatabaseName northwind -Password <your_pg_password>
 ```
 
-### 3. Start the Application
+#### 3. Start the Application
 
 ```powershell
 .\start.ps1 -Password <your_pg_password>
@@ -97,7 +116,7 @@ For UI development with hot reload:
 .\start.ps1 -Password <your_pg_password> -Dev
 ```
 
-### 4. Import an Access Database
+#### 4. Import an Access Database
 
 1. Click **Import** in the sidebar
 2. Browse to your `.accdb` or `.mdb` file
@@ -163,10 +182,9 @@ See the [conversion guide](skills/conversion.md) for the complete workflow:
 
 1. **Setup** — Create database and configure connection
 2. **Tables** — Import table structures, data, and indexes
-3. **Queries** — Import as PostgreSQL views and functions
-4. **Forms** — Import form definitions with layout and data bindings
-5. **Reports** — Import banded report definitions
-6. **Modules** — Preserve VBA source, translate to PostgreSQL with AI assistance
+3. **Forms & Reports** — Import definitions with layout, controls, and data bindings
+4. **Queries** — Convert Access SQL to PostgreSQL views and functions
+5. **Modules** — Extract intents from VBA, map to deterministic templates, generate clean code
 
 ## Configuration
 

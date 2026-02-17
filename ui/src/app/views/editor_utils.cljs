@@ -169,32 +169,69 @@
             :else
             (recur (rest chars) (conj result c) false)))))))
 
-(defn- strip-access-hotkey
-  "Strip Access &-hotkey markers from caption text.
-   In Access, '&V' underlines V as a keyboard shortcut."
+(defn strip-access-hotkey
+  "Strip Access &-hotkey markers from caption text, returning a plain string.
+   In Access, '&V' underlines V as a keyboard shortcut. '&&' becomes '&'."
   [s]
   (str/replace s #"&(.)" "$1"))
 
-(defn- coerce-display-text
-  "Ensure a value is a display-safe string. Vectors (e.g. tab page names)
-   are joined with commas."
+(defn extract-hotkey
+  "Extract the hotkey letter from an Access caption string.
+   Returns the lowercase letter following the first non-escaped '&', or nil."
+  [s]
+  (when (and (string? s) (not (str/blank? s)))
+    (let [m (re-find #"&([^&])" s)]
+      (when m (str/lower-case (second m))))))
+
+(defn render-hotkey-text
+  "Parse Access &-hotkey markers and return hiccup with the hotkey letter underlined.
+   '&V' becomes [:span.hotkey \"V\"]. '&&' becomes literal '&'.
+   Returns a hiccup [:span ...] fragment."
+  [s]
+  (if (or (nil? s) (not (string? s)) (= s ""))
+    [:span s]
+    (let [parts (loop [remaining s
+                       result []]
+                  (if (str/blank? remaining)
+                    result
+                    (let [idx (str/index-of remaining "&")]
+                      (if (nil? idx)
+                        (conj result remaining)
+                        (let [before (subs remaining 0 idx)
+                              after (subs remaining (inc idx))
+                              result (if (seq before) (conj result before) result)]
+                          (if (seq after)
+                            (let [ch (subs after 0 1)
+                                  rest-str (subs after 1)]
+                              (if (= ch "&")
+                                (recur rest-str (conj result "&"))
+                                (recur rest-str (conj result [:span.hotkey ch]))))
+                            result))))))]
+      (if (= (count parts) 1)
+        (let [p (first parts)]
+          (if (string? p) [:span p] [:span p]))
+        (into [:span] parts)))))
+
+(defn- coerce-display-hiccup
+  "Ensure a value is display-safe hiccup. Vectors (e.g. tab page names)
+   are joined with commas, with hotkey markers rendered as underlined letters."
   [v]
   (cond
     (nil? v)     nil
-    (string? v)  (strip-access-hotkey v)
-    (vector? v)  (str/join ", " (map #(if (string? %) (strip-access-hotkey %) (str %)) v))
-    (seq? v)     (str/join ", " (map #(if (string? %) (strip-access-hotkey %) (str %)) v))
-    :else        (str v)))
+    (string? v)  (render-hotkey-text v)
+    (vector? v)  (render-hotkey-text (str/join ", " (map #(if (string? %) % (str %)) v)))
+    (seq? v)     (render-hotkey-text (str/join ", " (map #(if (string? %) % (str %)) v)))
+    :else        [:span (str v)]))
 
 (defn display-text
   "Get display content from a control. Returns an img element for image controls
-   with picture data, otherwise text."
+   with picture data, otherwise hiccup with hotkey markers rendered."
   [ctrl]
   (if (and (#{:image :object-frame} (:type ctrl)) (:picture ctrl))
     [:img {:src (:picture ctrl)
            :style {:width "100%" :height "100%" :object-fit "contain"}
            :draggable false}]
-    (or (coerce-display-text (:text ctrl))
-        (coerce-display-text (:label ctrl))
-        (coerce-display-text (:caption ctrl))
+    (or (coerce-display-hiccup (:text ctrl))
+        (coerce-display-hiccup (:label ctrl))
+        (coerce-display-hiccup (:caption ctrl))
         "")))

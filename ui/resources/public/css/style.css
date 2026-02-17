@@ -4561,3 +4561,6 @@ body {
   color: var(--text-secondary);
   margin-top: 0.25rem;
 }
+
+/* Access &-hotkey underlined letter */
+.hotkey { text-decoration: underline; }

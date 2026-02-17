@@ -81,23 +81,22 @@
     #(js/alert (str "Button clicked: " button-text))))
 
 (defn- resolve-button-action [ctrl]
-  (let [button-text (or (:text ctrl) (:caption ctrl) "Button")]
+  (let [button-text (fu/strip-access-hotkey (or (:text ctrl) (:caption ctrl) "Button"))]
     (or (resolve-action-from-prop (:on-click ctrl))
         (resolve-action-from-caption (str/lower-case button-text) button-text))))
 
 (defn render-button [ctrl _field _value _on-change {:keys [tab-idx]}]
-  (let [text (or (:text ctrl) (:caption ctrl) "Button")]
-    [:button.view-button
-     (cond-> {:on-click (resolve-button-action ctrl)}
-       tab-idx (assoc :tab-index tab-idx))
-     text]))
+  [:button.view-button
+   (cond-> {:on-click (resolve-button-action ctrl)}
+     tab-idx (assoc :tab-index tab-idx))
+   (fu/render-hotkey-text (or (:text ctrl) (:caption ctrl) "Button"))])
 
 (defn render-checkbox [ctrl field value on-change {:keys [allow-edits? tab-idx]}]
   [:label.view-checkbox
    [:input (cond-> {:type "checkbox" :checked (boolean value) :disabled (not allow-edits?)
                     :on-change #(when (and field allow-edits?) (on-change field (.. % -target -checked)))}
              tab-idx (assoc :tab-index tab-idx))]
-   (or (:text ctrl) (:caption ctrl))])
+   (fu/render-hotkey-text (or (:text ctrl) (:caption ctrl) ""))])
 
 ;; --- Row-source helpers (shared by combobox & listbox) ---
 
@@ -200,7 +199,7 @@
                       :checked (= (str value) (str opt-val)) :disabled (not allow-edits?)
                       :on-change #(when (and field allow-edits?) (on-change field opt-val))}
                tab-idx (assoc :tab-index tab-idx))]
-     (or (:text ctrl) (:caption ctrl) "")]))
+     (fu/render-hotkey-text (or (:text ctrl) (:caption ctrl) ""))]))
 
 (defn render-toggle-button [ctrl field value on-change {:keys [allow-edits? tab-idx]}]
   (let [pressed? (boolean value)]
@@ -208,7 +207,7 @@
      (cond-> {:class (when pressed? "pressed") :disabled (not allow-edits?)
               :on-click #(when (and field allow-edits?) (on-change field (not pressed?)))}
        tab-idx (assoc :tab-index tab-idx))
-     (or (:text ctrl) (:caption ctrl) "Toggle")]))
+     (fu/render-hotkey-text (or (:text ctrl) (:caption ctrl) "Toggle"))]))
 
 ;; --- Tab control ---
 
@@ -216,7 +215,13 @@
   (let [pg (first (filter #(and (= :page (:type %)) (= (:name %) page-name))
                           (or all-controls [])))
         raw (or (:caption pg) page-name)]
-    (if (string? raw) (clojure.string/replace raw #"&(.)" "$1") (str raw))))
+    (if (string? raw) (fu/render-hotkey-text raw) [:span (str raw)])))
+
+(defn- tab-page-hotkey [page-name all-controls]
+  (let [pg (first (filter #(and (= :page (:type %)) (= (:name %) page-name))
+                          (or all-controls [])))
+        raw (or (:caption pg) page-name)]
+    (when (string? raw) (fu/extract-hotkey raw))))
 
 (defn render-tab-control [ctrl _field _value _on-change _opts]
   (let [active-tab (r/atom 0)]
@@ -230,11 +235,13 @@
          [:div.view-tab-headers
           (if (seq page-names)
             (for [[idx pname] (map-indexed vector page-names)]
-              ^{:key idx}
-              [:div.view-tab-header
-               {:class (when (= idx @active-tab) "active")
-                :on-click #(reset! active-tab idx)}
-               (tab-page-caption pname all-controls)])
+              (let [hk (tab-page-hotkey pname all-controls)]
+                ^{:key idx}
+                [:div.view-tab-header
+                 (cond-> {:class (when (= idx @active-tab) "active")
+                          :on-click #(reset! active-tab idx)}
+                   hk (assoc :data-hotkey hk))
+                 (tab-page-caption pname all-controls)]))
             [:div.view-tab-header.active "Page 1"])]
          [:div.view-tab-body
           (if (seq child-controls)
@@ -434,10 +441,13 @@
         tip (:control-tip-text ctrl)
         ctrl-enabled? (not= 0 (:enabled ctrl))
         ctrl-locked? (= 1 (:locked ctrl))
-        effective-edits? (and allow-edits? ctrl-enabled? (not ctrl-locked?))]
+        effective-edits? (and allow-edits? ctrl-enabled? (not ctrl-locked?))
+        hotkey (fu/extract-hotkey (or (:text ctrl) (:caption ctrl)))]
     [:div.view-control
      (cond-> {:style style :on-context-menu show-record-menu}
        tip (assoc :title tip)
+       hotkey (assoc :data-hotkey hotkey)
+       (= ctrl-type :label) (assoc :data-hotkey-label "true")
        (not ctrl-enabled?) (assoc :class "disabled"))
      [renderer ctrl field value on-change
       {:auto-focus? auto-focus? :is-new? (:__new__ current-record)
@@ -670,6 +680,29 @@
             (seq (fu/get-section-controls current :footer))) "No records found"
         :else "Add controls in Design View"))
 
+(defn- handle-hotkey
+  "Handle Alt+letter hotkey: find the control with matching data-hotkey and focus/click it.
+   For labels, focus the next sibling control's focusable element."
+  [e canvas-el]
+  (when (and (.-altKey e) (not (.-ctrlKey e)) (not (.-metaKey e))
+             (= 1 (count (.-key e))))
+    (let [letter (str/lower-case (.-key e))
+          target (.querySelector canvas-el (str "[data-hotkey=\"" letter "\"]"))]
+      (when target
+        (.preventDefault e)
+        (.stopPropagation e)
+        (if (= "true" (.getAttribute target "data-hotkey-label"))
+          ;; Label hotkey: focus the next sibling control's focusable element
+          (when-let [next-ctrl (.-nextElementSibling target)]
+            (let [focusable (or (.querySelector next-ctrl "input, select, button, textarea") next-ctrl)]
+              (.focus focusable)))
+          ;; Non-label: click the first button/input, or focus the first focusable element
+          (let [btn (.querySelector target "button")
+                focusable (or btn (.querySelector target "input, select, textarea"))]
+            (if btn
+              (.click btn)
+              (when focusable (.focus focusable)))))))))
+
 (defn form-view
   "The form in view/data entry mode"
   []
@@ -689,6 +722,8 @@
                            (and continuous? (:allow-additions? opts))))]
     [:div.form-canvas.view-mode
      {:style (when-let [bc (:back-color current)] {:background-color bc})
+      :tab-index -1
+      :on-key-down (fn [e] (handle-hotkey e (.. e -currentTarget)))
       :on-click #(do (t/dispatch! :hide-form-context-menu) (t/dispatch! :hide-context-menu))}
      [form-canvas-header continuous? record-source]
      [:div.canvas-body.view-mode-body

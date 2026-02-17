@@ -14,6 +14,9 @@
 (def format-value eu/format-value)
 (def parse-input-mask eu/parse-input-mask)
 (def mask-placeholder eu/mask-placeholder)
+(def strip-access-hotkey eu/strip-access-hotkey)
+(def render-hotkey-text eu/render-hotkey-text)
+(def extract-hotkey eu/extract-hotkey)
 
 ;; --- Form-specific functions ---
 

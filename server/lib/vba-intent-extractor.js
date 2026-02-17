@@ -22,6 +22,71 @@ try {
 const KNOWN_INTENT_TYPES = new Set(Object.keys(INTENT_VOCABULARY));
 
 /**
+ * Attempt to repair common JSON issues from LLM output.
+ * Handles: unescaped quotes in string values (from VBA concatenation),
+ * embedded \" that breaks JSON parsing.
+ */
+function repairJson(text) {
+  // Strategy: walk through character by character, tracking JSON state.
+  // When inside a string value, fix unescaped quotes that appear to be
+  // VBA content (preceded by space or letter, not by backslash).
+  let result = '';
+  let inString = false;
+  let i = 0;
+
+  while (i < text.length) {
+    const ch = text[i];
+    const prev = i > 0 ? text[i - 1] : '';
+
+    if (!inString) {
+      result += ch;
+      if (ch === '"') {
+        inString = true;
+      }
+    } else {
+      // Inside a string
+      if (ch === '\\' && i + 1 < text.length && text[i + 1] === '"') {
+        // \\" — is this a legitimate escape or a VBA artifact?
+        // Check if the character after the closing quote looks like JSON structure
+        const afterQuote = text.substring(i + 2, i + 20).trimStart();
+        if (afterQuote.match(/^[,}\]:\n\r]/)) {
+          // This \" is actually the end of the string — output just the quote
+          result += '"';
+          i += 2;
+          inString = false;
+          continue;
+        } else {
+          // This \" is inside the string value — replace with single quote
+          result += "'";
+          i += 2;
+          continue;
+        }
+      } else if (ch === '"') {
+        // Unescaped quote — check if it's truly end of string
+        const after = text.substring(i + 1, i + 20).trimStart();
+        if (after.match(/^[,}\]:\n\r]/)) {
+          // End of string
+          result += '"';
+          inString = false;
+        } else if (after.match(/^\s*"/)) {
+          // Looks like end of string followed by key/value
+          result += '"';
+          inString = false;
+        } else {
+          // Quote in the middle of a string — replace with single quote
+          result += "'";
+        }
+      } else {
+        result += ch;
+      }
+    }
+    i++;
+  }
+
+  return result;
+}
+
+/**
  * Validate an extracted intent result.
  * Checks structure and flags unknown intent types.
  *
@@ -156,7 +221,13 @@ async function extractIntents(vbaSource, moduleName, context, apiKey) {
   try {
     result = JSON.parse(jsonText);
   } catch (parseErr) {
-    throw new Error(`Failed to parse intent JSON: ${parseErr.message}\nRaw: ${jsonText.substring(0, 200)}`);
+    // Attempt JSON repair: fix common LLM issues with embedded VBA expressions
+    const repaired = repairJson(jsonText);
+    try {
+      result = JSON.parse(repaired);
+    } catch (repairErr) {
+      throw new Error(`Failed to parse intent JSON: ${parseErr.message}\nRaw: ${jsonText.substring(0, 500)}`);
+    }
   }
 
   return result;
@@ -165,5 +236,6 @@ async function extractIntents(vbaSource, moduleName, context, apiKey) {
 module.exports = {
   extractIntents,
   validateIntents,
+  repairJson,
   KNOWN_INTENT_TYPES
 };

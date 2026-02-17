@@ -1,4 +1,4 @@
-const { validateIntents, KNOWN_INTENT_TYPES } = require('../lib/vba-intent-extractor');
+const { validateIntents, repairJson, KNOWN_INTENT_TYPES } = require('../lib/vba-intent-extractor');
 
 // ============================================================
 // validateIntents — unit tests (no LLM)
@@ -152,6 +152,46 @@ describe('KNOWN_INTENT_TYPES', () => {
 
   test('has 30 intent types', () => {
     expect(KNOWN_INTENT_TYPES.size).toBe(30);
+  });
+});
+
+// ============================================================
+// repairJson — unit tests
+// ============================================================
+
+describe('repairJson', () => {
+  test('passes valid JSON through unchanged', () => {
+    const json = '{"type": "save-record"}';
+    expect(JSON.parse(repairJson(json))).toEqual({ type: 'save-record' });
+  });
+
+  test('fixes backslash-quote inside string values', () => {
+    // LLM outputs: "criteria": "OrderID = \" & Me.OrderID"
+    // Which has \" that looks like end-of-string but isn't followed by JSON structure
+    const broken = '{"criteria": "OrderID = \\" & Me.OrderID"}';
+    const repaired = repairJson(broken);
+    const parsed = JSON.parse(repaired);
+    expect(parsed.criteria).toBeTruthy();
+  });
+
+  test('handles embedded VBA concatenation in string values', () => {
+    const broken = '{"message": "Has \\" & cnt & \\" items"}';
+    const repaired = repairJson(broken);
+    const parsed = JSON.parse(repaired);
+    expect(parsed.message).toBeTruthy();
+  });
+
+  test('preserves legitimate end-of-string quotes', () => {
+    const json = '{"a": "hello", "b": "world"}';
+    const parsed = JSON.parse(repairJson(json));
+    expect(parsed.a).toBe('hello');
+    expect(parsed.b).toBe('world');
+  });
+
+  test('handles complex nested JSON', () => {
+    const json = '{"procedures": [{"name": "test", "intents": [{"type": "save-record"}]}]}';
+    const parsed = JSON.parse(repairJson(json));
+    expect(parsed.procedures[0].intents[0].type).toBe('save-record');
   });
 });
 

@@ -723,5 +723,122 @@ Return ONLY the ClojureScript code, no markdown code fences, no explanations. In
     }
   });
 
+  /**
+   * POST /api/chat/auto-resolve-gaps
+   * Send all gap questions to the LLM to pick the best option for each.
+   */
+  router.post('/auto-resolve-gaps', async (req, res) => {
+    const { gap_questions, database_id } = req.body;
+
+    if (!Array.isArray(gap_questions) || gap_questions.length === 0) {
+      return res.status(400).json({ error: 'gap_questions array is required' });
+    }
+
+    const apiKey = secrets.anthropic?.api_key || process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: 'Anthropic API key not configured in secrets.json' });
+    }
+
+    try {
+      // Build database context for the LLM
+      let inventoryText = '';
+      const databaseId = database_id || req.headers['x-database-id'];
+      if (databaseId) {
+        const graphCtx = await buildGraphContext(pool, databaseId);
+        if (graphCtx) {
+          inventoryText = formatGraphContext(graphCtx);
+        }
+      }
+
+      // Chunk into batches of 80 to stay within output token limits
+      const BATCH_SIZE = 80;
+      const allSelections = [];
+
+      for (let batchStart = 0; batchStart < gap_questions.length; batchStart += BATCH_SIZE) {
+        const batch = gap_questions.slice(batchStart, batchStart + BATCH_SIZE);
+
+        // Format each gap for the user message
+        const gapLines = batch.map((gq, i) => {
+          const globalIdx = batchStart + i;
+          const opts = (gq.suggestions || []).map((s, j) => `  ${j + 1}. ${s}`).join('\n');
+          return `[Gap ${globalIdx}] Module: ${gq.module || '?'}, Procedure: ${gq.procedure || '?'}
+VBA: ${gq.vba_line || '(unknown)'}
+Question: ${gq.question}
+Options:
+${opts}`;
+        }).join('\n\n');
+
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01'
+          },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-20250514',
+            max_tokens: 4096,
+            system: `You are an expert at converting Microsoft Access applications to modern web applications.
+
+You are given a list of "gap questions" — decisions that need to be made during the conversion from VBA to a web app. For each gap, you must pick the best option from the numbered suggestions.
+
+${inventoryText ? `Database inventory:\n${inventoryText}\n\n` : ''}Consider the database context and pick the option that best preserves the original Access application's behavior in a web environment. Prefer options that use existing framework functions, API endpoints, or table data over options that skip functionality.
+
+Respond with ONLY a JSON array of objects, each with "index" (the gap number) and "selected" (the exact text of the chosen option). Example:
+[{"index": 0, "selected": "Use API call to fetch data"}, {"index": 1, "selected": "Skip this functionality"}]
+
+No explanation, no markdown fences — just the JSON array.`,
+            messages: [{
+              role: 'user',
+              content: `Pick the best option for each gap question:\n\n${gapLines}`
+            }]
+          })
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          console.error('Anthropic API error in auto-resolve:', errorData);
+          return res.status(500).json({ error: errorData.error?.message || 'Auto-resolve API request failed' });
+        }
+
+        const data = await response.json();
+        const text = data.content?.find(c => c.type === 'text')?.text || '[]';
+
+        // Parse JSON — strip markdown fences if present
+        const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+        try {
+          const parsed = JSON.parse(cleaned);
+          if (Array.isArray(parsed)) {
+            // Validate each selection matches an actual suggestion
+            for (const sel of parsed) {
+              const gq = gap_questions[sel.index];
+              if (gq && gq.suggestions?.includes(sel.selected)) {
+                allSelections.push(sel);
+              } else if (gq) {
+                // LLM returned text that doesn't exactly match — find closest suggestion
+                const match = gq.suggestions?.find(s =>
+                  s.toLowerCase().trim() === (sel.selected || '').toLowerCase().trim()
+                );
+                if (match) {
+                  allSelections.push({ index: sel.index, selected: match });
+                }
+                // else skip this gap — no valid match
+              }
+            }
+          }
+        } catch (parseErr) {
+          console.error('Failed to parse auto-resolve response:', parseErr.message, text.substring(0, 200));
+          // Continue with partial results rather than failing entirely
+        }
+      }
+
+      res.json({ selections: allSelections });
+    } catch (err) {
+      console.error('Error in auto-resolve-gaps:', err);
+      logError(pool, 'POST /api/chat/auto-resolve-gaps', 'Auto-resolve gaps failed', err, { databaseId: database_id });
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 };

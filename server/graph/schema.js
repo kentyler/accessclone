@@ -68,13 +68,13 @@ CREATE TABLE IF NOT EXISTS shared.databases (
 );
 
 -- ============================================================
--- Forms - UI form definitions (EDN) with append-only versioning
+-- Forms - UI form definitions (JSON) with append-only versioning
 -- ============================================================
 CREATE TABLE IF NOT EXISTS shared.forms (
     id SERIAL PRIMARY KEY,
     database_id VARCHAR(100) NOT NULL,
     name VARCHAR(255) NOT NULL,
-    definition TEXT NOT NULL,
+    definition JSONB NOT NULL,
     record_source VARCHAR(255),
     description TEXT,
     version INT NOT NULL DEFAULT 1,
@@ -88,13 +88,13 @@ CREATE INDEX IF NOT EXISTS idx_forms_database ON shared.forms(database_id);
 CREATE INDEX IF NOT EXISTS idx_forms_current ON shared.forms(database_id, name) WHERE is_current = true;
 
 -- ============================================================
--- Reports - UI report definitions (EDN) with append-only versioning
+-- Reports - UI report definitions (JSON) with append-only versioning
 -- ============================================================
 CREATE TABLE IF NOT EXISTS shared.reports (
     id SERIAL PRIMARY KEY,
     database_id VARCHAR(100) NOT NULL,
     name VARCHAR(255) NOT NULL,
-    definition TEXT NOT NULL,
+    definition JSONB NOT NULL,
     record_source VARCHAR(255),
     description TEXT,
     version INT NOT NULL DEFAULT 1,
@@ -133,6 +133,24 @@ CREATE INDEX IF NOT EXISTS idx_modules_current ON shared.modules(database_id, na
 ALTER TABLE shared.modules ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'pending';
 ALTER TABLE shared.modules ADD COLUMN IF NOT EXISTS review_notes TEXT;
 ALTER TABLE shared.modules ADD COLUMN IF NOT EXISTS intents JSONB;
+
+-- Migrate definition columns from TEXT to JSONB (for existing installs)
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'shared' AND table_name = 'forms'
+    AND column_name = 'definition' AND data_type = 'text'
+  ) THEN
+    ALTER TABLE shared.forms ALTER COLUMN definition TYPE jsonb USING definition::jsonb;
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'shared' AND table_name = 'reports'
+    AND column_name = 'definition' AND data_type = 'text'
+  ) THEN
+    ALTER TABLE shared.reports ALTER COLUMN definition TYPE jsonb USING definition::jsonb;
+  END IF;
+END $$;
 
 -- ============================================================
 -- Macros - Access macro XML storage with optional ClojureScript translation
@@ -198,6 +216,15 @@ CREATE TABLE IF NOT EXISTS shared.source_discovery (
     source_path TEXT NOT NULL,
     discovery JSONB NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- Gap Questions - persisted gap questions + answers per database
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.gap_questions (
+    database_id VARCHAR(100) NOT NULL UNIQUE,
+    questions JSONB NOT NULL DEFAULT '[]',
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- ============================================================

@@ -301,15 +301,34 @@ module.exports = function(pool) {
         // Non-fatal
       }
 
+      // Access system tables — internal to the Jet/ACE engine, never imported to PG.
+      // References to these are expected in VBA modules (e.g. modDAO enumerating objects)
+      // and should not be flagged as missing dependencies.
+      const ACCESS_SYSTEM_TABLES = new Set([
+        'msysobjects', 'msysrelationships', 'msysqueries', 'msysaces',
+        'msysaccessobjects', 'msysaccessxml', 'msysimexspecs', 'msysimexcolumns',
+        'msysnavigatepanegroups', 'msysnavigatepanegroupcategories',
+        'msysnavigatepanegrouptoobjects', 'msysnavigatepaneobjectids',
+        'msysdbtableattributes', 'msyscomplexcolumns', 'msyscomplextype_text',
+        'msyscomplextype_long', 'msyscomplextype_short', 'msyscomplextype_single',
+        'msyscomplextype_double', 'msyscomplextype_guid', 'msyscomplextype_decimal',
+        'msyscomplextype_ieeesingle', 'msyscomplextype_ieeedouble',
+        'msyscomplextype_attachment', 'msysresources',
+        'usysobjects', 'usysribbons', 'usysapplicationlog',
+      ]);
+
       // Build result
       const endpoints = [];
       for (const [table, info] of neededEndpoints) {
+        const normalizedTable = table.toLowerCase().replace(/\s+/g, '_');
+        const isSystem = ACCESS_SYSTEM_TABLES.has(normalizedTable);
         endpoints.push({
           table,
           operations: [...info.operations],
           modules: [...info.modules],
-          exists: table === '__current_form__' || table === '__runsql__' || allDataSources.has(table) ||
-                  allDataSources.has(table.toLowerCase().replace(/\s+/g, '_'))
+          exists: isSystem || table === '__current_form__' || table === '__runsql__' ||
+                  allDataSources.has(table) || allDataSources.has(normalizedTable),
+          system: isSystem
         });
       }
 
@@ -336,6 +355,55 @@ module.exports = function(pool) {
     } catch (err) {
       console.error('Error analyzing API surface:', err);
       logError(pool, 'GET /api/app/api-surface', 'Failed to analyze API surface', err, { databaseId });
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * GET /api/app/gap-questions?database_id=X
+   * Returns persisted gap questions for a database, or null if never extracted.
+   */
+  router.get('/gap-questions', async (req, res) => {
+    const databaseId = req.query.database_id || req.headers['x-database-id'];
+    if (!databaseId) {
+      return res.status(400).json({ error: 'database_id is required' });
+    }
+
+    try {
+      const result = await pool.query(
+        'SELECT questions FROM shared.gap_questions WHERE database_id = $1',
+        [databaseId]
+      );
+      if (result.rows.length === 0) {
+        return res.json({ questions: null });
+      }
+      res.json({ questions: result.rows[0].questions });
+    } catch (err) {
+      logError(pool, 'GET /api/app/gap-questions', 'Failed to load gap questions', err, { databaseId });
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * PUT /api/app/gap-questions
+   * Upsert gap questions for a database.
+   */
+  router.put('/gap-questions', async (req, res) => {
+    const { database_id, questions } = req.body;
+    if (!database_id) {
+      return res.status(400).json({ error: 'database_id is required' });
+    }
+
+    try {
+      await pool.query(
+        `INSERT INTO shared.gap_questions (database_id, questions, updated_at)
+         VALUES ($1, $2, NOW())
+         ON CONFLICT (database_id) DO UPDATE SET questions = $2, updated_at = NOW()`,
+        [database_id, JSON.stringify(questions || [])]
+      );
+      res.json({ success: true });
+    } catch (err) {
+      logError(pool, 'PUT /api/app/gap-questions', 'Failed to save gap questions', err, { databaseId: database_id });
       res.status(500).json({ error: err.message });
     }
   });

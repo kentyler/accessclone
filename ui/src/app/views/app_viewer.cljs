@@ -116,7 +116,7 @@
          (:intent_stats overview)]])]))
 
 ;; ============================================================
-;; Gap Decisions Pane — Phase 4
+;; Gap Decisions Pane — 3-Step Pipeline
 ;; ============================================================
 
 (defn- gap-decision-item [idx gq]
@@ -138,64 +138,127 @@
                 :on-change #(t/dispatch! :set-app-gap-selection idx suggestion)}]
        [:span suggestion]])]])
 
-(def mode-descriptions
-  {:manual     "Extract and resolve gaps one at a time."
-   :guided     "Auto-extract all, auto-generate for modules with no gaps, present only gap-bearing modules."
-   :autonomous "Auto-extract all, auto-resolve gaps (first suggestion), auto-generate all."})
+(defn- pipeline-step-header [number title active? complete?]
+  [:div.app-pipeline-step
+   {:class (str (when active? " active") (when complete? " complete"))}
+   [:span.app-pipeline-number (str number)]
+   [:span.app-pipeline-title title]
+   (when complete?
+     [:span.app-pipeline-check "\u2713"])])
+
+(defn- gen-results-summary [results]
+  (when results
+    [:div.app-gen-results
+     (when (seq (:generated results))
+       [:div.app-gen-result-group.generated
+        [:strong (str (count (:generated results)) " generated")]
+        [:span (clojure.string/join ", " (:generated results))]])
+     (when (seq (:skipped results))
+       [:div.app-gen-result-group.skipped
+        [:strong (str (count (:skipped results)) " skipped (missing deps)")]
+        [:span (clojure.string/join ", " (:skipped results))]])
+     (when (seq (:failed results))
+       [:div.app-gen-result-group.failed
+        [:strong (str (count (:failed results)) " failed")]
+        (for [{:keys [name error]} (:failed results)]
+          ^{:key name}
+          [:div (str name ": " (or error "unknown error"))])])]))
 
 (defn- gap-decisions-pane []
   (let [extracting? (get-in @state/app-state [:app-viewer :batch-extracting?])
         progress (get-in @state/app-state [:app-viewer :batch-progress])
         gap-questions (get-in @state/app-state [:app-viewer :all-gap-questions] [])
         submitting? (get-in @state/app-state [:app-viewer :submitting-gaps?])
-        import-mode (or (get-in @state/app-state [:app-viewer :import-mode]) :manual)
+        generating? (get-in @state/app-state [:app-viewer :batch-generating?])
+        gen-progress (get-in @state/app-state [:app-viewer :batch-gen-progress])
+        gen-results (get-in @state/app-state [:app-viewer :batch-gen-results])
+        overview (get-in @state/app-state [:app-viewer :overview])
+        has-intents? (pos? (get-in overview [:intent_stats :modules_with_intents] 0))
         all-answered? (and (seq gap-questions)
-                           (every? :selected gap-questions))]
+                           (every? :selected gap-questions))
+        gaps-resolved? (and has-intents?
+                            (empty? gap-questions)
+                            (not extracting?))]
     [:div.app-gaps-pane
-     ;; Mode selector
-     [:div.app-mode-selector
-      [:label "Mode:"]
-      [:select
-       {:value (name import-mode)
-        :on-change #(t/dispatch! :set-import-mode (keyword (.. % -target -value)))}
-       [:option {:value "manual"} "Manual"]
-       [:option {:value "guided"} "Guided"]
-       [:option {:value "autonomous"} "Autonomous"]]
-      [:span.app-mode-desc (get mode-descriptions import-mode)]]
-     [:div.app-gaps-actions
-      [:button.primary-btn
-       {:disabled extracting?
-        :on-click #(f/run-fire-and-forget! app-flow/batch-extract-intents-flow)}
-       (if extracting? "Extracting..." "Generate Questions")]]
-     (when extracting?
-       [:div.app-gaps-progress
-        [:div.app-progress-bar
-         [:div.app-progress-fill
-          {:style {:width (str (if (pos? (:total progress 0))
-                                 (Math/round (* 100 (/ (:completed progress 0)
-                                                       (:total progress))))
-                                 0) "%")}}]]
-        (when (:current-module progress)
-          [:div.app-gaps-current (str "Processing: " (:current-module progress))])])
-     (when (seq gap-questions)
+
+     ;; ── Step 1: Extract ──
+     [pipeline-step-header 1 "Extract Intents" (not has-intents?) has-intents?]
+     [:div.app-pipeline-body
+      [:div.app-gaps-actions
+       [:button.primary-btn
+        {:disabled (or extracting? generating?)
+         :on-click #(f/run-fire-and-forget! app-flow/batch-extract-intents-flow)}
+        (cond
+          extracting? "Extracting..."
+          has-intents? "Re-extract All"
+          :else "Extract All Intents")]]
+      (when extracting?
+        [:div.app-gaps-progress
+         [:div.app-progress-bar
+          [:div.app-progress-fill
+           {:style {:width (str (if (pos? (:total progress 0))
+                                  (Math/round (* 100 (/ (:completed progress 0)
+                                                        (:total progress))))
+                                  0) "%")}}]]
+         (when (:current-module progress)
+           [:div.app-gaps-current (str "Processing: " (:current-module progress))])])]
+
+     ;; ── Step 2: Resolve Gaps ──
+     (when has-intents?
        [:<>
-        [:h4 (str (count gap-questions) " gap question(s) across all modules")]
-        (for [[idx gq] (map-indexed vector gap-questions)]
-          ^{:key idx}
-          [gap-decision-item idx gq])
-        [:div.app-gaps-submit
-         [:button.primary-btn
-          {:disabled (or (not all-answered?) submitting?)
-           :on-click #(f/run-fire-and-forget! app-flow/submit-all-gap-decisions-flow)}
-          (if submitting? "Submitting..." "Submit All Decisions")]
-         [:span.app-gaps-hint
-          (if all-answered?
-            "All gaps answered. Click Submit to save."
-            (let [remaining (count (filter #(nil? (:selected %)) gap-questions))]
-              (str remaining " of " (count gap-questions) " remaining")))]]])
-     (when (and (not extracting?) (empty? gap-questions))
-       [:div.app-gaps-empty
-        "Click \"Generate Questions\" to extract intents from all modules and collect gap decisions."])]))
+        [pipeline-step-header 2 "Resolve Gaps"
+         (and has-intents? (seq gap-questions))
+         gaps-resolved?]
+        [:div.app-pipeline-body
+         (cond
+           (seq gap-questions)
+           [:<>
+            [:h4 (str (count gap-questions) " gap question(s) across all modules")]
+            (for [[idx gq] (map-indexed vector gap-questions)]
+              ^{:key idx}
+              [gap-decision-item idx gq])
+            [:div.app-gaps-submit
+             [:button.primary-btn
+              {:disabled (or (not all-answered?) submitting? generating?)
+               :on-click #(f/run-fire-and-forget! app-flow/submit-all-gap-decisions-flow)}
+              (if submitting? "Submitting..." "Submit All Decisions")]
+             [:span.app-gaps-hint
+              (if all-answered?
+                "All gaps answered. Click Submit to save."
+                (let [remaining (count (filter #(nil? (:selected %)) gap-questions))]
+                  (str remaining " of " (count gap-questions) " remaining")))]]]
+
+           gaps-resolved?
+           [:div.app-gaps-empty "All gaps resolved."])]])
+
+     ;; ── Step 3: Generate Code ──
+     (when has-intents?
+       [:<>
+        [pipeline-step-header 3 "Generate Code"
+         (and gaps-resolved? (not gen-results))
+         (some? gen-results)]
+        [:div.app-pipeline-body
+         [:div.app-gaps-actions
+          [:button.primary-btn
+           {:disabled (or (not gaps-resolved?) generating? extracting?)
+            :on-click #(f/run-fire-and-forget! app-flow/batch-generate-code-flow)}
+           (cond
+             generating? "Generating..."
+             gen-results "Regenerate All Code"
+             :else "Generate All Code")]]
+         (when generating?
+           [:div.app-gaps-progress
+            [:div.app-progress-bar
+             [:div.app-progress-fill
+              {:style {:width (str (if (pos? (:total gen-progress 0))
+                                     (Math/round (* 100 (/ (:generated gen-progress 0)
+                                                           (:total gen-progress))))
+                                     0) "%")}}]]
+            [:div.app-gaps-current
+             (str "Pass " (:pass gen-progress 1)
+                  " \u2014 " (:current-module gen-progress "")
+                  " (" (:generated gen-progress 0) "/" (:total gen-progress 0) ")")]])
+         [gen-results-summary gen-results]]])]))
 
 ;; ============================================================
 ;; Dependencies Pane — Phase 5 (stub)

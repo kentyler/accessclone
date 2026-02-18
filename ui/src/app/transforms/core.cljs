@@ -129,7 +129,7 @@
    ;; Logs domain (1)
    :set-logs-filter          logs/set-logs-filter
 
-   ;; App Viewer domain (11)
+   ;; App Viewer domain (14)
    :set-app-pane             app/set-app-pane
    :set-app-overview         app/set-app-overview
    :set-app-loading          app/set-app-loading
@@ -138,6 +138,9 @@
    :set-all-gap-questions    app/set-all-gap-questions
    :set-app-gap-selection    app/set-app-gap-selection
    :set-submitting-gaps      app/set-submitting-gaps
+   :set-batch-generating     app/set-batch-generating
+   :set-batch-gen-progress   app/set-batch-gen-progress
+   :set-batch-gen-results    app/set-batch-gen-results
    :set-app-dependencies     app/set-app-dependencies
    :set-app-api-surface      app/set-app-api-surface
    :set-import-mode          app/set-import-mode})

@@ -53,6 +53,22 @@
   [state surface]
   (assoc-in state [:app-viewer :api-surface] surface))
 
+;; Batch code generation state
+(defn set-batch-generating
+  "Set whether batch code generation is in progress."
+  [state generating?]
+  (assoc-in state [:app-viewer :batch-generating?] generating?))
+
+(defn set-batch-gen-progress
+  "Update batch code generation progress (pass, current-module, counts)."
+  [state progress]
+  (assoc-in state [:app-viewer :batch-gen-progress] progress))
+
+(defn set-batch-gen-results
+  "Store batch code generation results summary."
+  [state results]
+  (assoc-in state [:app-viewer :batch-gen-results] results))
+
 ;; Phase 6: Import mode
 (defn set-import-mode
   "Set the import automation mode (:manual, :guided, :autonomous)."

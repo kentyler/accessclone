@@ -5051,6 +5051,84 @@ body {
   color: var(--gray-500);
 }
 
+/* Pipeline steps */
+.app-pipeline-step {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  margin-top: 1rem;
+  border-bottom: 1px solid var(--gray-200);
+  color: var(--gray-400);
+}
+.app-pipeline-step.active {
+  color: var(--gray-800);
+}
+.app-pipeline-step.complete {
+  color: #166534;
+}
+.app-pipeline-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--gray-200);
+  font-size: 0.75rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.app-pipeline-step.active .app-pipeline-number {
+  background: var(--primary);
+  color: white;
+}
+.app-pipeline-step.complete .app-pipeline-number {
+  background: #166534;
+  color: white;
+}
+.app-pipeline-title {
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+.app-pipeline-check {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.app-pipeline-body {
+  padding: 0.75rem 0 0 0;
+}
+
+/* Batch generation results */
+.app-gen-results {
+  margin-top: 1rem;
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.app-gen-result-group {
+  padding: 0.5rem 1rem;
+  font-size: 0.82rem;
+}
+.app-gen-result-group strong {
+  margin-right: 0.5rem;
+}
+.app-gen-result-group span {
+  color: var(--gray-600);
+}
+.app-gen-result-group.generated {
+  background: #dcfce7;
+  color: #166534;
+}
+.app-gen-result-group.skipped {
+  background: #fef3c7;
+  color: #92400e;
+}
+.app-gen-result-group.failed {
+  background: #fecaca;
+  color: #991b1b;
+}
+
 /* Dependencies & API surface panes */
 .app-deps-pane,
 .app-surface-pane {

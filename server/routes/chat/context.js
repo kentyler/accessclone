@@ -296,7 +296,149 @@ function formatGraphContext(graphContext) {
   return parts.join('\n');
 }
 
+/**
+ * Check whether a module's mapped intents reference objects that exist in the graph.
+ * Returns { satisfied: boolean, missing: [{type, name}] }.
+ */
+function checkIntentDependencies(mappedIntents, graphContext) {
+  if (!mappedIntents || !graphContext) return { satisfied: true, missing: [] };
+
+  const missing = [];
+  const allTables = new Set([
+    ...graphContext.tables.map(t => t.name.toLowerCase()),
+    ...graphContext.views.map(v => v.name.toLowerCase())
+  ]);
+  const allForms = new Set(graphContext.forms.map(f => f.name.toLowerCase()));
+  const allReports = new Set(graphContext.reports.map(r => r.name.toLowerCase()));
+
+  function scan(intents) {
+    for (const intent of (intents || [])) {
+      // Forms
+      if ((intent.type === 'open-form' || intent.type === 'open-form-filtered') && intent.form) {
+        if (!allForms.has(intent.form.toLowerCase()))
+          missing.push({ type: 'form', name: intent.form });
+      }
+      // Reports
+      if (intent.type === 'open-report' && intent.report) {
+        if (!allReports.has(intent.report.toLowerCase()))
+          missing.push({ type: 'report', name: intent.report });
+      }
+      // Tables (DLookup, DCount, DSum, set-record-source)
+      if (['dlookup', 'dcount', 'dsum'].includes(intent.type) && intent.table) {
+        const normalized = intent.table.toLowerCase().replace(/\s+/g, '_');
+        if (!allTables.has(normalized) && !allTables.has(intent.table.toLowerCase()))
+          missing.push({ type: 'table', name: intent.table });
+      }
+      if (intent.type === 'set-record-source' && intent.record_source) {
+        const normalized = intent.record_source.toLowerCase().replace(/\s+/g, '_');
+        if (!allTables.has(normalized) && !allTables.has(intent.record_source.toLowerCase()))
+          missing.push({ type: 'table', name: intent.record_source });
+      }
+      // Recurse
+      if (intent.then) scan(intent.then);
+      if (intent.else) scan(intent.else);
+      if (intent.children) scan(intent.children);
+    }
+  }
+
+  for (const proc of (mappedIntents?.procedures || [])) {
+    scan(proc.intents);
+  }
+
+  // Deduplicate
+  const unique = [...new Map(missing.map(m => [`${m.type}:${m.name}`, m])).values()];
+  return { satisfied: unique.length === 0, missing: unique };
+}
+
+/**
+ * Auto-resolve gap intents when referenced objects exist in the graph.
+ * Returns { resolved_count, remaining_gaps }.
+ */
+function autoResolveGaps(mappedIntents, graphContext) {
+  if (!mappedIntents || !graphContext) return { resolved_count: 0, remaining_gaps: 0 };
+
+  const allTables = new Set([
+    ...graphContext.tables.map(t => t.name.toLowerCase()),
+    ...graphContext.views.map(v => v.name.toLowerCase())
+  ]);
+  const allForms = new Set(graphContext.forms.map(f => f.name.toLowerCase()));
+
+  let resolvedCount = 0;
+  let remainingGaps = 0;
+
+  function tryResolve(intents) {
+    for (const intent of (intents || [])) {
+      if (intent.type === 'gap' && !intent.resolution) {
+        let resolved = false;
+        const reason = (intent.reason || '').toLowerCase();
+        const vbaLine = (intent.vba_line || '').toLowerCase();
+
+        // Check for DLookup/DCount/DSum referencing existing tables
+        if (/dlookup|dcount|dsum/.test(reason) || /dlookup|dcount|dsum/.test(vbaLine)) {
+          const tableMatch = (intent.vba_line || '').match(/["'](\w[\w\s]*?)["']/);
+          if (tableMatch) {
+            const tableName = tableMatch[1].toLowerCase().replace(/\s+/g, '_');
+            if (allTables.has(tableName) || allTables.has(tableMatch[1].toLowerCase())) {
+              intent.resolution = {
+                answer: `Use API call to /api/data/${tableName}`,
+                custom_notes: 'Auto-resolved: table exists in database',
+                resolved_at: new Date().toISOString(),
+                resolved_by: 'auto'
+              };
+              resolved = true;
+            }
+          }
+        }
+
+        // Check for form references
+        if (!resolved && (/openform|doCmd\.openform/i.test(reason) || /openform|doCmd\.openform/i.test(vbaLine))) {
+          const formMatch = (intent.vba_line || '').match(/["'](\w[\w\s]*?)["']/);
+          if (formMatch && allForms.has(formMatch[1].toLowerCase())) {
+            intent.resolution = {
+              answer: 'Use state/open-object!',
+              custom_notes: 'Auto-resolved: form exists in database',
+              resolved_at: new Date().toISOString(),
+              resolved_by: 'auto'
+            };
+            resolved = true;
+          }
+        }
+
+        // Check for RunSQL referencing existing tables
+        if (!resolved && (/runsql/i.test(reason) || /runsql/i.test(vbaLine))) {
+          const tableMatch = (intent.vba_line || '').match(/(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+[[\]"']?(\w[\w\s]*?)[[\]"']?\s/i);
+          if (tableMatch) {
+            const tableName = tableMatch[1].toLowerCase().replace(/\s+/g, '_');
+            if (allTables.has(tableName) || allTables.has(tableMatch[1].toLowerCase())) {
+              intent.resolution = {
+                answer: `Use API POST to /api/data/${tableName}`,
+                custom_notes: 'Auto-resolved: table exists in database',
+                resolved_at: new Date().toISOString(),
+                resolved_by: 'auto'
+              };
+              resolved = true;
+            }
+          }
+        }
+
+        if (resolved) resolvedCount++;
+        else remainingGaps++;
+      }
+      // Recurse
+      if (intent.then) tryResolve(intent.then);
+      if (intent.else) tryResolve(intent.else);
+      if (intent.children) tryResolve(intent.children);
+    }
+  }
+
+  for (const proc of (mappedIntents?.procedures || [])) {
+    tryResolve(proc.intents);
+  }
+
+  return { resolved_count: resolvedCount, remaining_gaps: remainingGaps };
+}
+
 module.exports = {
   summarizeDefinition, checkImportCompleteness, formatMissingList, buildAppInventory,
-  buildGraphContext, formatGraphContext
+  buildGraphContext, formatGraphContext, checkIntentDependencies, autoResolveGaps
 };

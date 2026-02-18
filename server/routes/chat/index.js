@@ -7,7 +7,7 @@ const router = express.Router();
 const path = require('path');
 const { logError } = require('../../lib/events');
 const { dataTools, graphTools, moduleTools, queryTools } = require('./tools');
-const { summarizeDefinition, checkImportCompleteness, formatMissingList, buildAppInventory, buildGraphContext, formatGraphContext } = require('./context');
+const { summarizeDefinition, checkImportCompleteness, formatMissingList, buildAppInventory, buildGraphContext, formatGraphContext, checkIntentDependencies, autoResolveGaps } = require('./context');
 const { executeTool } = require('./tool-handlers');
 
 module.exports = function(pool, secrets) {
@@ -601,7 +601,7 @@ Return ONLY the ClojureScript code, no markdown code fences, no explanations. In
    * Generate ClojureScript wiring from mapped intents
    */
   router.post('/generate-wiring', async (req, res) => {
-    const { mapped_intents, module_name, vba_source, database_id } = req.body;
+    const { mapped_intents, module_name, vba_source, database_id, check_deps } = req.body;
 
     if (!mapped_intents) {
       return res.status(400).json({ error: 'mapped_intents is required' });
@@ -615,6 +615,14 @@ Return ONLY the ClojureScript code, no markdown code fences, no explanations. In
       const databaseId = database_id || req.headers['x-database-id'];
       if (databaseId) {
         graphCtx = await buildGraphContext(pool, databaseId);
+      }
+
+      // Dependency check: if check_deps is true, verify all referenced objects exist
+      if (check_deps && graphCtx) {
+        const depCheck = checkIntentDependencies(mapped_intents, graphCtx);
+        if (!depCheck.satisfied) {
+          return res.json({ skipped: true, missing_deps: depCheck.missing });
+        }
       }
 
       const result = await generateWiring(mapped_intents, module_name || 'unknown', {

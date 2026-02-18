@@ -129,12 +129,13 @@
    ;; Logs domain (1)
    :set-logs-filter          logs/set-logs-filter
 
-   ;; App Viewer domain (14)
+   ;; App Viewer domain (16)
    :set-app-pane             app/set-app-pane
    :set-app-overview         app/set-app-overview
    :set-app-loading          app/set-app-loading
    :set-batch-extracting     app/set-batch-extracting
    :set-batch-progress       app/set-batch-progress
+   :set-batch-extract-results app/set-batch-extract-results
    :set-all-gap-questions    app/set-all-gap-questions
    :set-app-gap-selection    app/set-app-gap-selection
    :set-submitting-gaps      app/set-submitting-gaps
@@ -143,7 +144,12 @@
    :set-batch-gen-results    app/set-batch-gen-results
    :set-app-dependencies     app/set-app-dependencies
    :set-app-api-surface      app/set-app-api-surface
-   :set-import-mode          app/set-import-mode})
+   :set-import-mode          app/set-import-mode
+   :set-auto-resolving-gaps  app/set-auto-resolving-gaps
+   :set-all-gap-selections   app/set-all-gap-selections
+   :set-module-pipeline-status   app/set-module-pipeline-status
+   :set-module-pipeline-statuses app/set-module-pipeline-statuses
+   :set-pipeline-running         app/set-pipeline-running})
 
 ;; ============================================================
 ;; DISPATCH

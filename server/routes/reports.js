@@ -9,13 +9,13 @@ const router = express.Router();
 const { logEvent, logError } = require('../lib/events');
 
 /**
- * Extract record-source from JSON content string
- * @param {string} json - JSON content
+ * Extract record-source from a definition (object or JSON string)
+ * @param {object|string} def - definition object or JSON string
  * @returns {string|null} - record source or null
  */
-function extractRecordSource(json) {
+function extractRecordSource(def) {
   try {
-    const obj = JSON.parse(json);
+    const obj = typeof def === 'string' ? JSON.parse(def) : def;
     return obj['record-source'] || obj['record_source'] || null;
   } catch (e) {
     return null;
@@ -66,14 +66,7 @@ function createRouter(pool) {
         return res.status(404).json({ error: 'Report not found' });
       }
 
-      const raw = result.rows[0].definition;
-
-      // Try JSON parse; if it fails, return as EDN string
-      try {
-        res.json(JSON.parse(raw));
-      } catch (e) {
-        res.json({ _raw_edn: raw, _format: 'edn' });
-      }
+      res.json(result.rows[0].definition);
     } catch (err) {
       console.error('Error reading report:', err);
       logError(pool, 'GET /api/reports/:name', 'Failed to read report', err, { databaseId: req.databaseId });
@@ -125,12 +118,7 @@ function createRouter(pool) {
         return res.status(404).json({ error: 'Report version not found' });
       }
 
-      const raw = result.rows[0].definition;
-      try {
-        res.json(JSON.parse(raw));
-      } catch (e) {
-        res.json({ _raw_edn: raw, _format: 'edn' });
-      }
+      res.json(result.rows[0].definition);
     } catch (err) {
       console.error('Error reading report version:', err);
       logError(pool, 'GET /api/reports/:name/versions/:version', 'Failed to read report version', err, { databaseId: req.databaseId });
@@ -148,12 +136,7 @@ function createRouter(pool) {
       const databaseId = req.databaseId;
       const reportName = req.params.name;
 
-      let content;
-      if (typeof req.body === 'string') {
-        content = req.body;
-      } else {
-        content = JSON.stringify(req.body);
-      }
+      const content = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
 
       const recordSource = extractRecordSource(content);
 
@@ -211,7 +194,7 @@ function createRouter(pool) {
       if (req.query.source === 'import' && req.query.import_log_id) {
         try {
           const { validateReport, validateReportCrossObject, getSchemaInfo } = require('./lint');
-          const reportDef = JSON.parse(content);
+          const reportDef = content;
           const issues = validateReport(reportDef);
           const dbResult = await pool.query(
             'SELECT schema_name FROM shared.databases WHERE database_id = $1', [databaseId]
@@ -235,7 +218,7 @@ function createRouter(pool) {
         // Create PostgreSQL functions for domain-function expressions (DLookUp, DCount, etc.)
         try {
           const { processDefinitionExpressions } = require('../lib/expression-converter');
-          const reportDef = JSON.parse(content);
+          const reportDef = content;
           const dbResult2 = await pool.query(
             'SELECT schema_name FROM shared.databases WHERE database_id = $1', [databaseId]
           );
@@ -245,11 +228,10 @@ function createRouter(pool) {
               pool, reportDef, reportName, schemaName, 'report'
             );
             if (functions.length > 0) {
-              const updatedContent = JSON.stringify(updatedDef);
               await pool.query(
                 `UPDATE shared.reports SET definition = $1
                  WHERE database_id = $2 AND name = $3 AND is_current = true`,
-                [updatedContent, databaseId, reportName]
+                [updatedDef, databaseId, reportName]
               );
               console.log(`Created ${functions.length} computed functions for report ${reportName}`);
             }

@@ -93,12 +93,8 @@ module.exports = function(router, pool) {
           );
           if (defResult.rows.length === 0) continue;
 
-          let definition;
-          try {
-            definition = JSON.parse(defResult.rows[0].definition);
-          } catch {
-            continue;
-          }
+          const definition = defResult.rows[0].definition;
+          if (!definition || typeof definition !== 'object') continue;
 
           let modified = false;
 
@@ -136,7 +132,6 @@ module.exports = function(router, pool) {
 
           // Save updated definition as new version
           if (modified) {
-            const content = JSON.stringify(definition);
             const recordSource = definition['record-source'] || definition.recordSource || null;
 
             const client = await pool.connect();
@@ -156,7 +151,7 @@ module.exports = function(router, pool) {
 
               await client.query(
                 `INSERT INTO ${table} (database_id, name, definition, record_source, version, is_current) VALUES ($1, $2, $3, $4, $5, true)`,
-                [targetDatabaseId, objectName, content, recordSource, newVersion]
+                [targetDatabaseId, objectName, definition, recordSource, newVersion]
               );
 
               await client.query('COMMIT');
@@ -214,8 +209,8 @@ module.exports = function(router, pool) {
 
       function collectImages(rows, objectType) {
         for (const row of rows) {
-          let def;
-          try { def = JSON.parse(row.definition); } catch { continue; }
+          const def = row.definition;
+          if (!def || typeof def !== 'object') continue;
 
           // Object-level picture (form/report background)
           if (def.picture !== undefined) {

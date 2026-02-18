@@ -5040,6 +5040,15 @@ body {
 .app-gap-option input[type="radio"] {
   margin: 0;
 }
+.app-gaps-heading {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+.app-gaps-heading h4 {
+  margin: 0;
+}
 .app-gaps-submit {
   display: flex;
   align-items: center;
@@ -5129,6 +5138,146 @@ body {
   color: #991b1b;
 }
 
+/* Pipeline pane — per-module status table */
+.app-pipeline-pane {
+  max-width: 900px;
+}
+.app-pipeline-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.app-pipeline-header h3 {
+  margin: 0;
+}
+.app-pipeline-actions {
+  display: flex;
+  gap: 8px;
+}
+.app-pipeline-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.app-pipeline-table th {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 2px solid var(--gray-300);
+  font-weight: 600;
+  color: var(--gray-600);
+}
+.app-pipeline-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--gray-200);
+  vertical-align: middle;
+}
+.app-pipeline-table tr.complete {
+  background: #f0fdf4;
+}
+.app-pipeline-table tr.failed {
+  background: #fef2f2;
+}
+.app-pipeline-table tr.running {
+  background: #eff6ff;
+}
+.app-pipeline-table .module-name {
+  font-weight: 500;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-pipeline-table .module-actions {
+  white-space: nowrap;
+  display: flex;
+  gap: 4px;
+}
+.app-pipeline-table .module-flags {
+  white-space: nowrap;
+}
+.app-pipeline-table .module-error {
+  max-width: 200px;
+}
+.error-text {
+  color: #dc2626;
+  font-size: 12px;
+}
+
+/* Pipeline status badges */
+.app-pipeline-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.app-pipeline-badge.step-pending {
+  background: #e5e7eb;
+  color: #4b5563;
+}
+.app-pipeline-badge.step-running {
+  background: #dbeafe;
+  color: #1d4ed8;
+  animation: pulse-bg 1.5s ease-in-out infinite;
+}
+.app-pipeline-badge.step-complete {
+  background: #d1fae5;
+  color: #065f46;
+}
+.app-pipeline-badge.step-failed {
+  background: #fecaca;
+  color: #991b1b;
+}
+@keyframes pulse-bg {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* Flag badges */
+.flag-vba, .flag-cljs {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  margin-right: 4px;
+}
+.flag-vba {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+.flag-cljs {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+/* Small action buttons */
+.small-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+  border: 1px solid var(--gray-300);
+  border-radius: 3px;
+  background: white;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.small-btn:hover:not(:disabled) {
+  background: var(--gray-100);
+}
+.small-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.small-btn.primary-btn {
+  background: var(--primary-blue);
+  color: white;
+  border-color: var(--primary-blue);
+}
+.small-btn.primary-btn:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
 /* Dependencies & API surface panes */
 .app-deps-pane,
 .app-surface-pane {
@@ -5193,6 +5342,10 @@ body {
 .app-deps-table tr.broken td {
   background: #fef2f2;
   color: #991b1b;
+}
+.app-deps-table tr.system td {
+  color: var(--gray-400);
+  font-style: italic;
 }
 .app-deps-orphans {
   font-size: 0.82rem;

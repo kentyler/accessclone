@@ -214,12 +214,12 @@ async function buildGraphContext(pool, databaseId) {
         [schemaName]
       ),
       pool.query(
-        `SELECT DISTINCT ON (name) name, definition->>'record-source' as record_source
+        `SELECT DISTINCT ON (name) name, record_source
          FROM shared.forms WHERE database_id = $1 AND is_current = true`,
         [databaseId]
       ),
       pool.query(
-        `SELECT DISTINCT ON (name) name, definition->>'record-source' as record_source
+        `SELECT DISTINCT ON (name) name, record_source
          FROM shared.reports WHERE database_id = $1 AND is_current = true`,
         [databaseId]
       )

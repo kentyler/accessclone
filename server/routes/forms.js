@@ -9,13 +9,13 @@ const router = express.Router();
 const { logEvent, logError } = require('../lib/events');
 
 /**
- * Extract record-source from JSON content string
- * @param {string} json - JSON content
+ * Extract record-source from a definition (object or JSON string)
+ * @param {object|string} def - definition object or JSON string
  * @returns {string|null} - record source or null
  */
-function extractRecordSource(json) {
+function extractRecordSource(def) {
   try {
-    const obj = JSON.parse(json);
+    const obj = typeof def === 'string' ? JSON.parse(def) : def;
     return obj['record-source'] || obj['record_source'] || null;
   } catch (e) {
     return null;
@@ -66,7 +66,7 @@ function createRouter(pool) {
         return res.status(404).json({ error: 'Form not found' });
       }
 
-      res.json(JSON.parse(result.rows[0].definition));
+      res.json(result.rows[0].definition);
     } catch (err) {
       console.error('Error reading form:', err);
       logError(pool, 'GET /api/forms/:name', 'Failed to read form', err, { databaseId: req.databaseId });
@@ -118,7 +118,7 @@ function createRouter(pool) {
         return res.status(404).json({ error: 'Form version not found' });
       }
 
-      res.json(JSON.parse(result.rows[0].definition));
+      res.json(result.rows[0].definition);
     } catch (err) {
       console.error('Error reading form version:', err);
       logError(pool, 'GET /api/forms/:name/versions/:version', 'Failed to read form version', err, { databaseId: req.databaseId });
@@ -136,12 +136,7 @@ function createRouter(pool) {
       const databaseId = req.databaseId;
       const formName = req.params.name;
 
-      let content;
-      if (typeof req.body === 'string') {
-        content = req.body;
-      } else {
-        content = JSON.stringify(req.body);
-      }
+      const content = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
 
       const recordSource = extractRecordSource(content);
 
@@ -195,7 +190,7 @@ function createRouter(pool) {
       if (req.query.source === 'import' && req.query.import_log_id) {
         try {
           const { validateForm, validateFormCrossObject, getSchemaInfo } = require('./lint');
-          const formDef = JSON.parse(content);
+          const formDef = content;
           const issues = validateForm(formDef);
           // Cross-object validation needs schema info
           const dbResult = await pool.query(
@@ -220,7 +215,7 @@ function createRouter(pool) {
         // Create PostgreSQL functions for domain-function expressions (DLookUp, DCount, etc.)
         try {
           const { hasDomainFunctions, processDefinitionExpressions } = require('../lib/expression-converter');
-          const formDef = JSON.parse(content);
+          const formDef = content;
           const dbResult2 = await pool.query(
             'SELECT schema_name FROM shared.databases WHERE database_id = $1', [databaseId]
           );
@@ -231,11 +226,10 @@ function createRouter(pool) {
             );
             if (functions.length > 0) {
               // Re-save the definition with computed-function annotations
-              const updatedContent = JSON.stringify(updatedDef);
               await pool.query(
                 `UPDATE shared.forms SET definition = $1
                  WHERE database_id = $2 AND name = $3 AND is_current = true`,
-                [updatedContent, databaseId, formName]
+                [updatedDef, databaseId, formName]
               );
               console.log(`Created ${functions.length} computed functions for form ${formName}`);
             }

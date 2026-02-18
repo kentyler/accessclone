@@ -76,7 +76,16 @@ function createRouter(pool) {
 
       await client.query('BEGIN');
 
-      // Get current max version for this module
+      // Load current version to preserve fields not being updated
+      const currentResult = await client.query(
+        `SELECT vba_source, cljs_source, description, status, review_notes, intents
+         FROM shared.modules
+         WHERE database_id = $1 AND name = $2 AND is_current = true`,
+        [databaseId, moduleName]
+      );
+      const prev = currentResult.rows[0] || {};
+
+      // Get max version across ALL rows (including non-current)
       const versionResult = await client.query(
         `SELECT COALESCE(MAX(version), 0) as max_version
          FROM shared.modules
@@ -84,6 +93,14 @@ function createRouter(pool) {
         [databaseId, moduleName]
       );
       const newVersion = versionResult.rows[0].max_version + 1;
+
+      // Merge: use provided value when present, otherwise preserve current
+      const finalVba = vba_source !== undefined ? vba_source : (prev.vba_source || null);
+      const finalCljs = cljs_source !== undefined ? cljs_source : (prev.cljs_source || null);
+      const finalDesc = description !== undefined ? description : (prev.description || null);
+      const finalStatus = status || prev.status || 'pending';
+      const finalNotes = review_notes !== undefined ? review_notes : (prev.review_notes || null);
+      const finalIntents = intents !== undefined ? intents : prev.intents;
 
       // Mark all existing versions as not current
       await client.query(
@@ -97,8 +114,8 @@ function createRouter(pool) {
       await client.query(
         `INSERT INTO shared.modules (database_id, name, vba_source, cljs_source, description, status, review_notes, intents, version, is_current)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)`,
-        [databaseId, moduleName, vba_source || null, cljs_source || null, description || null,
-         status || 'pending', review_notes || null, intents ? JSON.stringify(intents) : null, newVersion]
+        [databaseId, moduleName, finalVba, finalCljs, finalDesc,
+         finalStatus, finalNotes, finalIntents ? JSON.stringify(finalIntents) : null, newVersion]
       );
 
       await client.query('COMMIT');

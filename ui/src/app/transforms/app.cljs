@@ -42,6 +42,11 @@
   [state submitting?]
   (assoc-in state [:app-viewer :submitting-gaps?] submitting?))
 
+(defn set-batch-extract-results
+  "Store batch intent extraction results summary."
+  [state results]
+  (assoc-in state [:app-viewer :batch-extract-results] results))
+
 ;; Phase 5: Dependencies and API surface
 (defn set-app-dependencies
   "Store dependency summary data."
@@ -69,8 +74,40 @@
   [state results]
   (assoc-in state [:app-viewer :batch-gen-results] results))
 
+;; LLM auto-resolve gaps
+(defn set-auto-resolving-gaps
+  "Set whether LLM auto-resolve is in progress."
+  [state resolving?]
+  (assoc-in state [:app-viewer :auto-resolving-gaps?] resolving?))
+
+(defn set-all-gap-selections
+  "Bulk-set selections for all gap questions from LLM auto-resolve."
+  [state selections]
+  (reduce (fn [s {:keys [index selected]}]
+            (assoc-in s [:app-viewer :all-gap-questions index :selected] selected))
+          state selections))
+
 ;; Phase 6: Import mode
 (defn set-import-mode
   "Set the import automation mode (:manual, :guided, :autonomous)."
   [state mode]
   (assoc-in state [:app-viewer :import-mode] mode))
+
+;; Per-module pipeline tracking
+(defn set-module-pipeline-status
+  "Set pipeline status for a single module.
+   status: {:step :name :status :pending|:running|:done|:failed :error? :results?}"
+  [state module-name status]
+  (assoc-in state [:app-viewer :module-pipeline module-name] status))
+
+(defn set-module-pipeline-statuses
+  "Bulk-set pipeline statuses for all modules from GET /api/pipeline/status."
+  [state modules]
+  (reduce (fn [s {:keys [name] :as mod}]
+            (assoc-in s [:app-viewer :module-pipeline name] mod))
+          state modules))
+
+(defn set-pipeline-running
+  "Set whether a pipeline operation is currently running."
+  [state running?]
+  (assoc-in state [:app-viewer :pipeline-running?] running?))

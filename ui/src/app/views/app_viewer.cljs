@@ -135,7 +135,8 @@
        [:input {:type "radio"
                 :name (str "app-gap-" idx)
                 :checked (= suggestion (:selected gq))
-                :on-change #(t/dispatch! :set-app-gap-selection idx suggestion)}]
+                :on-change #(do (t/dispatch! :set-app-gap-selection idx suggestion)
+                               (app-flow/save-gap-questions!))}]
        [:span suggestion]])]])
 
 (defn- pipeline-step-header [number title active? complete?]
@@ -167,8 +168,12 @@
 (defn- gap-decisions-pane []
   (let [extracting? (get-in @state/app-state [:app-viewer :batch-extracting?])
         progress (get-in @state/app-state [:app-viewer :batch-progress])
-        gap-questions (get-in @state/app-state [:app-viewer :all-gap-questions] [])
+        extract-results (get-in @state/app-state [:app-viewer :batch-extract-results])
+        gap-questions-raw (get-in @state/app-state [:app-viewer :all-gap-questions])
+        gap-questions (or gap-questions-raw [])
+        gaps-loaded? (some? gap-questions-raw)
         submitting? (get-in @state/app-state [:app-viewer :submitting-gaps?])
+        auto-resolving? (get-in @state/app-state [:app-viewer :auto-resolving-gaps?])
         generating? (get-in @state/app-state [:app-viewer :batch-generating?])
         gen-progress (get-in @state/app-state [:app-viewer :batch-gen-progress])
         gen-results (get-in @state/app-state [:app-viewer :batch-gen-results])
@@ -177,8 +182,12 @@
         all-answered? (and (seq gap-questions)
                            (every? :selected gap-questions))
         gaps-resolved? (and has-intents?
+                            gaps-loaded?
                             (empty? gap-questions)
-                            (not extracting?))]
+                            (not extracting?))
+        ;; Auto-load persisted gap questions from server
+        _ (when (and has-intents? (nil? gap-questions-raw) (not extracting?))
+            (f/run-fire-and-forget! app-flow/load-gap-questions-flow))]
     [:div.app-gaps-pane
 
      ;; ── Step 1: Extract ──
@@ -201,7 +210,23 @@
                                                         (:total progress))))
                                   0) "%")}}]]
          (when (:current-module progress)
-           [:div.app-gaps-current (str "Processing: " (:current-module progress))])])]
+           [:div.app-gaps-current (str "Processing: " (:current-module progress))])])
+      (when extract-results
+        [:div.app-gen-results
+         (when (seq (:extracted extract-results))
+           [:div.app-gen-result-group.generated
+            [:strong (str (count (:extracted extract-results)) " extracted")]
+            [:span (clojure.string/join ", " (:extracted extract-results))]])
+         (when (seq (:skipped extract-results))
+           [:div.app-gen-result-group.skipped
+            [:strong (str (count (:skipped extract-results)) " skipped (no VBA source)")]
+            [:span (clojure.string/join ", " (:skipped extract-results))]])
+         (when (seq (:failed extract-results))
+           [:div.app-gen-result-group.failed
+            [:strong (str (count (:failed extract-results)) " failed")]
+            (for [{:keys [name error]} (:failed extract-results)]
+              ^{:key name}
+              [:div (str name ": " (or error "unknown error"))])])])]
 
      ;; ── Step 2: Resolve Gaps ──
      (when has-intents?
@@ -213,7 +238,12 @@
          (cond
            (seq gap-questions)
            [:<>
-            [:h4 (str (count gap-questions) " gap question(s) across all modules")]
+            [:div.app-gaps-heading
+             [:h4 (str (count gap-questions) " gap question(s) across all modules")]
+             [:button.secondary-btn
+              {:disabled (or auto-resolving? submitting?)
+               :on-click #(f/run-fire-and-forget! app-flow/auto-resolve-gaps-flow)}
+              (if auto-resolving? "Auto-resolving..." "Auto-resolve All")]]
             (for [[idx gq] (map-indexed vector gap-questions)]
               ^{:key idx}
               [gap-decision-item idx gq])
@@ -229,7 +259,10 @@
                   (str remaining " of " (count gap-questions) " remaining")))]]]
 
            gaps-resolved?
-           [:div.app-gaps-empty "All gaps resolved."])]])
+           [:div.app-gaps-empty "All gaps resolved."]
+
+           :else
+           [:div.app-gaps-empty "Click Re-extract All to load gap questions."])]])
 
      ;; ── Step 3: Generate Code ──
      (when has-intents?
@@ -365,11 +398,16 @@
               [:tbody
                (for [[idx ep] (map-indexed vector (:module_endpoints surface))]
                  ^{:key idx}
-                 [:tr {:class (when-not (:exists ep) "broken")}
+                 [:tr {:class (cond
+                                (not (:exists ep)) "broken"
+                                (:system ep) "system")}
                   [:td (:table ep)]
                   [:td (clojure.string/join ", " (:operations ep))]
                   [:td (clojure.string/join ", " (:modules ep))]
-                  [:td (if (:exists ep) "Yes" "Missing")]])]]])
+                  [:td (cond
+                         (:system ep) [:span {:title "Access system table — not needed in PostgreSQL"} "N/A"]
+                         (:exists ep) "Yes"
+                         :else "Missing")]])]]])
           ;; Form data needs
           (when (seq (:form_data_needs surface))
             [:div.app-deps-section
@@ -385,11 +423,128 @@
                   [:td (if (:exists fd) "Yes" "Missing")]])]]])]))]))
 
 ;; ============================================================
+;; Pipeline Pane — Per-module step tracking
+;; ============================================================
+
+(def step-labels
+  {"extract" "Extract"
+   "map" "Map"
+   "gap-questions" "Gap Q's"
+   "resolve-gaps" "Resolve"
+   "generate" "Generate"
+   "complete" "Complete"
+   "failed" "Failed"})
+
+(defn- step-badge
+  "Color-coded badge for pipeline step."
+  [step status]
+  (let [label (get step-labels step step)]
+    [:span.app-pipeline-badge
+     {:class (str "step-" (name (or status "pending"))
+                  (when (= step "complete") " step-complete")
+                  (when (= step "failed") " step-failed"))}
+     label]))
+
+(defn- module-pipeline-row
+  "Single row in the per-module pipeline table."
+  [mod-name mod-status pipeline-running?]
+  (let [step (or (:step mod-status) "extract")
+        status (or (:status mod-status) "pending")
+        has-vba (:has_vba mod-status)
+        has-cljs (:has_cljs mod-status)
+        is-running (= "running" status)]
+    [:tr {:class (str (when is-running "running ")
+                      (when (= step "complete") "complete ")
+                      (when (= step "failed") "failed "))}
+     [:td.module-name mod-name]
+     [:td.module-step [step-badge step status]]
+     [:td.module-flags
+      (when has-vba [:span.flag-vba "VBA"])
+      (when has-cljs [:span.flag-cljs "CLJS"])]
+     [:td.module-actions
+      (when (and has-vba (not= step "complete") (not is-running))
+        [:<>
+         ;; Run next step button
+         (when (not= step "complete")
+           [:button.small-btn
+            {:disabled pipeline-running?
+             :on-click #(app-flow/run-module-step! mod-name step)
+             :title (str "Run: " (get step-labels step step))}
+            (str (get step-labels step step))])
+         ;; Run all button
+         [:button.small-btn.primary-btn
+          {:disabled pipeline-running?
+           :on-click #(app-flow/run-module-pipeline! mod-name)
+           :title "Run full pipeline"}
+          "All"]])]
+     [:td.module-error
+      (when (:error mod-status)
+        [:span.error-text {:title (:error mod-status)}
+         (let [e (:error mod-status)]
+           (if (> (count e) 40) (str (subs e 0 40) "...") e))])]]))
+
+(defn- pipeline-pane []
+  (let [module-pipeline (get-in @state/app-state [:app-viewer :module-pipeline])
+        modules (get-in @state/app-state [:objects :modules])
+        pipeline-running? (get-in @state/app-state [:app-viewer :pipeline-running?])
+        progress (get-in @state/app-state [:app-viewer :batch-progress])
+        gen-results (get-in @state/app-state [:app-viewer :batch-gen-results])
+        ;; Auto-load pipeline status on first render
+        _ (when (and (seq modules) (nil? module-pipeline))
+            (f/run-fire-and-forget! app-flow/load-pipeline-status-flow))]
+    [:div.app-pipeline-pane
+     [:div.app-pipeline-header
+      [:h3 "Module Pipeline"]
+      [:div.app-pipeline-actions
+       [:button.secondary-btn
+        {:disabled pipeline-running?
+         :on-click #(f/run-fire-and-forget! app-flow/load-pipeline-status-flow)}
+        "Refresh Status"]
+       [:button.primary-btn
+        {:disabled pipeline-running?
+         :on-click #(f/run-fire-and-forget! app-flow/batch-pipeline-flow)}
+        (if pipeline-running? "Running..." "Run All Modules")]]]
+
+     ;; Progress bar during batch
+     (when pipeline-running?
+       [:div.app-gaps-progress
+        [:div.app-progress-bar
+         [:div.app-progress-fill
+          {:style {:width (str (if (pos? (:total progress 0))
+                                 (Math/round (* 100 (/ (:completed progress 0)
+                                                       (:total progress))))
+                                 0) "%")}}]]
+        (when (:current-module progress)
+          [:div.app-gaps-current (str "Processing: " (:current-module progress))])])
+
+     ;; Per-module status table
+     (if (empty? modules)
+       [:div.app-loading "No modules imported yet."]
+       [:table.app-pipeline-table
+        [:thead
+         [:tr
+          [:th "Module"]
+          [:th "Pipeline Step"]
+          [:th ""]
+          [:th "Actions"]
+          [:th ""]]]
+        [:tbody
+         (for [module modules]
+           (let [mod-name (:name module)
+                 mod-status (get module-pipeline mod-name)]
+             ^{:key mod-name}
+             [module-pipeline-row mod-name mod-status pipeline-running?]))]])
+
+     ;; Batch results summary
+     [gen-results-summary gen-results]]))
+
+;; ============================================================
 ;; Main App Viewer Component
 ;; ============================================================
 
 (def pane-tabs
   [{:id :overview   :label "Overview"}
+   {:id :pipeline   :label "Pipeline"}
    {:id :gaps       :label "Gap Decisions"}
    {:id :deps       :label "Dependencies"}
    {:id :api        :label "API Surface"}])
@@ -409,6 +564,7 @@
      [:div.app-viewer-content
       (case active-pane
         :overview [overview-pane]
+        :pipeline [pipeline-pane]
         :gaps     [gap-decisions-pane]
         :deps     [dependencies-pane]
         :api      [api-surface-pane]

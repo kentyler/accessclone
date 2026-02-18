@@ -342,9 +342,8 @@ module.exports = function(router, pool, secrets) {
         );
         if (formResult.rows.length === 0) continue;
 
-        let definition;
-        try { definition = JSON.parse(formResult.rows[0].definition); }
-        catch { continue; }
+        const definition = formResult.rows[0].definition;
+        if (!definition || typeof definition !== 'object') continue;
 
         let modified = false;
         // Scan all sections for matching controls
@@ -364,7 +363,7 @@ module.exports = function(router, pool, secrets) {
           await pool.query(
             `UPDATE shared.forms SET definition = $1
              WHERE database_id = $2 AND name = $3 AND is_current = true`,
-            [JSON.stringify(definition), targetDatabaseId, formName]
+            [definition, targetDatabaseId, formName]
           );
         }
       }

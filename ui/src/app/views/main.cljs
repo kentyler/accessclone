@@ -8,6 +8,7 @@
             [app.flows.navigation :as nav]
             [app.flows.ui :as ui-flow]
             [app.flows.chat :as chat-flow]
+            [app.flows.module :as module-flow]
             [app.views.sidebar :as sidebar]
             [app.views.tabs :as tabs]
             [app.views.form-editor :as form-editor]
@@ -179,6 +180,48 @@
         {:empty-hint "Ask me anything about your database, forms, or code. I can help you find records, write queries, and create functions."
          :placeholder "Type a message..."}))))
 
+(defn- gap-decision-item [idx gq]
+  [:div.gap-decision-item
+   [:div.gap-decision-question
+    [:span.gap-decision-number (str (inc idx) ". ")]
+    [:span.gap-decision-proc (:procedure gq)]
+    " \u2014 "
+    [:span.gap-decision-vba (let [vba (or (:vba_line gq) "")]
+                               (if (> (count vba) 60)
+                                 (str (subs vba 0 60) "...")
+                                 vba))]]
+   [:div.gap-decision-text (:question gq)]
+   [:div.gap-decision-options
+    (for [suggestion (:suggestions gq)]
+      ^{:key suggestion}
+      [:label.gap-decision-option
+       [:input {:type "radio"
+                :name (str "gap-decision-" idx)
+                :checked (= suggestion (:selected gq))
+                :on-change #(t/dispatch! :set-gap-selection idx suggestion)}]
+       [:span suggestion]])]])
+
+(defn- gap-decisions-widget []
+  (let [gap-questions (get-in @state/app-state [:module-viewer :gap-questions])
+        all-answered? (every? :selected gap-questions)
+        submitting? (get-in @state/app-state [:module-viewer :submitting-gaps?])]
+    (when (seq gap-questions)
+      [:div.gap-decisions-panel
+       [:div.gap-decisions-header "Gap Decisions"]
+       (for [[idx gq] (map-indexed vector gap-questions)]
+         ^{:key idx}
+         [gap-decision-item idx gq])
+       [:div.gap-decisions-actions
+        [:button.btn-primary.btn-sm
+         {:disabled (or (not all-answered?) submitting?)
+          :on-click #(f/run-fire-and-forget! module-flow/submit-gap-decisions-flow)}
+         (if submitting? "Submitting..." "Submit Decisions")]
+        [:span.gap-decisions-hint
+         (if all-answered?
+           "All gaps answered. Click Submit to save."
+           (let [remaining (count (filter #(nil? (:selected %)) gap-questions))]
+             (str remaining " of " (count gap-questions) " remaining")))]]])))
+
 (defn- chat-messages-list [messages loading? empty-hint messages-end]
   [:div.chat-messages
    (if (empty? messages)
@@ -186,6 +229,8 @@
      (for [[idx msg] (map-indexed vector messages)]
        ^{:key idx}
        [chat-message msg]))
+   ;; Interactive gap decisions widget (after chat messages)
+   [gap-decisions-widget]
    (when loading?
      [:div.chat-message.assistant
       [:div.message-content.typing "Thinking..."]])
@@ -209,12 +254,16 @@
     "Send"]])
 
 (defn chat-panel []
-  (let [messages-end (r/atom nil)]
+  (let [messages-end (r/atom nil)
+        prev-msg-count (r/atom 0)]
     (r/create-class
      {:component-did-update
       (fn [_this]
-        (when-let [el @messages-end]
-          (.scrollIntoView el #js {:behavior "smooth"})))
+        (let [cur-count (count (:chat-messages @state/app-state))]
+          (when (not= cur-count @prev-msg-count)
+            (reset! prev-msg-count cur-count)
+            (when-let [el @messages-end]
+              (.scrollIntoView el #js {:behavior "smooth"})))))
       :reagent-render
       (fn []
         (let [messages (:chat-messages @state/app-state)

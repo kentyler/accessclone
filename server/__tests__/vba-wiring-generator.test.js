@@ -153,6 +153,41 @@ describe('generateIntentCljs', () => {
     expect(cljs).toContain(';; UNMAPPED:');
   });
 
+  test('resolved gap produces GAP RESOLVED comment', () => {
+    const cljs = generateIntentCljs({
+      type: 'gap',
+      vba_line: 'DoCmd.TransferSpreadsheet acExport, ...',
+      reason: 'Excel export',
+      resolution: {
+        answer: 'Download as CSV file',
+        custom_notes: 'Use existing /api/data endpoint',
+        resolved_at: '2026-02-17T15:30:00Z',
+        resolved_by: 'user'
+      }
+    }, 2);
+    expect(cljs).toContain(';; GAP RESOLVED:');
+    expect(cljs).toContain('User decision: Download as CSV file');
+    expect(cljs).toContain('Notes: Use existing /api/data endpoint');
+    expect(cljs).toContain('TODO: Implement');
+  });
+
+  test('resolved gap without custom_notes omits Notes line', () => {
+    const cljs = generateIntentCljs({
+      type: 'gap',
+      vba_line: 'DoCmd.OutputTo ...',
+      reason: 'PDF export',
+      resolution: {
+        answer: 'Skip this functionality',
+        custom_notes: null,
+        resolved_at: '2026-02-17T15:30:00Z',
+        resolved_by: 'user'
+      }
+    }, 2);
+    expect(cljs).toContain(';; GAP RESOLVED:');
+    expect(cljs).toContain('User decision: Skip this functionality');
+    expect(cljs).not.toContain('Notes:');
+  });
+
   test('dlookup produces NEEDS LLM comment', () => {
     const cljs = generateIntentCljs({
       type: 'dlookup',

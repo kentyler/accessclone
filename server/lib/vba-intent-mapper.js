@@ -136,6 +136,26 @@ function mapSingleIntent(intent) {
 }
 
 /**
+ * Assign gap_id to all gap intents in a list, recursively.
+ * gap_id format: {procedureName}:{gapIndex}
+ * @returns {number} the next gapIndex after assignment
+ */
+function assignGapIds(intents, procName, startIndex) {
+  let idx = startIndex;
+  for (const intent of intents) {
+    if (intent.type === 'gap' || (intent.classification === 'gap' && intent.type === 'gap')) {
+      intent.gap_id = `${procName}:${idx}`;
+      idx++;
+    }
+    // Recurse into structural children
+    if (intent.then) idx = assignGapIds(intent.then, procName, idx);
+    if (intent.else) idx = assignGapIds(intent.else, procName, idx);
+    if (intent.children) idx = assignGapIds(intent.children, procName, idx);
+  }
+  return idx;
+}
+
+/**
  * Map an entire intent extraction result to transforms/flows.
  *
  * @param {Object} intentResult - { procedures: [{ name, trigger, intents: [...] }], gaps: [...] }
@@ -152,6 +172,9 @@ function mapIntentsToTransforms(intentResult, context) {
 
   const procedures = intentResult.procedures.map(proc => {
     const mappedIntents = (proc.intents || []).map(mapSingleIntent);
+
+    // Assign gap_id to all gap intents in this procedure
+    assignGapIds(mappedIntents, proc.name, 0);
 
     // Collect unmapped/gap intents
     const gaps = mappedIntents.filter(i => i.classification === 'gap');
@@ -226,5 +249,6 @@ module.exports = {
   classifyIntent,
   mapSingleIntent,
   mapIntentsToTransforms,
-  countClassifications
+  countClassifications,
+  assignGapIds
 };

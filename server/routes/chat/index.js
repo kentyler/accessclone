@@ -441,7 +441,7 @@ Return ONLY the ClojureScript code, no markdown code fences, no explanations. In
   });
 
   // Load intent extraction dependencies
-  const { extractIntents, validateIntents } = require('../../lib/vba-intent-extractor');
+  const { extractIntents, validateIntents, collectGaps, generateGapQuestions, applyGapQuestions } = require('../../lib/vba-intent-extractor');
   const { mapIntentsToTransforms, countClassifications } = require('../../lib/vba-intent-mapper');
   const { generateWiring } = require('../../lib/vba-wiring-generator');
 
@@ -485,8 +485,56 @@ Return ONLY the ClojureScript code, no markdown code fences, no explanations. In
       // Step 2: Validate
       const validation = validateIntents(intentResult);
 
-      // Step 3: Map to transforms/flows
+      // Step 4: Map to transforms/flows
       const mapped = mapIntentsToTransforms(intentResult);
+
+      // Step 5: Carry forward previous resolutions
+      const moduleName = module_name || 'unknown';
+      if (databaseId) {
+        try {
+          const existing = await pool.query(
+            `SELECT intents FROM shared.modules WHERE name = $1 AND database_id = $2 ORDER BY version DESC LIMIT 1`,
+            [moduleName, databaseId]
+          );
+          if (existing.rows[0]?.intents?.mapped?.procedures) {
+            const oldResolutions = {};
+            function collectOldResolutions(intents) {
+              for (const intent of intents) {
+                if (intent.type === 'gap' && intent.resolution && intent.vba_line) {
+                  oldResolutions[intent.vba_line] = {
+                    resolution: intent.resolution,
+                    resolution_history: intent.resolution_history || []
+                  };
+                }
+                if (intent.then) collectOldResolutions(intent.then);
+                if (intent.else) collectOldResolutions(intent.else);
+                if (intent.children) collectOldResolutions(intent.children);
+              }
+            }
+            for (const proc of existing.rows[0].intents.mapped.procedures) {
+              collectOldResolutions(proc.intents || []);
+            }
+            // Apply old resolutions to new gaps with matching vba_line
+            function applyResolutions(intents) {
+              for (const intent of intents) {
+                if (intent.type === 'gap' && intent.vba_line && oldResolutions[intent.vba_line]) {
+                  intent.resolution = oldResolutions[intent.vba_line].resolution;
+                  intent.resolution_history = oldResolutions[intent.vba_line].resolution_history;
+                }
+                if (intent.then) applyResolutions(intent.then);
+                if (intent.else) applyResolutions(intent.else);
+                if (intent.children) applyResolutions(intent.children);
+              }
+            }
+            for (const proc of mapped.procedures) {
+              applyResolutions(proc.intents || []);
+            }
+          }
+        } catch (carryErr) {
+          // Non-fatal: just skip carry-forward
+          console.log('Gap carry-forward skipped:', carryErr.message);
+        }
+      }
 
       // Aggregate stats
       let totalMechanical = 0, totalFallback = 0, totalGap = 0;
@@ -494,6 +542,30 @@ Return ONLY the ClojureScript code, no markdown code fences, no explanations. In
         totalMechanical += proc.stats?.mechanical || 0;
         totalFallback += proc.stats?.llm_fallback || 0;
         totalGap += proc.stats?.gap || 0;
+      }
+
+      // Generate gap questions via focused LLM call
+      let gapQuestions = [];
+      if (totalGap > 0) {
+        try {
+          const gaps = collectGaps(mapped);
+          console.log(`Found ${gaps.length} gaps, generating questions...`);
+          if (gaps.length > 0) {
+            const questions = await generateGapQuestions(gaps, vba_source, moduleName, apiKey);
+            // Merge questions with gap info for the response
+            gapQuestions = gaps.map((g, i) => ({
+              gap_id: g.gap_id,
+              procedure: g.procedure,
+              vba_line: g.vba_line,
+              reason: g.reason,
+              question: questions[i]?.question || `This VBA code does: "${g.vba_line}". How should this work in the web app?`,
+              suggestions: questions[i]?.suggestions || ['Implement equivalent functionality', 'Skip this functionality']
+            }));
+          }
+        } catch (gapErr) {
+          // Non-fatal: just skip gap questions
+          console.log('Gap question generation skipped:', gapErr.message);
+        }
       }
 
       res.json({
@@ -505,7 +577,8 @@ Return ONLY the ClojureScript code, no markdown code fences, no explanations. In
           mechanical: totalMechanical,
           llm_fallback: totalFallback,
           gap: totalGap
-        }
+        },
+        gap_questions: gapQuestions
       });
     } catch (err) {
       console.error('Error extracting intents:', err);
@@ -541,6 +614,86 @@ Return ONLY the ClojureScript code, no markdown code fences, no explanations. In
     } catch (err) {
       console.error('Error generating wiring:', err);
       logError(pool, 'POST /api/chat/generate-wiring', 'Wiring generation failed', err, { databaseId: database_id });
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * POST /api/chat/resolve-gap
+   * Resolve a gap intent with a user answer
+   */
+  router.post('/resolve-gap', async (req, res) => {
+    const { module_name, gap_id, answer, custom_notes, database_id } = req.body;
+
+    if (!module_name || !gap_id || !answer) {
+      return res.status(400).json({ error: 'module_name, gap_id, and answer are required' });
+    }
+
+    const databaseId = database_id || req.headers['x-database-id'];
+    if (!databaseId) {
+      return res.status(400).json({ error: 'database_id is required' });
+    }
+
+    try {
+      // Load current intents from DB
+      const result = await pool.query(
+        `SELECT intents FROM shared.modules WHERE name = $1 AND database_id = $2 ORDER BY version DESC LIMIT 1`,
+        [module_name, databaseId]
+      );
+
+      if (!result.rows[0]?.intents) {
+        return res.status(404).json({ error: 'No intents found for this module' });
+      }
+
+      const intents = result.rows[0].intents;
+
+      // Find and resolve the gap by gap_id
+      let found = false;
+      function resolveInList(intentList) {
+        for (const intent of intentList) {
+          if (intent.type === 'gap' && intent.gap_id === gap_id) {
+            const entry = {
+              answer,
+              custom_notes: custom_notes || null,
+              resolved_at: new Date().toISOString(),
+              resolved_by: 'user'
+            };
+            intent.resolution = entry;
+            if (!Array.isArray(intent.resolution_history)) {
+              intent.resolution_history = [];
+            }
+            intent.resolution_history.push(entry);
+            found = true;
+            return;
+          }
+          if (intent.then) resolveInList(intent.then);
+          if (intent.else) resolveInList(intent.else);
+          if (intent.children) resolveInList(intent.children);
+          if (found) return;
+        }
+      }
+
+      if (intents.mapped?.procedures) {
+        for (const proc of intents.mapped.procedures) {
+          resolveInList(proc.intents || []);
+          if (found) break;
+        }
+      }
+
+      if (!found) {
+        return res.status(404).json({ error: `Gap with id "${gap_id}" not found` });
+      }
+
+      // Update intents in DB
+      await pool.query(
+        `UPDATE shared.modules SET intents = $1 WHERE name = $2 AND database_id = $3 AND version = (SELECT MAX(version) FROM shared.modules WHERE name = $2 AND database_id = $3)`,
+        [JSON.stringify(intents), module_name, databaseId]
+      );
+
+      res.json({ success: true, updated_intents: intents });
+    } catch (err) {
+      console.error('Error resolving gap:', err);
+      logError(pool, 'POST /api/chat/resolve-gap', 'Gap resolution failed', err, { databaseId });
       res.status(500).json({ error: err.message });
     }
   });

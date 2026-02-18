@@ -20,20 +20,121 @@
     [:span {:class (str "intent-badge " cls)}
      classification]))
 
+;; ============================================================
+;; GAP RESOLUTION PANEL
+;; ============================================================
+
+(defn- count-gaps
+  "Count total and resolved gaps across all procedures, recursively."
+  [procedures]
+  (let [total (atom 0)
+        resolved (atom 0)]
+    (letfn [(walk [intents]
+              (doseq [intent intents]
+                (when (= "gap" (:type intent))
+                  (swap! total inc)
+                  (when (:resolution intent)
+                    (swap! resolved inc)))
+                (when (:then intent) (walk (:then intent)))
+                (when (:else intent) (walk (:else intent)))
+                (when (:children intent) (walk (:children intent)))))]
+      (doseq [proc procedures]
+        (walk (:intents proc))))
+    {:total @total :resolved @resolved}))
+
+(defn gap-resolution-panel
+  "Interactive panel for resolving a gap intent."
+  [intent]
+  (let [local-state (r/atom {:selected nil :notes "" :changing? false})]
+    (fn [intent]
+      (let [resolution (:resolution intent)
+            resolved? (and resolution (not (:changing? @local-state)))]
+        [:div.gap-resolution
+         [:div.gap-question (:question intent)]
+         (if resolved?
+           ;; Resolved state: compact summary
+           [:div.gap-resolved
+            [:div.gap-resolved-answer
+             [:strong "Resolved: "]
+             [:span (:answer resolution)]
+             (when (:custom_notes resolution)
+               [:span.gap-resolved-notes (str " - " (:custom_notes resolution))])]
+            [:a.gap-change-link
+             {:href "#"
+              :on-click (fn [e]
+                          (.preventDefault e)
+                          (swap! local-state assoc
+                                 :changing? true
+                                 :selected (:answer resolution)
+                                 :notes (or (:custom_notes resolution) "")))}
+             "Change answer"]
+            (when (seq (:resolution_history intent))
+              [:details.gap-history
+               [:summary (str (count (:resolution_history intent)) " previous answer(s)")]
+               [:ul
+                (for [[idx entry] (map-indexed vector (:resolution_history intent))]
+                  ^{:key idx}
+                  [:li (str (:answer entry)
+                            (when (:custom_notes entry) (str " - " (:custom_notes entry)))
+                            " (" (.toLocaleDateString (js/Date. (:resolved_at entry))) ")")])]])]
+           ;; Unresolved state: radio buttons + notes + resolve button
+           [:div.gap-suggestions
+            (for [suggestion (:suggestions intent)]
+              ^{:key suggestion}
+              [:label.gap-suggestion
+               [:input {:type "radio"
+                        :name (str "gap-" (:gap_id intent))
+                        :value suggestion
+                        :checked (= suggestion (:selected @local-state))
+                        :on-change #(swap! local-state assoc :selected suggestion)}]
+               [:span suggestion]])
+            [:textarea.gap-notes
+             {:placeholder "Additional notes (optional)"
+              :value (:notes @local-state)
+              :on-change #(swap! local-state assoc :notes (.. % -target -value))
+              :rows 2}]
+            [:div.gap-actions
+             [:button.btn-primary.btn-sm
+              {:disabled (nil? (:selected @local-state))
+               :on-click (fn []
+                           (f/run-fire-and-forget! module-flow/resolve-gap-flow
+                                                   {:gap-id (:gap_id intent)
+                                                    :answer (:selected @local-state)
+                                                    :custom-notes (let [n (:notes @local-state)]
+                                                                    (when (seq n) n))})
+                           (swap! local-state assoc :changing? false))}
+              "Resolve"]
+             (when (:changing? @local-state)
+               [:button.btn-secondary.btn-sm
+                {:on-click #(swap! local-state assoc :changing? false)}
+                "Cancel"])]])]))))
+
+;; ============================================================
+;; INTENT ITEMS & PROCEDURES
+;; ============================================================
+
 (defn- intent-item [intent]
-  [:div.intent-item
-   [:span.intent-type (:type intent)]
-   (when (:classification intent)
-     [classification-badge (:classification intent)])
-   (when-let [field (:field intent)]
-     [:span.intent-detail (str "field: " field)])
-   (when-let [form (:form intent)]
-     [:span.intent-detail (str "form: " form)])
-   (when-let [msg (:message intent)]
-     [:span.intent-detail (str "\"" (subs msg 0 (min 40 (count msg)))
-                                (when (> (count msg) 40) "...") "\"")])
-   (when-let [table (:table intent)]
-     [:span.intent-detail (str "table: " table)])])
+  [:<>
+   [:div.intent-item
+    [:span.intent-type (:type intent)]
+    (when (:classification intent)
+      [classification-badge (:classification intent)])
+    (when-let [field (:field intent)]
+      [:span.intent-detail (str "field: " field)])
+    (when-let [form (:form intent)]
+      [:span.intent-detail (str "form: " form)])
+    (when-let [msg (:message intent)]
+      [:span.intent-detail (str "\"" (subs msg 0 (min 40 (count msg)))
+                                 (when (> (count msg) 40) "...") "\"")])
+    (when-let [table (:table intent)]
+      [:span.intent-detail (str "table: " table)])
+    ;; For gaps: show VBA line as detail
+    (when (and (= "gap" (:type intent)) (:vba_line intent))
+      [:span.intent-detail (str (subs (:vba_line intent) 0 (min 50 (count (:vba_line intent))))
+                                (when (> (count (:vba_line intent)) 50) "..."))])]
+   ;; Show gap resolution panel for gaps with questions
+   (when (and (= "gap" (:type intent)) (:question intent))
+     [gap-resolution-panel intent])])
 
 (defn- procedure-summary [proc expanded-atom]
   (let [expanded? (get @expanded-atom (:name proc) false)
@@ -61,7 +162,9 @@
   (let [expanded-procs (r/atom {})]
     (fn []
       (let [intents-data (get-in @state/app-state [:module-viewer :intents])
-            stats (:stats intents-data)]
+            stats (:stats intents-data)
+            procedures (get-in intents-data [:mapped :procedures])
+            gap-counts (when (seq procedures) (count-gaps procedures))]
         (when intents-data
           [:div.intent-summary-panel
            [:div.intent-summary-header
@@ -78,9 +181,17 @@
                (str (:llm_fallback stats) " LLM-assisted")])
             (when (pos? (:gap stats 0))
               [:span.stat-bar-gap
-               (str (:gap stats) " gaps")])]
+               (str (:total gap-counts) " gaps"
+                    (when (pos? (:resolved gap-counts 0))
+                      (str " (" (:resolved gap-counts) " resolved)")))])]
+           ;; Unresolved gaps banner
+           (when (and gap-counts (pos? (:total gap-counts))
+                      (< (:resolved gap-counts 0) (:total gap-counts 0)))
+             (let [unresolved (- (:total gap-counts) (:resolved gap-counts 0))]
+               [:div.gap-banner
+                (str unresolved " unresolved gap(s) \u2014 expand procedures above to answer questions")]))
            [:div.intent-procedures
-            (for [proc (get-in intents-data [:mapped :procedures])]
+            (for [proc procedures]
               ^{:key (:name proc)}
               [procedure-summary proc expanded-procs])]])))))
 
@@ -262,7 +373,6 @@
          [:<>
           [info-panel]
           [import-completeness-banner]
-          [intent-summary-panel]
           [:div.module-split-view
            [vba-panel]
            [cljs-panel]]])])))

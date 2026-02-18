@@ -1073,7 +1073,9 @@
   (swap! viewer-state assoc
          :import-all-active? true
          :importing? true
-         :import-all-status {:phase nil :current nil :imported 0 :total 0 :failed []})
+         :import-all-status {:phase nil :current nil :imported 0 :total 0 :failed []}
+         ;; Reset progress counters so UI shows 0/N during re-import
+         :target-existing (if force? {} (:target-existing @viewer-state)))
   (go
     (let [total-imported (atom 0)
           total-failed (atom [])]

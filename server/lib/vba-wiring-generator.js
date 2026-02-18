@@ -179,6 +179,13 @@ function generateIntentCljs(intent, indent) {
       return `${pad};; NEEDS LLM: Loop — ${escapeCljs(intent.description || 'iteration')}`;
 
     case 'gap':
+      if (intent.resolution) {
+        const answer = escapeCljs(intent.resolution.answer || '');
+        const notes = intent.resolution.custom_notes ? `\n${pad};; Notes: ${escapeCljs(intent.resolution.custom_notes)}` : '';
+        return `${pad};; GAP RESOLVED: ${escapeCljs(intent.vba_line || intent.reason || 'unknown pattern')}\n` +
+               `${pad};; User decision: ${answer}${notes}\n` +
+               `${pad};; TODO: Implement "${answer}"`;
+      }
       return `${pad};; UNMAPPED: ${escapeCljs(intent.vba_line || intent.reason || 'unknown pattern')}`;
 
     default:
@@ -350,9 +357,39 @@ function generateMechanical(mappedResult, moduleName) {
  * @param {string} apiKey - Anthropic API key
  * @returns {Promise<{ cljs_source: string }>}
  */
-async function generateFallback(procedureNames, mechanicalSource, vbaSource, moduleName, apiKey) {
+async function generateFallback(procedureNames, mechanicalSource, vbaSource, moduleName, apiKey, mappedResult) {
   if (!procedureNames.length) {
     return { cljs_source: mechanicalSource };
+  }
+
+  // Collect resolved gap context for the LLM
+  let resolvedGapContext = '';
+  if (mappedResult?.procedures) {
+    const resolvedGaps = [];
+    function collectResolved(intents) {
+      for (const intent of intents) {
+        if (intent.type === 'gap' && intent.resolution) {
+          resolvedGaps.push({
+            vba_line: intent.vba_line,
+            question: intent.question,
+            answer: intent.resolution.answer,
+            notes: intent.resolution.custom_notes
+          });
+        }
+        if (intent.then) collectResolved(intent.then);
+        if (intent.else) collectResolved(intent.else);
+        if (intent.children) collectResolved(intent.children);
+      }
+    }
+    for (const proc of mappedResult.procedures) {
+      collectResolved(proc.intents || []);
+    }
+    if (resolvedGaps.length > 0) {
+      resolvedGapContext = '\n\nResolved gaps (user decisions for unmappable patterns):\n' +
+        resolvedGaps.map(g =>
+          `- VBA: ${g.vba_line}\n  Question: ${g.question || 'N/A'}\n  User answer: ${g.answer}${g.notes ? `\n  Notes: ${g.notes}` : ''}`
+        ).join('\n');
+    }
   }
 
   const systemPrompt = `You are an expert at translating VBA to ClojureScript for the AccessClone framework.
@@ -362,14 +399,16 @@ You are given:
 2. A partially-generated ClojureScript translation (mechanical portions are done)
 3. A list of procedures that need your help
 
-Your job: Replace the comment placeholders (;; NEEDS LLM: ...) in the mechanical output with working ClojureScript code that uses the AccessClone framework.
+Your job: Replace the comment placeholders (;; NEEDS LLM: ... and ;; GAP RESOLVED: ...) in the mechanical output with working ClojureScript code that uses the AccessClone framework.
+
+For resolved gaps (;; GAP RESOLVED), implement the user's chosen approach. The user's decision and any notes are provided below.
 
 Rules:
 - Use \`go\` blocks and \`<!\` for async operations (DLookup, DCount, RunSQL, etc.)
 - DLookup/DCount/DSum → API call to \`/api/data/tablename\` with query params
 - RunSQL → API call to \`/api/data/tablename\` with POST/PUT/DELETE
 - Keep the existing namespace and function structure
-- Return ONLY the complete ClojureScript source — no markdown, no explanations`;
+- Return ONLY the complete ClojureScript source — no markdown, no explanations${resolvedGapContext}`;
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -433,7 +472,7 @@ async function generateWiring(mappedResult, moduleName, options = {}) {
     try {
       const result = await generateFallback(
         fallback_procedures, mechanicalSource,
-        options.vbaSource || '', moduleName, options.apiKey
+        options.vbaSource || '', moduleName, options.apiKey, mappedResult
       );
       return { cljs_source: result.cljs_source, stats };
     } catch (err) {

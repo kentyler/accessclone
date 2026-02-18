@@ -367,7 +367,7 @@ const PROPERTY_CATALOG_SEED = [
   // Memo field extensions (Access 2007+)
   ['2007', 'table', 'field', 'RichText', 'boolean', 'false', null, 'skipped', 'TextFormat property; stores HTML in memo fields', 'Added in Access 2007'],
   ['2007', 'table', 'field', 'AppendOnly', 'boolean', 'false', null, 'skipped', 'Memo history tracking; Access retains all prior versions', 'Added in Access 2007'],
-  ['1997', 'table', 'field', 'Hyperlink', 'boolean', 'false', null, 'skipped', 'Attributes bit 0x8000 on Memo; display#address#subaddress#screentip format', 'Access 97+']
+  ['1997', 'table', 'field', 'Hyperlink', 'boolean', 'false', null, 'skipped', 'Attributes bit 0x8000 on Memo; display#address#subaddress#screentip format', 'Access 97+'],
 
   // TABLE index-level properties (object_subtype = 'index')
   // Source: https://learn.microsoft.com/en-us/office/client-developer/access/desktop-database-reference/index-object-dao

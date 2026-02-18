@@ -66,7 +66,8 @@
     :test (fn [ctx] (and (:name (:module-info ctx)) (:cljs-source (:module-info ctx))))
     :then [{:step :do
             :fn (fn [ctx]
-                  (let [mi (:module-info ctx)]
+                  (let [mi (:module-info ctx)
+                        intents-data (get-in @app-state [:module-viewer :intents])]
                     (go
                       (let [response (<! (http/put!
                                            (str api-base "/api/modules/"
@@ -75,7 +76,8 @@
                                            :json-params {:vba_source (:vba-source mi)
                                                          :cljs_source (:cljs-source mi)
                                                          :status (:status mi)
-                                                         :review_notes (:review-notes mi)}))]
+                                                         :review_notes (:review-notes mi)
+                                                         :intents intents-data}))]
                         (if (:ok? response)
                           (do
                             (swap! app-state assoc-in [:module-viewer :cljs-dirty?] false)
@@ -162,8 +164,12 @@
                   (let [data (:data response)
                         intents (:intents data)
                         mapped (:mapped data)
-                        stats (:stats data)]
+                        stats (:stats data)
+                        gap-questions (:gap_questions data)]
                     (t/dispatch! :set-module-intents {:intents intents :mapped mapped :stats stats})
+                    ;; Store gap questions for interactive widget
+                    (when (seq gap-questions)
+                      (t/dispatch! :set-gap-questions gap-questions))
                     ;; Add summary to chat
                     (t/dispatch! :add-chat-message "assistant"
                                  (str "Extracted " (:total stats) " intents from "
@@ -171,7 +177,9 @@
                                       "- " (:mechanical stats) " mechanical (deterministic)\n"
                                       "- " (:llm_fallback stats) " need LLM assistance\n"
                                       "- " (:gap stats) " gaps (unmappable)\n\n"
-                                      "Click \"Generate Code\" to produce ClojureScript.")))
+                                      "Click \"Generate Code\" to produce ClojureScript."
+                                      (when (pos? (:gap stats 0))
+                                        "\n\nPlease review the gap decisions below."))))
                   (let [missing (get-in response [:data :missing])
                         error-msg (get-in response [:data :error] "Unknown error")]
                     (if missing
@@ -223,6 +231,71 @@
                                          (get-in response [:data :error] "Unknown error"))
                                     "generate-wiring"))
                 ctx))))}])
+
+;; ============================================================
+;; GAP RESOLUTION
+;; ============================================================
+
+(def resolve-gap-flow
+  "POST /api/chat/resolve-gap → update intents in state.
+   Context requires: {:gap-id string, :answer string, :custom-notes string?}"
+  [{:step :do
+    :fn (fn [ctx]
+          (let [module-info (get-in @app-state [:module-viewer :module-info])]
+            (assoc ctx :module-info module-info)))}
+   {:step :do
+    :fn (fn [ctx]
+          (let [mi (:module-info ctx)]
+            (go
+              (let [response (<! (http/post!
+                                   (str api-base "/api/chat/resolve-gap")
+                                   :headers (db-headers)
+                                   :json-params {:module_name (:name mi)
+                                                 :gap_id (:gap-id ctx)
+                                                 :answer (:answer ctx)
+                                                 :custom_notes (:custom-notes ctx)
+                                                 :database_id (:database_id (:current-database @app-state))}))]
+                (if (:ok? response)
+                  (let [updated-intents (get-in response [:data :updated_intents])]
+                    (t/dispatch! :set-module-intents updated-intents))
+                  (state/log-error! (str "Gap resolution failed: "
+                                         (get-in response [:data :error] "Unknown error"))
+                                    "resolve-gap")))
+              ctx)))}])
+
+;; ============================================================
+;; GAP DECISIONS SUBMIT
+;; ============================================================
+
+(def submit-gap-decisions-flow
+  "Resolve all selected gap decisions via POST /api/chat/resolve-gap for each.
+   Reads gap-questions from state, submits each selection, clears gap-questions when done."
+  [{:step :do
+    :fn (fn [ctx]
+          (let [module-info (get-in @app-state [:module-viewer :module-info])
+                gap-questions (get-in @app-state [:module-viewer :gap-questions])]
+            (swap! app-state assoc-in [:module-viewer :submitting-gaps?] true)
+            (assoc ctx :module-info module-info :gap-questions gap-questions)))}
+   {:step :do
+    :fn (fn [ctx]
+          (let [mi (:module-info ctx)
+                gqs (filter :selected (:gap-questions ctx))]
+            (go
+              (doseq [gq gqs]
+                (let [response (<! (http/post!
+                                     (str api-base "/api/chat/resolve-gap")
+                                     :headers (db-headers)
+                                     :json-params {:module_name (:name mi)
+                                                   :gap_id (:gap_id gq)
+                                                   :answer (:selected gq)
+                                                   :database_id (:database_id (:current-database @app-state))}))]
+                  (when (:ok? response)
+                    (let [updated-intents (get-in response [:data :updated_intents])]
+                      (t/dispatch! :set-module-intents updated-intents)))))
+              (swap! app-state assoc-in [:module-viewer :submitting-gaps?] false)
+              (swap! app-state assoc-in [:module-viewer :gap-questions] nil)
+              (t/dispatch! :add-chat-message "assistant" "Gap decisions saved. Click \"Generate Code\" to produce ClojureScript.")
+              ctx)))}])
 
 ;; ============================================================
 ;; MACRO LOAD

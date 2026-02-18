@@ -136,6 +136,58 @@ describe('validateIntents', () => {
     const v = validateIntents(result);
     expect(v.unknown).toEqual(['mystery']);
   });
+
+  test('warns when gap is missing question field', () => {
+    const result = {
+      procedures: [{
+        name: 'test',
+        trigger: null,
+        intents: [
+          { type: 'gap', vba_line: 'DoCmd.TransferSpreadsheet', reason: 'Excel export' }
+        ]
+      }],
+      gaps: []
+    };
+    const v = validateIntents(result);
+    expect(v.warnings.some(w => w.includes('missing question'))).toBe(true);
+  });
+
+  test('warns when gap is missing suggestions field', () => {
+    const result = {
+      procedures: [{
+        name: 'test',
+        trigger: null,
+        intents: [
+          { type: 'gap', vba_line: 'DoCmd.TransferSpreadsheet', reason: 'Excel export', question: 'How to handle?' }
+        ]
+      }],
+      gaps: []
+    };
+    const v = validateIntents(result);
+    expect(v.warnings.some(w => w.includes('missing suggestions'))).toBe(true);
+  });
+
+  test('no warnings when gap has question and suggestions', () => {
+    const result = {
+      procedures: [{
+        name: 'test',
+        trigger: null,
+        intents: [
+          {
+            type: 'gap',
+            vba_line: 'DoCmd.TransferSpreadsheet',
+            reason: 'Excel export',
+            question: 'How to handle Excel export?',
+            suggestions: ['Download CSV', 'Skip this functionality']
+          }
+        ]
+      }],
+      gaps: []
+    };
+    const v = validateIntents(result);
+    // Only gap-related warnings should be absent — the gap type itself is known
+    expect(v.warnings.filter(w => w.includes('missing question') || w.includes('missing suggestions'))).toEqual([]);
+  });
 });
 
 // ============================================================

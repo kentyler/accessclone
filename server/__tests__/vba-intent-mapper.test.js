@@ -5,7 +5,8 @@ const {
   classifyIntent,
   mapSingleIntent,
   mapIntentsToTransforms,
-  countClassifications
+  countClassifications,
+  assignGapIds
 } = require('../lib/vba-intent-mapper');
 
 // ============================================================
@@ -267,5 +268,118 @@ describe('INTENT_VOCABULARY', () => {
 
   test('vocabulary has expected count', () => {
     expect(Object.keys(INTENT_VOCABULARY).length).toBe(30);
+  });
+});
+
+// ============================================================
+// assignGapIds
+// ============================================================
+
+describe('assignGapIds', () => {
+  test('assigns sequential gap_id to flat list', () => {
+    const intents = [
+      { type: 'show-message', classification: 'mechanical' },
+      { type: 'gap', classification: 'gap', vba_line: 'line1', reason: 'r1' },
+      { type: 'save-record', classification: 'mechanical' },
+      { type: 'gap', classification: 'gap', vba_line: 'line2', reason: 'r2' }
+    ];
+    assignGapIds(intents, 'btnExport_Click', 0);
+    expect(intents[1].gap_id).toBe('btnExport_Click:0');
+    expect(intents[3].gap_id).toBe('btnExport_Click:1');
+    // Non-gap intents should not have gap_id
+    expect(intents[0].gap_id).toBeUndefined();
+    expect(intents[2].gap_id).toBeUndefined();
+  });
+
+  test('assigns gap_id recursively in branches', () => {
+    const intents = [
+      {
+        type: 'branch',
+        classification: 'gap',
+        then: [
+          { type: 'gap', classification: 'gap', vba_line: 'then-gap', reason: 'r1' }
+        ],
+        else: [
+          { type: 'gap', classification: 'gap', vba_line: 'else-gap', reason: 'r2' }
+        ]
+      }
+    ];
+    const nextIdx = assignGapIds(intents, 'Form_Load', 0);
+    expect(intents[0].then[0].gap_id).toBe('Form_Load:0');
+    expect(intents[0].else[0].gap_id).toBe('Form_Load:1');
+    expect(nextIdx).toBe(2);
+  });
+
+  test('assigns gap_id recursively in children (loop/error-handler)', () => {
+    const intents = [
+      {
+        type: 'loop',
+        classification: 'gap',
+        children: [
+          { type: 'gap', classification: 'gap', vba_line: 'child-gap', reason: 'r1' },
+          { type: 'show-message', classification: 'mechanical' }
+        ]
+      }
+    ];
+    assignGapIds(intents, 'ProcessAll', 0);
+    expect(intents[0].children[0].gap_id).toBe('ProcessAll:0');
+    expect(intents[0].children[1].gap_id).toBeUndefined();
+  });
+
+  test('returns next index for chaining', () => {
+    const intents = [
+      { type: 'gap', classification: 'gap', vba_line: 'g1', reason: 'r1' }
+    ];
+    const nextIdx = assignGapIds(intents, 'proc', 5);
+    expect(intents[0].gap_id).toBe('proc:5');
+    expect(nextIdx).toBe(6);
+  });
+
+  test('empty list returns startIndex unchanged', () => {
+    expect(assignGapIds([], 'proc', 0)).toBe(0);
+  });
+});
+
+// ============================================================
+// mapIntentsToTransforms — gap_id integration
+// ============================================================
+
+describe('mapIntentsToTransforms — gap_id assignment', () => {
+  test('gaps in mapped output have gap_id', () => {
+    const intentResult = {
+      procedures: [{
+        name: 'btnExport_Click',
+        trigger: 'on-click',
+        intents: [
+          { type: 'show-message', message: 'Exporting...' },
+          { type: 'gap', vba_line: 'DoCmd.TransferSpreadsheet ...', reason: 'Excel export' }
+        ]
+      }],
+      gaps: []
+    };
+    const result = mapIntentsToTransforms(intentResult);
+    const gapIntent = result.procedures[0].intents.find(i => i.type === 'gap');
+    expect(gapIntent.gap_id).toBe('btnExport_Click:0');
+  });
+
+  test('multiple procedures get independent gap_id sequences', () => {
+    const intentResult = {
+      procedures: [
+        {
+          name: 'proc1',
+          trigger: null,
+          intents: [{ type: 'gap', vba_line: 'g1', reason: 'r1' }]
+        },
+        {
+          name: 'proc2',
+          trigger: null,
+          intents: [{ type: 'gap', vba_line: 'g2', reason: 'r2' }]
+        }
+      ],
+      gaps: []
+    };
+    const result = mapIntentsToTransforms(intentResult);
+    expect(result.procedures[0].intents[0].gap_id).toBe('proc1:0');
+    expect(result.procedures[1].intents[0].gap_id).toBe('proc2:0');
   });
 });

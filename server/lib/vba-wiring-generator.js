@@ -357,7 +357,7 @@ function generateMechanical(mappedResult, moduleName) {
  * @param {string} apiKey - Anthropic API key
  * @returns {Promise<{ cljs_source: string }>}
  */
-async function generateFallback(procedureNames, mechanicalSource, vbaSource, moduleName, apiKey, mappedResult) {
+async function generateFallback(procedureNames, mechanicalSource, vbaSource, moduleName, apiKey, mappedResult, graphContext) {
   if (!procedureNames.length) {
     return { cljs_source: mechanicalSource };
   }
@@ -392,6 +392,28 @@ async function generateFallback(procedureNames, mechanicalSource, vbaSource, mod
     }
   }
 
+  // Build graph context section for the prompt
+  let graphContextStr = '';
+  if (graphContext) {
+    const parts = [];
+    if (graphContext.tables?.length) {
+      parts.push('Available tables: ' + graphContext.tables.map(t => t.name).join(', '));
+    }
+    if (graphContext.views?.length) {
+      parts.push('Available views: ' + graphContext.views.map(v => v.name).join(', '));
+    }
+    if (graphContext.forms?.length) {
+      parts.push('Available forms: ' + graphContext.forms.map(f => f.name).join(', '));
+    }
+    if (graphContext.reports?.length) {
+      parts.push('Available reports: ' + graphContext.reports.map(r => r.name).join(', '));
+    }
+    if (parts.length > 0) {
+      graphContextStr = '\n\nDatabase objects in this application:\n' + parts.join('\n') +
+        '\n\nAPI patterns: GET/POST /api/data/:table for CRUD. You MUST only reference objects from the list above.';
+    }
+  }
+
   const systemPrompt = `You are an expert at translating VBA to ClojureScript for the AccessClone framework.
 
 You are given:
@@ -408,7 +430,7 @@ Rules:
 - DLookup/DCount/DSum → API call to \`/api/data/tablename\` with query params
 - RunSQL → API call to \`/api/data/tablename\` with POST/PUT/DELETE
 - Keep the existing namespace and function structure
-- Return ONLY the complete ClojureScript source — no markdown, no explanations${resolvedGapContext}`;
+- Return ONLY the complete ClojureScript source — no markdown, no explanations${resolvedGapContext}${graphContextStr}`;
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -472,7 +494,8 @@ async function generateWiring(mappedResult, moduleName, options = {}) {
     try {
       const result = await generateFallback(
         fallback_procedures, mechanicalSource,
-        options.vbaSource || '', moduleName, options.apiKey, mappedResult
+        options.vbaSource || '', moduleName, options.apiKey, mappedResult,
+        options.graphContext || null
       );
       return { cljs_source: result.cljs_source, stats };
     } catch (err) {

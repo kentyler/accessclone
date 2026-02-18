@@ -187,6 +187,116 @@ function buildAppInventory(app_objects) {
   return '';
 }
 
+/**
+ * Build a graph context of all database objects for context-aware code generation.
+ * Returns { tables: [{name, columns}], views: [...], forms: [{name, record_source}], reports: [...] }
+ */
+async function buildGraphContext(pool, databaseId) {
+  try {
+    const dbResult = await pool.query(
+      'SELECT schema_name FROM shared.databases WHERE database_id = $1',
+      [databaseId]
+    );
+    if (dbResult.rows.length === 0) return null;
+    const schemaName = dbResult.rows[0].schema_name;
+
+    const [tablesRes, viewsRes, columnsRes, formsRes, reportsRes] = await Promise.all([
+      pool.query(
+        `SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_type = 'BASE TABLE'`,
+        [schemaName]
+      ),
+      pool.query(
+        `SELECT table_name FROM information_schema.views WHERE table_schema = $1`,
+        [schemaName]
+      ),
+      pool.query(
+        `SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema = $1 ORDER BY table_name, ordinal_position`,
+        [schemaName]
+      ),
+      pool.query(
+        `SELECT DISTINCT ON (name) name, definition->>'record-source' as record_source
+         FROM shared.forms WHERE database_id = $1 AND is_current = true`,
+        [databaseId]
+      ),
+      pool.query(
+        `SELECT DISTINCT ON (name) name, definition->>'record-source' as record_source
+         FROM shared.reports WHERE database_id = $1 AND is_current = true`,
+        [databaseId]
+      )
+    ]);
+
+    // Group columns by table
+    const columnsByTable = {};
+    for (const row of columnsRes.rows) {
+      if (!columnsByTable[row.table_name]) columnsByTable[row.table_name] = [];
+      columnsByTable[row.table_name].push({ name: row.column_name, type: row.data_type });
+    }
+
+    const tableNames = new Set(tablesRes.rows.map(r => r.table_name));
+    const viewNames = new Set(viewsRes.rows.map(r => r.table_name));
+
+    return {
+      tables: tablesRes.rows.map(r => ({
+        name: r.table_name,
+        columns: columnsByTable[r.table_name] || []
+      })),
+      views: viewsRes.rows.map(r => ({
+        name: r.table_name,
+        columns: columnsByTable[r.table_name] || []
+      })),
+      forms: formsRes.rows.map(r => ({
+        name: r.name,
+        record_source: r.record_source
+      })),
+      reports: reportsRes.rows.map(r => ({
+        name: r.name,
+        record_source: r.record_source
+      }))
+    };
+  } catch (err) {
+    console.error('Error building graph context:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Format graph context into a compact text block for the LLM system prompt.
+ */
+function formatGraphContext(graphContext) {
+  if (!graphContext) return '';
+  const parts = [];
+
+  if (graphContext.tables?.length) {
+    parts.push('Tables:');
+    for (const t of graphContext.tables) {
+      const cols = t.columns.map(c => `${c.name} (${c.type})`).join(', ');
+      parts.push(`  ${t.name}: ${cols}`);
+    }
+  }
+  if (graphContext.views?.length) {
+    parts.push('Views:');
+    for (const v of graphContext.views) {
+      const cols = v.columns.map(c => `${c.name} (${c.type})`).join(', ');
+      parts.push(`  ${v.name}: ${cols}`);
+    }
+  }
+  if (graphContext.forms?.length) {
+    parts.push('Forms:');
+    for (const f of graphContext.forms) {
+      parts.push(`  ${f.name}${f.record_source ? ` (record-source: ${f.record_source})` : ''}`);
+    }
+  }
+  if (graphContext.reports?.length) {
+    parts.push('Reports:');
+    for (const r of graphContext.reports) {
+      parts.push(`  ${r.name}${r.record_source ? ` (record-source: ${r.record_source})` : ''}`);
+    }
+  }
+
+  return parts.join('\n');
+}
+
 module.exports = {
-  summarizeDefinition, checkImportCompleteness, formatMissingList, buildAppInventory
+  summarizeDefinition, checkImportCompleteness, formatMissingList, buildAppInventory,
+  buildGraphContext, formatGraphContext
 };

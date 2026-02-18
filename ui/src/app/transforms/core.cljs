@@ -17,7 +17,8 @@
             [app.transforms.module :as module]
             [app.transforms.macro :as macro]
             [app.transforms.logs :as logs]
-            [app.transforms.sql-function :as sql-function]))
+            [app.transforms.sql-function :as sql-function]
+            [app.transforms.app :as app]))
 
 ;; ============================================================
 ;; TRANSFORM REGISTRY
@@ -126,7 +127,20 @@
    :set-macro-status        macro/set-macro-status
 
    ;; Logs domain (1)
-   :set-logs-filter          logs/set-logs-filter})
+   :set-logs-filter          logs/set-logs-filter
+
+   ;; App Viewer domain (11)
+   :set-app-pane             app/set-app-pane
+   :set-app-overview         app/set-app-overview
+   :set-app-loading          app/set-app-loading
+   :set-batch-extracting     app/set-batch-extracting
+   :set-batch-progress       app/set-batch-progress
+   :set-all-gap-questions    app/set-all-gap-questions
+   :set-app-gap-selection    app/set-app-gap-selection
+   :set-submitting-gaps      app/set-submitting-gaps
+   :set-app-dependencies     app/set-app-dependencies
+   :set-app-api-surface      app/set-app-api-surface
+   :set-import-mode          app/set-import-mode})
 
 ;; ============================================================
 ;; DISPATCH

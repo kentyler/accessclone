@@ -177,6 +177,8 @@
                   :placeholder "Ask about this query or create new ones..."}
         :modules {:empty-hint (str "I can help you edit \"" tab-name "\", create new functions, or explain what this code does.")
                   :placeholder "Ask me to edit or create functions..."}
+        :app {:empty-hint "I can see the whole application. Ask me about dependencies, which modules write to a table, or what objects are missing."
+              :placeholder "Ask about the whole application..."}
         {:empty-hint "Ask me anything about your database, forms, or code. I can help you find records, write queries, and create functions."
          :placeholder "Type a message..."}))))
 

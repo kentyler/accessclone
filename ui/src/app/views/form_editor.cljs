@@ -17,7 +17,8 @@
             [app.views.module-viewer :as module-viewer]
             [app.views.macro-viewer :as macro-viewer]
             [app.views.sql-function-viewer :as sql-fn-viewer]
-            [app.views.report-editor :as report-editor]))
+            [app.views.report-editor :as report-editor]
+            [app.views.app-viewer :as app-viewer]))
 
 (defn ask-ai-to-fix-errors!
   "Send lint errors to AI for suggestions"
@@ -190,5 +191,6 @@
       :sql-functions [sql-fn-viewer/sql-function-viewer]
       :modules [module-viewer/module-viewer]
       :macros [macro-viewer/macro-viewer]
+      :app [app-viewer/app-viewer]
       [:div.no-editor
        [:p "Select an object to edit"]])))

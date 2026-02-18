@@ -6,7 +6,10 @@
             [app.state-form :as state-form]
             [app.state-report :as state-report]
             [app.state-query :as state-query]
-            [app.state-table :as state-table]))
+            [app.state-table :as state-table]
+            [app.flows.app :as app-flow]
+            [app.flows.core :as f]
+            [app.transforms.core :as t]))
 
 ;; ============================================================
 ;; OPEN / CLOSE TABS
@@ -111,6 +114,22 @@
   [{:step :do
     :fn (fn [ctx]
           (state-table/start-new-table!)
+          ctx)}])
+
+;; ============================================================
+;; OPEN APP VIEWER
+;; ============================================================
+
+(def open-app-flow
+  "Open the Application dashboard tab and load overview data."
+  [{:step :do
+    :fn (fn [ctx]
+          (state/open-object! :app :app-main)
+          ctx)}
+   {:step :do
+    :fn (fn [ctx]
+          ;; Load overview data via its flow
+          (f/run-fire-and-forget! app-flow/load-app-overview-flow)
           ctx)}])
 
 ;; ============================================================

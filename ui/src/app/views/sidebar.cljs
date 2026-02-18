@@ -6,7 +6,8 @@
             [app.flows.core :as f]
             [app.flows.navigation :as nav]
             [app.flows.ui :as ui-flow]
-            [app.views.access-database-viewer :as access-db-viewer]))
+            [app.views.access-database-viewer :as access-db-viewer]
+            [app.flows.app :as app-flow]))
 
 ;; Object types available in the dropdown (like Access navigation pane)
 (def object-types
@@ -256,8 +257,15 @@
                   [:div.object-list-container
                    [logs-entry-list]]]
          ;; default: :run
-         [:<>
-          [object-type-selector]
-          [new-object-button]
-          [:div.object-list-container
-           [object-list]]]))]))
+         (let [active-tab (:active-tab @state/app-state)
+               app-active? (= (:type active-tab) :app)]
+           [:<>
+            [:div.app-link
+             {:class (when app-active? "active")
+              :on-click #(f/run-fire-and-forget! nav/open-app-flow)}
+             [:span.app-link-icon "\uD83C\uDFE2"]
+             [:span "Application"]]
+            [object-type-selector]
+            [new-object-button]
+            [:div.object-list-container
+             [object-list]]])))]))

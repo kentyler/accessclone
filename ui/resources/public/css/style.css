@@ -4755,3 +4755,395 @@ body {
 
 /* Access &-hotkey underlined letter */
 .hotkey { text-decoration: underline; }
+
+/* ============================================================
+   APP VIEWER — Application dashboard
+   ============================================================ */
+
+/* Sidebar: Application link */
+.app-link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  margin: 0.25rem 0.5rem;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--gray-700);
+  border: 1px solid var(--gray-200);
+  background: var(--gray-50);
+  transition: background 0.15s, border-color 0.15s;
+}
+.app-link:hover {
+  background: var(--gray-100);
+  border-color: var(--gray-300);
+}
+.app-link.active {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+.app-link-icon {
+  font-size: 1rem;
+}
+
+/* App Viewer container */
+.app-viewer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Tab bar within App Viewer */
+.app-viewer-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid var(--gray-200);
+  background: var(--gray-50);
+  padding: 0 1rem;
+  flex-shrink: 0;
+}
+.app-viewer-tab {
+  padding: 0.5rem 1rem;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--gray-500);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.app-viewer-tab:hover {
+  color: var(--gray-700);
+}
+.app-viewer-tab.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+  font-weight: 500;
+}
+
+/* Content area */
+.app-viewer-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.5rem;
+}
+
+/* Loading */
+.app-loading {
+  text-align: center;
+  padding: 2rem;
+  color: var(--gray-500);
+}
+
+/* Overview pane */
+.app-overview-pane h3 {
+  margin-bottom: 1rem;
+  font-size: 1.1rem;
+}
+
+.app-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.app-status-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  background: white;
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+}
+.app-card-icon {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+.app-card-body {
+  flex: 1;
+  min-width: 0;
+}
+.app-card-label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--gray-700);
+  margin-bottom: 0.25rem;
+}
+
+/* Progress bar */
+.app-progress-bar {
+  position: relative;
+  height: 20px;
+  background: var(--gray-100);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.app-progress-fill {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 10px;
+  transition: width 0.3s ease;
+  min-width: 0;
+}
+.app-progress-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--gray-700);
+}
+
+/* Completeness banner */
+.app-completeness {
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  margin-bottom: 1rem;
+}
+.app-completeness.complete {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+.app-completeness.incomplete {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+/* Translation summary */
+.app-translation-summary {
+  background: white;
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+.app-translation-summary h4 {
+  font-size: 0.9rem;
+  margin-bottom: 0.75rem;
+  color: var(--gray-700);
+}
+.app-translation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 0.75rem;
+}
+.app-stat {
+  text-align: center;
+  padding: 0.5rem;
+  border-radius: 4px;
+  background: var(--gray-50);
+}
+.app-stat-value {
+  display: block;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--gray-900);
+}
+.app-stat-label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--gray-500);
+}
+.app-stat.mechanical { background: #dcfce7; }
+.app-stat.mechanical .app-stat-value { color: #166534; }
+.app-stat.llm-fallback { background: #fef3c7; }
+.app-stat.llm-fallback .app-stat-value { color: #92400e; }
+.app-stat.gap { background: #fecaca; }
+.app-stat.gap .app-stat-value { color: #991b1b; }
+
+.app-intent-summary {
+  margin-top: 1rem;
+}
+.app-intent-summary h4 {
+  font-size: 0.9rem;
+  margin-bottom: 0.75rem;
+  color: var(--gray-700);
+}
+
+/* Gap decisions pane */
+.app-gaps-pane {
+  max-width: 800px;
+}
+.app-gaps-actions {
+  margin-bottom: 1rem;
+}
+.app-gaps-progress {
+  margin-bottom: 1rem;
+}
+.app-gaps-current {
+  font-size: 0.8rem;
+  color: var(--gray-500);
+  margin-top: 0.25rem;
+}
+.app-gaps-empty {
+  color: var(--gray-500);
+  padding: 2rem;
+  text-align: center;
+}
+.app-gap-item {
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+  background: white;
+}
+.app-gap-header {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+}
+.app-gap-module {
+  font-weight: 600;
+  color: var(--primary);
+}
+.app-gap-proc {
+  color: var(--gray-700);
+}
+.app-gap-vba {
+  font-family: monospace;
+  font-size: 0.75rem;
+  color: var(--gray-500);
+  background: var(--gray-100);
+  padding: 0.1rem 0.3rem;
+  border-radius: 2px;
+}
+.app-gap-question {
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+}
+.app-gap-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.app-gap-option {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.app-gap-option input[type="radio"] {
+  margin: 0;
+}
+.app-gaps-submit {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.app-gaps-hint {
+  font-size: 0.8rem;
+  color: var(--gray-500);
+}
+
+/* Dependencies & API surface panes */
+.app-deps-pane,
+.app-surface-pane {
+  max-width: 800px;
+}
+.app-deps-content,
+.app-surface-content {
+  background: white;
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  padding: 1rem;
+  margin-top: 1rem;
+  font-size: 0.8rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+.app-deps-empty,
+.app-surface-empty {
+  color: var(--gray-500);
+  padding: 2rem;
+  text-align: center;
+}
+
+/* Dependencies/API surface structured views */
+.app-deps-summary,
+.app-surface-summary {
+  font-size: 0.9rem;
+  color: var(--gray-700);
+  margin: 1rem 0;
+}
+.app-deps-warning {
+  color: var(--error);
+  font-weight: 500;
+}
+.app-deps-section {
+  margin-bottom: 1.5rem;
+}
+.app-deps-section h4 {
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+  color: var(--gray-700);
+}
+.app-deps-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  background: white;
+  border: 1px solid var(--gray-200);
+  border-radius: 4px;
+}
+.app-deps-table th {
+  background: var(--gray-50);
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+  font-weight: 500;
+  border-bottom: 1px solid var(--gray-200);
+}
+.app-deps-table td {
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--gray-100);
+}
+.app-deps-table tr.broken td {
+  background: #fef2f2;
+  color: #991b1b;
+}
+.app-deps-orphans {
+  font-size: 0.82rem;
+  color: var(--gray-500);
+  background: var(--gray-50);
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+}
+
+/* Phase 6: Import mode selector */
+.app-mode-selector {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+.app-mode-selector label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--gray-700);
+}
+.app-mode-selector select {
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--gray-300);
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+.app-mode-desc {
+  font-size: 0.8rem;
+  color: var(--gray-500);
+  margin-left: 0.5rem;
+}

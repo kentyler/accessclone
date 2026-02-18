@@ -574,7 +574,42 @@
     :params   {:locations "optional path to scan"}
     :produces {:databases "vector of Access database file info"}
     :used-by  ['load-access-databases!]
-    :desc     "Scan for Access database files on disk"}})
+    :desc     "Scan for Access database files on disk"}
+
+   ;; ----------------------------------------------------------
+   ;; App Viewer (3)
+   ;; ----------------------------------------------------------
+   :fetch-app-overview
+   {:method   :get
+    :url      "/api/app/overview"
+    :domain   :app
+    :headers  :db
+    :params   {:database_id "target database ID"}
+    :produces {:database_name "string" :imported "counts map" :source "counts map" :completeness "map"
+               :translation_status "map" :intent_stats "map"}
+    :used-by  ['load-app-overview-flow]
+    :desc     "Load app-wide overview for the Application dashboard"}
+
+   :fetch-dependency-summary
+   {:method   :get
+    :url      "/api/app/dependency-summary"
+    :domain   :app
+    :headers  :db
+    :params   {:database_id "target database ID"}
+    :produces {:form_bindings "vector" :report_bindings "vector" :module_form_refs "vector"
+               :orphaned_tables "vector" :summary "map"}
+    :used-by  ['load-app-dependencies-flow]
+    :desc     "Analyze object dependencies across the whole application"}
+
+   :fetch-api-surface
+   {:method   :get
+    :url      "/api/app/api-surface"
+    :domain   :app
+    :headers  :db
+    :params   {:database_id "target database ID"}
+    :produces {:module_endpoints "vector" :form_data_needs "vector" :summary "map"}
+    :used-by  ['load-app-api-surface-flow]
+    :desc     "Discover what API endpoints the translated code needs"}})
 
 ;; ============================================================
 ;; DOM EFFECTS (8 call sites → 2 types)

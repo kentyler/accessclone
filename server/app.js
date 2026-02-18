@@ -28,6 +28,7 @@ const accessImportRoutes = require('./routes/access-import');
 const importIssuesRoutes = require('./routes/import-issues');
 const transcriptsRoutes = require('./routes/transcripts');
 const formStateRoutes = require('./routes/form-state');
+const appRoutes = require('./routes/app');
 
 function createApp({
   pool,
@@ -64,7 +65,8 @@ function createApp({
     if (req.path === '/databases' || req.path.startsWith('/databases') ||
         req.path.startsWith('/access-import') ||
         req.path.startsWith('/import-issues') ||
-        req.path.startsWith('/form-state')) {
+        req.path.startsWith('/form-state') ||
+        req.path.startsWith('/app')) {
       return next();
     }
 
@@ -114,6 +116,7 @@ function createApp({
   app.use('/api/import-issues', importIssuesRoutes(pool));
   app.use('/api/transcripts', transcriptsRoutes(pool));
   app.use('/api/form-state', formStateRoutes(pool));
+  app.use('/api/app', appRoutes(pool));
 
   return { app, databasesRouter };
 }

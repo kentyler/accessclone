@@ -91,6 +91,11 @@
            :form-data {}
            :form-session nil
 
+           ;; App Viewer state
+           :app-viewer {:active-pane :overview
+                        :overview nil
+                        :loading? false}
+
            ;; Chat panel state
            :chat-messages []  ; [{:role "user" :content "..."} {:role "assistant" :content "..."}]
            :chat-input ""
@@ -316,6 +321,7 @@
     :forms "forms"
     :reports "reports"
     :modules "modules"
+    :app "app"
     (name obj-type)))
 
 (defn- tab->object-name
@@ -379,10 +385,14 @@
     ;; Save current transcript before switching
     (save-chat-transcript!)
     (when-not already-open?
-      (let [obj (first (filter #(= (:id %) object-id)
-                               (get-in @app-state [:objects object-type])))]
+      (if (= object-type :app)
+        ;; App tab: hardcoded name, no object lookup needed
         (swap! app-state update :open-objects conj
-               (assoc tab :name (:name obj)))))
+               (assoc tab :name "Application"))
+        (let [obj (first (filter #(= (:id %) object-id)
+                                 (get-in @app-state [:objects object-type])))]
+          (swap! app-state update :open-objects conj
+                 (assoc tab :name (:name obj))))))
     (swap! app-state assoc :active-tab tab)
     ;; Load transcript for the new tab
     (load-chat-transcript! tab)
@@ -873,13 +883,16 @@
         (let [restored-tabs
               (vec (keep (fn [tab]
                            (let [obj-type (keyword (:type tab))
-                                 obj-id (:id tab)
-                                 objects (get-in @app-state [:objects obj-type])
-                                 obj (first (filter #(= (:id %) obj-id) objects))]
-                             (when obj
-                               {:type obj-type
-                                :id obj-id
-                                :name (:name obj)})))
+                                 obj-id (:id tab)]
+                             (if (= obj-type :app)
+                               ;; App tab: hardcoded name
+                               {:type :app :id :app-main :name "Application"}
+                               (let [objects (get-in @app-state [:objects obj-type])
+                                     obj (first (filter #(= (:id %) obj-id) objects))]
+                                 (when obj
+                                   {:type obj-type
+                                    :id obj-id
+                                    :name (:name obj)})))))
                          open-objects))]
           (swap! app-state assoc :open-objects restored-tabs)))
       ;; Restore active tab and load its transcript
@@ -1241,6 +1254,10 @@
                                :macro_xml (:macro-xml macro-info)
                                :cljs_source (:cljs-source macro-info)
                                :app_objects (get-app-objects)})
+              ;; App context when viewing the Application dashboard
+              app-context (when (= (:type active-tab) :app)
+                            {:app_objects (get-app-objects)
+                             :database_id (:database_id (:current-database @app-state))})
               ;; Issue context when in Logs mode
               logs-entry (:logs-selected-entry @app-state)
               issue-context (when (and (= (:app-mode @app-state) :logs) logs-entry)
@@ -1261,6 +1278,7 @@
                                                      :sql_function_context sql-fn-context
                                                      :table_context table-context
                                                      :query_context query-context
+                                                     :app_context app-context
                                                      :issue_context issue-context}
                                        :headers (db-headers)}))]
           (set-chat-loading! false)

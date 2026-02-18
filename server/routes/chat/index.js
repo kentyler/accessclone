@@ -7,7 +7,7 @@ const router = express.Router();
 const path = require('path');
 const { logError } = require('../../lib/events');
 const { dataTools, graphTools, moduleTools, queryTools } = require('./tools');
-const { summarizeDefinition, checkImportCompleteness, formatMissingList, buildAppInventory } = require('./context');
+const { summarizeDefinition, checkImportCompleteness, formatMissingList, buildAppInventory, buildGraphContext, formatGraphContext } = require('./context');
 const { executeTool } = require('./tool-handlers');
 
 module.exports = function(pool, secrets) {
@@ -16,7 +16,7 @@ module.exports = function(pool, secrets) {
    * Send a message to the LLM and get a response
    */
   router.post('/', async (req, res) => {
-    const { message, history, database_id, form_context, report_context, module_context, macro_context, sql_function_context, table_context, query_context, issue_context } = req.body;
+    const { message, history, database_id, form_context, report_context, module_context, macro_context, sql_function_context, table_context, query_context, app_context, issue_context } = req.body;
 
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
@@ -170,6 +170,15 @@ This function was imported from a Microsoft Access query and converted to Postgr
         if (macroInventory) macroContext += macroInventory;
       }
 
+      // App context (when viewing the Application dashboard)
+      let appContextStr = '';
+      if (app_context?.database_id) {
+        const appInventory = buildAppInventory(app_context.app_objects);
+        appContextStr = `\n\nThe user is viewing the Application dashboard — a whole-application overview.${appInventory}
+
+You can see all objects in this application. Help the user understand cross-object relationships, find which modules reference a table, identify missing imports, or plan migration steps.`;
+      }
+
       // Issue context (when in Logs mode reviewing import issues)
       let issueContextStr = '';
       if (issue_context?.object_name) {
@@ -214,7 +223,7 @@ This function was imported from a Microsoft Access query and converted to Postgr
           model: 'claude-sonnet-4-20250514',
           max_tokens: (module_context?.module_name || macro_context?.macro_name || sql_function_context?.function_name || query_context?.query_name) ? 4096 : 1024,
           tools: availableTools,
-          system: `You are a helpful assistant for a database application called AccessClone. You help users understand their data, create forms, write queries, and work with their databases. ${dbContext}${tableContext}${queryContext}${formContext}${reportContext}${moduleContext}${macroContext}${sqlFunctionContext}${issueContextStr}${graphContext}${completenessWarning}
+          system: `You are a helpful assistant for a database application called AccessClone. You help users understand their data, create forms, write queries, and work with their databases. ${dbContext}${tableContext}${queryContext}${formContext}${reportContext}${moduleContext}${macroContext}${sqlFunctionContext}${appContextStr}${issueContextStr}${graphContext}${completenessWarning}
 
 Keep responses concise and helpful. When discussing code or SQL, use markdown code blocks.`,
           messages: [
@@ -601,10 +610,18 @@ Return ONLY the ClojureScript code, no markdown code fences, no explanations. In
     const apiKey = secrets.anthropic?.api_key || process.env.ANTHROPIC_API_KEY;
 
     try {
+      // Build graph context so generated code references real objects
+      let graphCtx = null;
+      const databaseId = database_id || req.headers['x-database-id'];
+      if (databaseId) {
+        graphCtx = await buildGraphContext(pool, databaseId);
+      }
+
       const result = await generateWiring(mapped_intents, module_name || 'unknown', {
         vbaSource: vba_source,
         apiKey,
-        useFallback: !!apiKey
+        useFallback: !!apiKey,
+        graphContext: graphCtx
       });
 
       res.json({

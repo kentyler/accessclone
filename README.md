@@ -224,6 +224,7 @@ DB tests require a running PostgreSQL instance and are gated behind an environme
 
 | Doc | Audience | Purpose |
 |-----|----------|---------|
+| [PRODUCT.md](PRODUCT.md) | Stakeholders, AI agent developers | Full product description — pipeline, transforms, AI automation thesis |
 | [INSTRUCTIONS.md](INSTRUCTIONS.md) | New users, AI assistants | Step-by-step install and setup runbook |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Developers | Technical deep dive — state management, routing, design decisions |
 | [Codebase Guide](skills/codebase-guide.md) | LLMs, new contributors | Pipeline-oriented walkthrough of every subsystem |

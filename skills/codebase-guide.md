@@ -73,7 +73,7 @@ These PowerShell scripts extract objects from Access databases using COM automat
 
 **Key point:** These scripts only run on Windows with Access installed. They produce JSON that the rest of the system consumes. This is the only Windows-dependent part of the pipeline.
 
-**Important warning:** Access databases with an AutoExec macro will run it on open via COM, potentially hanging the script. Users must rename AutoExec to xAutoExec before export.
+**AutoExec handling:** Access databases with an AutoExec macro are handled automatically — `disable_autoexec.ps1` renames AutoExec → xAutoExec via DAO before listing, restores after. No manual intervention needed.
 
 ### Layer 2: Conversion Engine (server/lib/)
 
@@ -217,6 +217,7 @@ ClojureScript with Reagent (a React wrapper). Single-page app.
 | `query_viewer.cljs` | Queries | Results grid + SQL editor. SELECT only. |
 | `module_viewer.cljs` | Modules | VBA source + CLJS translation. Two-phase intent extraction (Extract Intents → Generate Code) with legacy Direct Translate. Intent summary panel with color-coded stats. |
 | `macro_viewer.cljs` | Macros | Left: raw macro definition. Right: ClojureScript translation. |
+| `app_viewer.cljs` | App dashboard | Whole-application view: overview, 3-step batch pipeline (Extract → Resolve Gaps → Generate Code), dependencies, API surface. |
 | `access_database_viewer.cljs` | Import UI | Scans Access DB, shows objects, drives import workflow. |
 | `sidebar.cljs` | Navigation | Object tree grouped by type. Database switcher. |
 | `tabs.cljs` | Tab bar | Manages open tabs, reactivation, close. |
@@ -288,6 +289,7 @@ The system tracks which Access objects have been imported vs. which exist in the
 | `check-system.ps1` | Verifies prerequisites are installed |
 | `package.ps1` | Packages the Electron app for distribution |
 | `CLAUDE.md` | Instructions for AI assistants working on this codebase |
+| `PRODUCT.md` | Full product description — pipeline, transforms, AI automation thesis |
 | `ARCHITECTURE.md` | Detailed architecture documentation |
 | `CONTRIBUTING.md` | Contributor guidelines |
 | `CHANGELOG.md` | Version history |

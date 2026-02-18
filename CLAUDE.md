@@ -84,6 +84,18 @@ This is AccessClone, a platform for converting MS Access databases to web applic
 - Auto-analyze fires on first open, LLM describes structure/purpose
 - Macros stored in `shared.macros` table with append-only versioning
 
+### App Viewer (ui/src/app/views/app_viewer.cljs)
+- Whole-application dashboard with tabbed panes: Overview, Gap Decisions, Dependencies, API Surface
+- **Gap Decisions pane**: 3-step pipeline UI:
+  1. **Extract All Intents** — batch extract from all modules (`batch-extract-intents-flow`)
+  2. **Resolve Gaps** — auto-resolved gaps pre-selected where graph context satisfies the reference; remaining gaps presented to user with radio buttons + "Submit All Decisions"
+  3. **Generate All Code** — multi-pass batch generation (`batch-generate-code-flow`) with dependency retry (max 20 passes, same pattern as query imports)
+- Server-side helpers in `context.js`: `checkIntentDependencies(mappedIntents, graphContext)` validates intent references exist; `autoResolveGaps(mappedIntents, graphContext)` auto-resolves gaps when objects exist
+- `POST /api/chat/generate-wiring` accepts `check_deps: true` — returns `{skipped: true, missing_deps}` if dependencies unsatisfied
+- Transforms: `set-batch-generating`, `set-batch-gen-progress`, `set-batch-gen-results`
+- Results summary: color-coded (green=generated, amber=skipped with missing deps, red=failed)
+- Post-pipeline: users can refine individual modules in Module Viewer — by that point all endpoints exist in the graph
+
 ### Access Import — AutoExec Handling
 AutoExec macros are now handled automatically by the import pipeline:
 - `disable_autoexec.ps1` uses `DAO.DBEngine.120` (engine-level, no UI trigger) to rename `AutoExec` → `xAutoExec` in `MSysObjects`. The `-Restore` switch reverses it.

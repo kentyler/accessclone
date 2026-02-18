@@ -166,7 +166,7 @@ The business logic doesn't change across these phases. The intent graph is the s
 
 **A dependency graph** tracking every structural relationship (table contains column, form binds to field, control references query) and every business intent (form serves "customer management," procedure implements "order validation").
 
-**334 automated tests** across the server and desktop layers. Query converter alone has 95 tests validating Access SQL → PostgreSQL conversion.
+**406 automated tests** across 12 test suites covering the server and desktop layers. Query converter alone has 95 tests validating Access SQL → PostgreSQL conversion.
 
 ## Who This Is For
 

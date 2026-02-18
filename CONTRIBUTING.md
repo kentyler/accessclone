@@ -88,9 +88,10 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed architecture documentation.
 
 1. Fork the repo and create a branch from `master`
 2. Make your changes
-3. Verify the server starts: `cd server && node index.js`
-4. Verify the frontend compiles: `cd ui && npx shadow-cljs compile app`
-5. Open a PR with a clear description of what changed and why
+3. Run tests: `npm test` (from project root)
+4. Verify the server starts: `cd server && node index.js`
+5. Verify the frontend compiles: `cd ui && npx shadow-cljs compile app`
+6. Open a PR with a clear description of what changed and why
 
 ## Reporting Bugs
 

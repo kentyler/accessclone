@@ -210,7 +210,7 @@ After any change, run from the project root:
 npm test
 ```
 
-This runs all unit tests across server (146 tests) and electron (72 tests).
+This runs all unit tests (406 tests across 12 test suites).
 
 If you changed database/schema routing code, also run:
 

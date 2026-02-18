@@ -30,10 +30,10 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 - **Tested against two databases**: Northwind and a second Access database both import fully (tables, forms, reports, queries, modules, macros) without errors.
 
 ### In Progress / Uncommitted
-- `ui/src/app/views/access_database_viewer.cljs` — modified (import order change)
-- 4 batch PowerShell scripts in `scripts/access/` (untracked): `export_forms_batch.ps1`, `export_reports_batch.ps1`, `export_modules_batch.ps1`, `export_macros_batch.ps1`
+- No uncommitted changes (as of 2026-02-18)
 
 ### Next Up
+- Add file picker option for import mode (alternative to full machine scan)
 - Test batch pipeline end-to-end: extract all → resolve gaps → generate all code against a real database
 - Test .mdb → .accdb conversion end-to-end with a real .mdb file
 - Test runtime form state sync end-to-end: open a form, navigate records, verify `form_control_state` populated and dependent views filter correctly

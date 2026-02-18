@@ -7,12 +7,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
-- **Batch pipeline: Extract All → Resolve Gaps → Generate All Code** — App Viewer's Gap Decisions pane restructured as a 3-step pipeline. Step 1: batch extract intents from all modules. Step 2: auto-resolve gaps whose referenced objects exist in the database, present remaining gaps to user. Step 3: batch code generation with multi-pass dependency retry (same pattern as query imports — modules whose intent dependencies aren't satisfied are deferred and retried, up to 20 passes).
-- **Intent dependency checking** — `checkIntentDependencies()` validates that all forms, reports, and tables referenced by a module's intents exist in the database. `autoResolveGaps()` auto-resolves gap intents (DLookup, OpenForm, RunSQL) when the referenced object exists. Both server-side in `context.js`.
-- **`check_deps` flag on generate-wiring endpoint** — `POST /api/chat/generate-wiring` accepts `check_deps: true` to skip generation when dependencies are unsatisfied, returning `{skipped: true, missing_deps: [...]}` instead.
-- **PRODUCT.md** — Full product description covering the import pipeline, intent extraction, transform architecture, and the three-phase trajectory from migration tool to AI agent substrate.
-- **Access &-hotkey rendering** — Captions with `&` markers (e.g. `"Product &Vendors"`) now render the hotkey letter with an underline, matching Access display behavior. Applies to buttons, checkboxes, option buttons, toggle buttons, tab pages, labels, and default controls across both forms and reports.
-- **Alt+letter keyboard shortcuts** — Pressing Alt+letter in Form View activates the control whose caption has the matching `&`-hotkey. Buttons are clicked, inputs are focused. Label hotkeys focus the next control in tab order.
+- **File picker for import** — planned alternative to the full machine scan when importing Access databases
+
+## [0.4.0] - 2026-02-17
+
+### Added
+- **Batch pipeline: Extract All → Resolve Gaps → Generate All Code** — App Viewer's Gap Decisions pane restructured as a 3-step pipeline with multi-pass dependency retry (max 20 passes)
+- **Intent dependency checking** — `checkIntentDependencies()` and `autoResolveGaps()` validate and auto-resolve intent references against the dependency graph
+- **Automatic .mdb → .accdb conversion** — `.mdb` files are silently converted when selected in the import UI via `convert_mdb.ps1`
+- **Automatic AutoExec disabling** — `disable_autoexec.ps1` renames AutoExec macros via DAO before listing scripts, restores after
+- **PRODUCT.md** — full product description covering the import pipeline, intent extraction, transform architecture, and three-phase trajectory
+- **README rewrite** — "copy the intent, not the code" philosophy, AI-Assisted Setup section, OpenClaw appendix
+- **INSTRUCTIONS.md rewrite** — distinguishes shell-access tools from chat-only tools with mode-specific guidance
+
+## [0.3.0] - 2026-02-16
+
+### Added
+- **VBA intent extraction pipeline** — three-stage VBA migration: LLM extracts structured intents → deterministic mapping (30 intent types) → mechanical CLJS generation (22 templates) with LLM fallback
+- **Pure state transform architecture** — 77 pure transforms, 75 flows across 10 domains; all views wired through `dispatch!` / `run-fire-and-forget!`
+- **Access &-hotkey rendering** — captions with `&` markers render the hotkey letter underlined; Alt+letter activates controls in Form View
+- **Control palette** — shared draggable/clickable toolbar for form (15 types) and report (9 types) Design Views
+- **Query Design View** — visual table/join layout editor
+- **Image import pipeline** — redesigned import UI with image support
+- **Form state sync** — `session_state` cross-join pattern for form/TempVar references in converted queries; `control_column_map` populated at form/report save
+- **LLM fallback for query conversion** — when regex converter output fails PG execution, falls back to Claude Sonnet with full schema context
+- **VBA stub functions** — placeholder PG functions from VBA module declarations so views can reference user-defined functions
+- **Dependency error handling** — PG errors 42P01/42883 bypass LLM fallback; frontend retry loop resolves across passes
+
+### Fixed
+- Blank page crash on forms with tab controls and `&` hotkeys
+- Intent extraction JSON parsing for VBA expressions
+- JSON escaping for large text fields with embedded quotes (`ConvertTo-SafeJson`)
+- Form_/Report_ module import (VBE type 100 design-view fallback)
+- Query re-import with `CREATE OR REPLACE VIEW` (column-change fallback with targeted `DROP CASCADE`)
 
 ## [0.2.0] - 2026-02-10
 

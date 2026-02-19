@@ -1,0 +1,4 @@
+# Access database files (large binaries, keep out of git)
+*.accdb
+*.mdb
+*.laccdb

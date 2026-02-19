@@ -5,7 +5,7 @@
             [clojure.string :as str]
             [app.state :as state]))
 
-(declare run-query!)
+(declare run-query! load-query-design!)
 
 (defn set-query-view-mode!
   "Set query view mode - :results, :sql, or :design"

@@ -60,218 +60,226 @@
 ;; Phase 4: Batch extraction (stub — implemented in Phase 4)
 ;; ============================================================
 
+(defn batch-extract-intents!
+  "Extract intents from all modules. Returns a channel."
+  []
+  (go
+    (t/dispatch! :set-batch-extracting true)
+    (t/dispatch! :set-batch-extract-results nil)
+    (let [db-id (:database_id (:current-database @app-state))
+          modules (get-in @app-state [:objects :modules])
+          total (count modules)]
+      (t/dispatch! :set-batch-progress {:total total :completed 0 :current-module nil})
+      (let [all-gaps (atom [])
+            completed (atom 0)
+            results (atom {:extracted [] :skipped [] :failed []})]
+        (doseq [module modules]
+          (t/dispatch! :set-batch-progress {:total total
+                                            :completed @completed
+                                            :current-module (:name module)})
+          ;; Load module source
+          (let [mod-response (<! (http/get (str api-base "/api/modules/"
+                                                (js/encodeURIComponent (:name module)))
+                                           {:headers (db-headers)}))]
+            (if-not (and (:success mod-response)
+                         (:vba_source (:body mod-response)))
+              ;; No VBA source — skip
+              (swap! results update :skipped conj (:name module))
+              ;; Extract intents via LLM
+              (let [vba-source (:vba_source (:body mod-response))
+                    extract-response (<! (http/post (str api-base "/api/chat/extract-intents")
+                                                    {:json-params {:vba_source vba-source
+                                                                   :module_name (:name module)
+                                                                   :database_id db-id}
+                                                     :headers (db-headers)}))]
+                (if (:success extract-response)
+                  (let [body (:body extract-response)
+                        intents-data {:intents (:intents body)
+                                      :mapped (:mapped body)
+                                      :stats (:stats body)}]
+                    ;; Save intents to module
+                    (<! (http/put (str api-base "/api/modules/"
+                                      (js/encodeURIComponent (:name module)))
+                                 {:json-params {:intents intents-data}
+                                  :headers (db-headers)}))
+                    (swap! results update :extracted conj (:name module))
+                    ;; Collect gap questions with module attribution
+                    (when (seq (:gap_questions body))
+                      (doseq [gq (:gap_questions body)]
+                        (swap! all-gaps conj
+                               (assoc gq :module (:name module))))))
+                  ;; Extraction failed
+                  (swap! results update :failed conj
+                         {:name (:name module)
+                          :error (get-in extract-response [:body :error] "Unknown error")})))))
+          (swap! completed inc))
+        (t/dispatch! :set-batch-progress {:total total :completed total :current-module nil})
+        (t/dispatch! :set-all-gap-questions (vec @all-gaps))
+        (<! (save-gap-questions!))
+        (t/dispatch! :set-batch-extract-results @results)
+        (t/dispatch! :set-batch-extracting false)
+        ;; Refresh overview
+        (let [db-id (:database_id (:current-database @app-state))
+              response (<! (http/get (str api-base "/api/app/overview")
+                                     {:query-params {:database_id db-id}
+                                      :headers (db-headers)}))]
+          (when (:success response)
+            (t/dispatch! :set-app-overview (:body response))))))))
+
 (def batch-extract-intents-flow
   "Batch extract intents from all modules."
-  [{:step :do
-    :fn (fn [ctx]
-          (go
-            (t/dispatch! :set-batch-extracting true)
-            (t/dispatch! :set-batch-extract-results nil)
-            (let [db-id (:database_id (:current-database @app-state))
-                  modules (get-in @app-state [:objects :modules])
-                  total (count modules)]
-              (t/dispatch! :set-batch-progress {:total total :completed 0 :current-module nil})
-              (let [all-gaps (atom [])
-                    completed (atom 0)
-                    results (atom {:extracted [] :skipped [] :failed []})]
-                (doseq [module modules]
-                  (t/dispatch! :set-batch-progress {:total total
-                                                    :completed @completed
-                                                    :current-module (:name module)})
-                  ;; Load module source
-                  (let [mod-response (<! (http/get (str api-base "/api/modules/"
-                                                       (js/encodeURIComponent (:name module)))
-                                                  {:headers (db-headers)}))]
-                    (if-not (and (:success mod-response)
-                                 (:vba_source (:body mod-response)))
-                      ;; No VBA source — skip
-                      (swap! results update :skipped conj (:name module))
-                      ;; Extract intents via LLM
-                      (let [vba-source (:vba_source (:body mod-response))
-                            extract-response (<! (http/post (str api-base "/api/chat/extract-intents")
-                                                            {:json-params {:vba_source vba-source
-                                                                           :module_name (:name module)
-                                                                           :database_id db-id}
-                                                             :headers (db-headers)}))]
-                        (if (:success extract-response)
-                          (let [body (:body extract-response)
-                                intents-data {:intents (:intents body)
-                                              :mapped (:mapped body)
-                                              :stats (:stats body)}]
-                            ;; Save intents to module
-                            (<! (http/put (str api-base "/api/modules/"
-                                              (js/encodeURIComponent (:name module)))
-                                         {:json-params {:intents intents-data}
-                                          :headers (db-headers)}))
-                            (swap! results update :extracted conj (:name module))
-                            ;; Collect gap questions with module attribution
-                            (when (seq (:gap_questions body))
-                              (doseq [gq (:gap_questions body)]
-                                (swap! all-gaps conj
-                                       (assoc gq :module (:name module))))))
-                          ;; Extraction failed
-                          (swap! results update :failed conj
-                                 {:name (:name module)
-                                  :error (get-in extract-response [:body :error] "Unknown error")})))))
-                  (swap! completed inc))
-                (t/dispatch! :set-batch-progress {:total total :completed total :current-module nil})
-                (t/dispatch! :set-all-gap-questions (vec @all-gaps))
-                (<! (save-gap-questions!))
-                (t/dispatch! :set-batch-extract-results @results)
-                (t/dispatch! :set-batch-extracting false)
-                ;; Refresh overview
-                (let [db-id (:database_id (:current-database @app-state))
-                      response (<! (http/get (str api-base "/api/app/overview")
-                                             {:query-params {:database_id db-id}
-                                              :headers (db-headers)}))]
-                  (when (:success response)
-                    (t/dispatch! :set-app-overview (:body response))))))
-            ctx))}])
+  [{:step :do :fn (fn [ctx] (go (<! (batch-extract-intents!)) ctx))}])
+
+(defn submit-all-gap-decisions!
+  "Submit all gap decisions. Returns a channel."
+  []
+  (go
+    (t/dispatch! :set-submitting-gaps true)
+    (let [db-id (:database_id (:current-database @app-state))
+          gap-questions (get-in @app-state [:app-viewer :all-gap-questions])]
+      (doseq [gq gap-questions]
+        (when (:selected gq)
+          (<! (http/post (str api-base "/api/chat/resolve-gap")
+                         {:json-params {:module_name (:module gq)
+                                        :gap_id (:gap_id gq)
+                                        :answer (:selected gq)
+                                        :database_id db-id}
+                          :headers (db-headers)})))))
+    (t/dispatch! :set-submitting-gaps false)
+    (t/dispatch! :set-all-gap-questions [])
+    (<! (save-gap-questions!))))
 
 (def submit-all-gap-decisions-flow
   "Submit all gap decisions from the app viewer."
-  [{:step :do
-    :fn (fn [ctx]
-          (go
-            (t/dispatch! :set-submitting-gaps true)
-            (let [db-id (:database_id (:current-database @app-state))
-                  gap-questions (get-in @app-state [:app-viewer :all-gap-questions])]
-              (doseq [gq gap-questions]
-                (when (:selected gq)
-                  (<! (http/post (str api-base "/api/chat/resolve-gap")
-                                {:json-params {:module_name (:module gq)
-                                               :gap_id (:gap_id gq)
-                                               :answer (:selected gq)
-                                               :database_id db-id}
-                                 :headers (db-headers)})))))
-            (t/dispatch! :set-submitting-gaps false)
-            (t/dispatch! :set-all-gap-questions [])
-            (<! (save-gap-questions!))
-            ctx))}])
+  [{:step :do :fn (fn [ctx] (go (<! (submit-all-gap-decisions!)) ctx))}])
 
 ;; ============================================================
 ;; LLM auto-resolve gaps
 ;; ============================================================
 
+(defn auto-resolve-gaps!
+  "Send all gap questions to the LLM to pick the best option. Returns a channel."
+  []
+  (go
+    (t/dispatch! :set-auto-resolving-gaps true)
+    (let [db-id (:database_id (:current-database @app-state))
+          gap-questions (get-in @app-state [:app-viewer :all-gap-questions] [])
+          ;; Convert to plain maps for JSON
+          gq-payload (mapv (fn [gq]
+                             {:module (:module gq)
+                              :procedure (:procedure gq)
+                              :vba_line (:vba_line gq)
+                              :question (:question gq)
+                              :suggestions (vec (:suggestions gq))})
+                           gap-questions)
+          response (<! (http/post (str api-base "/api/chat/auto-resolve-gaps")
+                                  {:json-params {:gap_questions gq-payload
+                                                 :database_id db-id}
+                                   :headers (db-headers)}))]
+      (if (:success response)
+        (let [selections (get-in response [:body :selections] [])]
+          (t/dispatch! :set-all-gap-selections selections)
+          (<! (save-gap-questions!)))
+        (state/log-error! "Auto-resolve failed" "auto-resolve-gaps")))
+    (t/dispatch! :set-auto-resolving-gaps false)))
+
 (def auto-resolve-gaps-flow
   "Send all gap questions to the LLM to pick the best option for each."
-  [{:step :do
-    :fn (fn [ctx]
-          (go
-            (t/dispatch! :set-auto-resolving-gaps true)
-            (let [db-id (:database_id (:current-database @app-state))
-                  gap-questions (get-in @app-state [:app-viewer :all-gap-questions] [])
-                  ;; Convert to plain maps for JSON
-                  gq-payload (mapv (fn [gq]
-                                     {:module (:module gq)
-                                      :procedure (:procedure gq)
-                                      :vba_line (:vba_line gq)
-                                      :question (:question gq)
-                                      :suggestions (vec (:suggestions gq))})
-                                   gap-questions)
-                  response (<! (http/post (str api-base "/api/chat/auto-resolve-gaps")
-                                          {:json-params {:gap_questions gq-payload
-                                                         :database_id db-id}
-                                           :headers (db-headers)}))]
-              (if (:success response)
-                (let [selections (get-in response [:body :selections] [])]
-                  (t/dispatch! :set-all-gap-selections selections)
-                  (<! (save-gap-questions!)))
-                (state/log-error! "Auto-resolve failed" "auto-resolve-gaps-flow")))
-            (t/dispatch! :set-auto-resolving-gaps false)
-            ctx))}])
+  [{:step :do :fn (fn [ctx] (go (<! (auto-resolve-gaps!)) ctx))}])
 
 ;; ============================================================
 ;; Batch code generation — multi-pass retry
 ;; ============================================================
 
+(defn batch-generate-code!
+  "Batch generate code for all modules with multi-pass dependency retry. Returns a channel."
+  []
+  (go
+    (t/dispatch! :set-batch-generating true)
+    (t/dispatch! :set-batch-gen-results nil)
+    (let [db-id (:database_id (:current-database @app-state))
+          modules (get-in @app-state [:objects :modules])
+          ;; Phase 1: Load each module's intents + VBA source
+          module-data (atom [])]
+      (doseq [module modules]
+        (let [resp (<! (http/get (str api-base "/api/modules/"
+                                      (js/encodeURIComponent (:name module)))
+                                 {:headers (db-headers)}))]
+          (when (and (:success resp)
+                     (:vba_source (:body resp))
+                     (get-in resp [:body :intents :mapped]))
+            (swap! module-data conj
+                   {:name (:name module)
+                    :intents (:intents (:body resp))
+                    :vba-source (:vba_source (:body resp))}))))
+
+      ;; Phase 2: Multi-pass code generation
+      (let [results (atom {:generated [] :skipped [] :failed []})
+            loaded-total (count @module-data)]
+        (t/dispatch! :set-batch-gen-progress
+          {:total loaded-total :pass 0
+           :current-module nil
+           :generated 0})
+        (loop [pass 1
+               pending @module-data]
+          (let [generated-this-pass (atom 0)
+                still-pending (atom [])]
+            (doseq [mod pending]
+              (t/dispatch! :set-batch-gen-progress
+                {:total loaded-total :pass pass
+                 :current-module (:name mod)
+                 :generated (count (:generated @results))})
+              (let [resp (<! (http/post
+                               (str api-base "/api/chat/generate-wiring")
+                               {:json-params {:mapped_intents (get-in mod [:intents :mapped])
+                                              :module_name (:name mod)
+                                              :vba_source (:vba-source mod)
+                                              :database_id db-id
+                                              :check_deps true}
+                                :headers (db-headers)}))]
+                (cond
+                  ;; Skipped due to missing deps
+                  (:skipped (:body resp))
+                  (swap! still-pending conj mod)
+
+                  ;; Success
+                  (:success resp)
+                  (do
+                    ;; Save CLJS back to module
+                    (<! (http/put
+                           (str api-base "/api/modules/"
+                                (js/encodeURIComponent (:name mod)))
+                           {:json-params {:cljs_source (:cljs_source (:body resp))}
+                            :headers (db-headers)}))
+                    (swap! generated-this-pass inc)
+                    (swap! results update :generated conj (:name mod)))
+
+                  ;; Failed
+                  :else
+                  (swap! results update :failed conj
+                         {:name (:name mod)
+                          :error (get-in resp [:body :error])}))))
+            ;; Continue if progress + remaining (max 20 passes)
+            (if (and (seq @still-pending)
+                     (pos? @generated-this-pass)
+                     (< pass 20))
+              (recur (inc pass) @still-pending)
+              ;; Record any remaining as skipped
+              (swap! results assoc :skipped
+                     (mapv :name @still-pending)))))
+        (t/dispatch! :set-batch-gen-results @results)))
+    (t/dispatch! :set-batch-generating false)
+    ;; Refresh overview
+    (let [db-id (:database_id (:current-database @app-state))
+          resp (<! (http/get (str api-base "/api/app/overview")
+                              {:query-params {:database_id db-id}
+                               :headers (db-headers)}))]
+      (when (:success resp)
+        (t/dispatch! :set-app-overview (:body resp))))))
+
 (def batch-generate-code-flow
   "Batch generate code for all modules with multi-pass dependency retry."
-  [{:step :do
-    :fn (fn [ctx]
-          (go
-            (t/dispatch! :set-batch-generating true)
-            (t/dispatch! :set-batch-gen-results nil)
-            (let [db-id (:database_id (:current-database @app-state))
-                  modules (get-in @app-state [:objects :modules])
-                  ;; Phase 1: Load each module's intents + VBA source
-                  module-data (atom [])]
-              (doseq [module modules]
-                (let [resp (<! (http/get (str api-base "/api/modules/"
-                                              (js/encodeURIComponent (:name module)))
-                                         {:headers (db-headers)}))]
-                  (when (and (:success resp)
-                             (:vba_source (:body resp))
-                             (get-in resp [:body :intents :mapped]))
-                    (swap! module-data conj
-                           {:name (:name module)
-                            :intents (:intents (:body resp))
-                            :vba-source (:vba_source (:body resp))}))))
-
-              ;; Phase 2: Multi-pass code generation
-              (let [results (atom {:generated [] :skipped [] :failed []})
-                    loaded-total (count @module-data)]
-                (t/dispatch! :set-batch-gen-progress
-                  {:total loaded-total :pass 0
-                   :current-module nil
-                   :generated 0})
-                (loop [pass 1
-                       pending @module-data]
-                  (let [generated-this-pass (atom 0)
-                        still-pending (atom [])]
-                    (doseq [mod pending]
-                      (t/dispatch! :set-batch-gen-progress
-                        {:total loaded-total :pass pass
-                         :current-module (:name mod)
-                         :generated (count (:generated @results))})
-                      (let [resp (<! (http/post
-                                       (str api-base "/api/chat/generate-wiring")
-                                       {:json-params {:mapped_intents (get-in mod [:intents :mapped])
-                                                      :module_name (:name mod)
-                                                      :vba_source (:vba-source mod)
-                                                      :database_id db-id
-                                                      :check_deps true}
-                                        :headers (db-headers)}))]
-                        (cond
-                          ;; Skipped due to missing deps
-                          (:skipped (:body resp))
-                          (swap! still-pending conj mod)
-
-                          ;; Success
-                          (:success resp)
-                          (do
-                            ;; Save CLJS back to module
-                            (<! (http/put
-                                   (str api-base "/api/modules/"
-                                        (js/encodeURIComponent (:name mod)))
-                                   {:json-params {:cljs_source (:cljs_source (:body resp))}
-                                    :headers (db-headers)}))
-                            (swap! generated-this-pass inc)
-                            (swap! results update :generated conj (:name mod)))
-
-                          ;; Failed
-                          :else
-                          (swap! results update :failed conj
-                                 {:name (:name mod)
-                                  :error (get-in resp [:body :error])}))))
-                    ;; Continue if progress + remaining (max 20 passes)
-                    (if (and (seq @still-pending)
-                             (pos? @generated-this-pass)
-                             (< pass 20))
-                      (recur (inc pass) @still-pending)
-                      ;; Record any remaining as skipped
-                      (swap! results assoc :skipped
-                             (mapv :name @still-pending)))))
-                (t/dispatch! :set-batch-gen-results @results)))
-            (t/dispatch! :set-batch-generating false)
-            ;; Refresh overview
-            (let [db-id (:database_id (:current-database @app-state))
-                  resp (<! (http/get (str api-base "/api/app/overview")
-                                      {:query-params {:database_id db-id}
-                                       :headers (db-headers)}))]
-              (when (:success resp)
-                (t/dispatch! :set-app-overview (:body resp))))
-            ctx))}])
+  [{:step :do :fn (fn [ctx] (go (<! (batch-generate-code!)) ctx))}])
 
 ;; ============================================================
 ;; Phase 5: Dependencies + API Surface (stubs)

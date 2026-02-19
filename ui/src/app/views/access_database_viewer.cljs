@@ -2,6 +2,7 @@
   "Viewer for Access database files - shows forms/reports available for import"
   (:require [reagent.core :as r]
             [app.state :as state]
+            [app.flows.app :as app-flows]
             [cljs-http.client :as http]
             [cljs.core.async :refer [go <! chan put!]]
             [clojure.string :as str]))
@@ -334,6 +335,7 @@
            :import-all-active? false ;; True while Import All is running
            :import-all-status nil    ;; {:phase :tables :current "TableName" :imported 0 :total 0 :failed []}
            :image-status nil         ;; {:total N :imported M} from /api/access-import/image-status
+           :auto-import-phase nil    ;; nil, :importing, :extracting, :resolving-gaps, :generating, :complete
            }))
 
 ;; ============================================================
@@ -1162,6 +1164,32 @@
         (state/load-functions!)
         (state/load-macros!)))))
 
+(defn auto-import-all!
+  "Import all objects, then run the full LLM pipeline (extract, resolve, generate)."
+  [target-database-id]
+  (swap! viewer-state assoc :auto-import-phase :importing)
+  (go
+    ;; Step 1: Import all objects
+    (<! (import-all! target-database-id {:force? true}))
+    ;; Ensure modules list is populated in app-state after import
+    (let [resp (<! (http/get (str api-base "/api/modules")
+                             {:headers {"X-Database-ID" target-database-id}}))]
+      (when (:success resp)
+        (swap! state/app-state assoc-in [:objects :modules] (:body resp))))
+    ;; Step 2: Extract intents from all modules
+    (swap! viewer-state assoc :auto-import-phase :extracting)
+    (<! (app-flows/batch-extract-intents!))
+    ;; Step 3: Auto-resolve gaps via LLM
+    (swap! viewer-state assoc :auto-import-phase :resolving-gaps)
+    (<! (app-flows/auto-resolve-gaps!))
+    ;; Step 4: Submit gap decisions
+    (<! (app-flows/submit-all-gap-decisions!))
+    ;; Step 5: Generate code for all modules
+    (swap! viewer-state assoc :auto-import-phase :generating)
+    (<! (app-flows/batch-generate-code!))
+    ;; Done
+    (swap! viewer-state assoc :auto-import-phase :complete)))
+
 (defn object-type-dropdown []
   (let [obj-type (:object-type @viewer-state)]
     [:div.access-object-type-selector
@@ -1379,7 +1407,7 @@
     (-> path
         (.split "\\")
         last
-        (.replace #"\.accdb$" "")
+        (.replace #"\.(accdb|mdb)$" "")
         (.replace #"_" " "))))
 
 (defn target-database-selector
@@ -1484,6 +1512,24 @@
             (when (pos? imported)
               [:span.import-all-count (str " (" imported " done)")])])]))))
 
+(defn auto-import-phase-status
+  "Status display for auto-import pipeline phases"
+  []
+  (let [phase (:auto-import-phase @viewer-state)]
+    (when phase
+      [:div.auto-import-phase {:class (when (= phase :complete) "complete")}
+       (case phase
+         :importing "Importing objects..."
+         :extracting "Extracting intents from modules..."
+         :resolving-gaps "Resolving gaps via AI..."
+         :generating "Generating ClojureScript code..."
+         :complete [:span {:style {:display "flex" :align-items "center" :gap "8px"}}
+                    "Auto-import complete"
+                    [:button.btn-link
+                     {:on-click #(swap! viewer-state assoc :auto-import-phase nil)}
+                     "Dismiss"]]
+         nil)])))
+
 (defn toolbar [access-db-path]
   (let [{:keys [selected object-type target-database-id loading? importing?]} @viewer-state
         cached? (some? (get-in @viewer-state [:access-db-cache access-db-path]))
@@ -1550,18 +1596,20 @@
      [source-databases-list]
      [:div.header-actions
       (let [{:keys [target-database-id importing?]} @viewer-state
+            auto-phase (:auto-import-phase @viewer-state)
             all-types [:tables :queries :forms :reports :modules :macros]
             total-remaining (reduce + (map #(count (not-yet-imported %)) all-types))
-            total-all (reduce + (map #(count (all-source-objects %)) all-types))]
+            total-all (reduce + (map #(count (all-source-objects %)) all-types))
+            busy? (or importing? (and auto-phase (not= auto-phase :complete)))]
         [:<>
-         (when (and target-database-id (pos? total-remaining) (not importing?) (not error))
+         (when (and target-database-id (pos? total-all) (not busy?) (not error))
            [:button.btn-primary.import-all-btn
+            {:on-click #(auto-import-all! target-database-id)}
+            (str "Auto-Import (" total-all ")")])
+         (when (and target-database-id (pos? total-remaining) (not busy?) (not error))
+           [:button.btn-secondary.import-all-btn
             {:on-click #(import-all! target-database-id)}
-            (str "Import All (" total-remaining ")")])
-         (when (and target-database-id (pos? total-all) (not importing?) (not error))
-           [:button.btn-secondary.reimport-all-btn
-            {:on-click #(import-all! target-database-id {:force? true})}
-            (str "Re-import All (" total-all ")")])])
+            (str "Manual Import (" total-remaining ")")])])
       [target-database-selector]]]]
    (when-not (or error loading?)
      [:div.viewer-phase-bar
@@ -1574,6 +1622,7 @@
        :else [:<>
               [dependency-warning]
               [import-all-progress]
+              [auto-import-phase-status]
               [toolbar active-path]
               [object-list]
               [next-step-suggestion]])]

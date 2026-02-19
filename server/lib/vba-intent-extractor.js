@@ -206,7 +206,7 @@ async function extractIntents(vbaSource, moduleName, context, apiKey) {
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 4096,
+      max_tokens: 16384,
       system: systemPrompt,
       messages: [{
         role: 'user',
@@ -221,6 +221,12 @@ async function extractIntents(vbaSource, moduleName, context, apiKey) {
   }
 
   const data = await response.json();
+
+  // Detect truncated response before attempting parse
+  if (data.stop_reason === 'max_tokens') {
+    throw new Error(`Intent extraction response truncated (hit max_tokens). Module "${moduleName}" may be too large for a single extraction call.`);
+  }
+
   const text = data.content?.find(c => c.type === 'text')?.text || '';
 
   // Parse JSON — strip code fences if the LLM included them despite instructions

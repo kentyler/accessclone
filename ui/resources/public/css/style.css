@@ -3909,6 +3909,45 @@ body {
   margin-right: 0.5rem;
 }
 
+.auto-import-phase {
+  background: #e8f0fe;
+  border: 1px solid #a8c7fa;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.8125rem;
+  color: #1a73e8;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.auto-import-phase::before {
+  content: '';
+  width: 14px;
+  height: 14px;
+  border: 2px solid #1a73e8;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  flex-shrink: 0;
+}
+
+.auto-import-phase.complete {
+  background: #e6f4ea;
+  border-color: #a8dab5;
+  color: #137333;
+}
+
+.auto-import-phase.complete::before {
+  content: '\2713';
+  border: none;
+  animation: none;
+  font-weight: bold;
+  width: auto;
+  height: auto;
+}
+
 /* Access Toolbar */
 .access-toolbar {
   display: flex;

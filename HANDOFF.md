@@ -6,7 +6,13 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 
 ## Current State
 
-### Just Shipped (2026-02-17)
+### Just Shipped (2026-02-18)
+- **Capability ontology: intent → potential rename** (PR #31): Graph node type `intent` renamed to `potential` throughout. The three-layer model is now: capability (names) → potential (what's implied) → expression (what exists). `application` removed as a graph node type — applications are expressions. Schema migration renames existing nodes automatically on server restart.
+- **Per-database folder structure**: `databases/accessclone/` and `databases/threehorse/` created with `source/`, `modules/`, and `notes.md`. `.gitignore` excludes `.accdb`/`.mdb` files from git.
+- **Two new databases registered**: AccessClone (`db_accessclone`) and ThreeHorse (`db_threehorse`) schemas created in PostgreSQL via the app, registered in `shared.databases`.
+- **capability-ontology.md**: Full rewrite documenting three-layer model, graph node types, edge types, API endpoints, chat tools.
+
+### Previously Shipped (2026-02-17)
 - **Batch pipeline: Extract → Resolve → Generate**: App Viewer's Gap Decisions pane restructured as a 3-step pipeline. Batch extract intents from all modules, auto-resolve gaps whose referenced objects exist, batch generate code with multi-pass dependency retry (max 20 passes). Same retry pattern as query imports.
 - **Intent dependency checking**: `checkIntentDependencies()` and `autoResolveGaps()` in `server/routes/chat/context.js`. `POST /api/chat/generate-wiring` accepts `check_deps: true` to skip generation when deps unsatisfied.
 - **3 new transforms**: `set-batch-generating`, `set-batch-gen-progress`, `set-batch-gen-results` (registered in core.cljs, domain count 11→14).
@@ -30,10 +36,28 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 - **Tested against two databases**: Northwind and a second Access database both import fully (tables, forms, reports, queries, modules, macros) without errors.
 
 ### In Progress / Uncommitted
-- No uncommitted changes (as of 2026-02-18)
+5 uncommitted files from prior work (pre-existing before 2026-02-18 session):
+- `server/lib/vba-intent-extractor.js` (8 lines changed)
+- `ui/resources/public/css/style.css` (39 lines added)
+- `ui/src/app/flows/app.cljs` (392 lines changed)
+- `ui/src/app/state_query.cljs` (2 lines changed)
+- `ui/src/app/views/access_database_viewer.cljs` (65 lines changed)
+- `scripts/dump-form-definitions.js` (untracked)
+
+**Review these before starting new work** — decide whether to commit, discard, or branch them.
+
+### Server Restart Required
+The schema migration in `server/graph/schema.js` needs to run to:
+1. Rename existing `intent` nodes to `potential` in `shared._nodes`
+2. Remove any `application`-typed nodes
+3. Update the `valid_scope` constraint
+
+**Just restart the server** — the migration runs automatically on startup.
 
 ### Next Up
-- Add file picker option for import mode (alternative to full machine scan)
+- Place `.accdb` source files in `databases/accessclone/source/` and `databases/threehorse/source/`
+- Start importing into the new databases
+- Clean up stale feature branches (22 listed)
 - Test batch pipeline end-to-end: extract all → resolve gaps → generate all code against a real database
 - Test .mdb → .accdb conversion end-to-end with a real .mdb file
 - Test runtime form state sync end-to-end: open a form, navigate records, verify `form_control_state` populated and dependent views filter correctly
@@ -46,9 +70,13 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 ### API Contract Changes
 - `PUT /api/form-state` now expects `{sessionId, entries: [{tableName, columnName, value}]}`. The old format `{sessionId, formName, controls: {...}}` no longer works. Both server and frontend are updated.
 - `GET /api/data/:table` no longer reads `X-Form-Name` header or sets `app.active_form`. Only `X-Session-ID` and `X-Database-ID` headers matter now.
+- Graph endpoints renamed: `/api/graph/intents` → `/api/graph/potentials`, `/api/graph/intent` → `/api/graph/potential`, etc.
+- Chat tools renamed: `query_intent` → `query_potential`, `propose_intent` → `propose_potential`
 
 ### Schema Migration
-- `server/graph/schema.js` has a `DO $$ ... END $$` block that renames `form_name` → `table_name` and `control_name` → `column_name` in `form_control_state` on first run. It truncates the table during migration. This runs automatically on server start.
+- `server/graph/schema.js` has migration blocks that run on startup:
+  - Renames `intent` → `potential` nodes, deletes `application` nodes, updates `valid_scope` constraint
+  - Renames `form_name` → `table_name` and `control_name` → `column_name` in `form_control_state` (older migration)
 
 ### Name Sanitization
 - `sanitizeName()` in `query-converter.js` lowercases and replaces spaces with underscores, strips non-alphanumeric chars. All table names, column names, form names, and control names go through this. If you're comparing names across systems, always sanitize both sides.

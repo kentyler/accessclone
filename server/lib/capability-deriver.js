@@ -77,6 +77,7 @@ Return a JSON array of capability objects. Each has:
 - "description": one or two sentences describing the business capability in plain language
 - "evidence": brief note on what intents/structures led you to this conclusion
 - "related_structures": array of table/form/report names this capability touches
+- "related_procedures": array of {"module": "ModuleName", "procedure": "ProcName"} identifying the specific VBA procedures whose intents support this capability
 - "confidence": "high" (clear pattern across multiple modules), "medium" (visible pattern), or "low" (inferred)
 
 Return ONLY the JSON array. No markdown, no explanation.`;
@@ -132,6 +133,7 @@ Identify the high-level business capabilities this application supports.`;
     description: cap.description || '',
     evidence: cap.evidence || '',
     related_structures: cap.related_structures || [],
+    related_procedures: cap.related_procedures || [],
     confidence: cap.confidence || 'medium'
   }));
 }

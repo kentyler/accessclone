@@ -709,12 +709,13 @@ Return ONLY the ClojureScript code, no markdown code fences, no explanations. In
             evidence: cap.evidence,
             confidence: cap.confidence,
             derived_from: databaseId,
+            source_procedures: cap.related_procedures,
             history: [{ event: 'derived', source: databaseId, at: new Date().toISOString() }]
           }
         });
 
         // Link related structures via proposed 'serves' edges
-        let linked = 0;
+        let linkedStructures = 0;
         for (const structName of cap.related_structures) {
           // Try as form, table, or report
           for (const nodeType of ['form', 'table', 'report']) {
@@ -727,8 +728,46 @@ Return ONLY the ClojureScript code, no markdown code fences, no explanations. In
                 status: 'proposed',
                 proposed_by: 'llm'
               });
-              linked++;
+              linkedStructures++;
               break;
+            }
+          }
+        }
+
+        // Link existing graph intent nodes via proposed 'actualizes' edges
+        let linkedIntents = 0;
+        const intentNodes = await pool.query(
+          `SELECT id, name FROM shared._nodes WHERE node_type = 'intent'`
+        );
+        if (intentNodes.rows.length > 0) {
+          // Check each intent's serves edges — if it serves structures that
+          // also serve this capability, propose an actualizes link
+          for (const intent of intentNodes.rows) {
+            const intentEdges = await pool.query(
+              `SELECT e.from_id FROM shared._edges e
+               JOIN shared._nodes n ON n.id = e.from_id
+               WHERE e.to_id = $1 AND e.rel_type = 'serves'
+                 AND n.database_id = $2`,
+              [intent.id, databaseId]
+            );
+            // If any structure serving this intent also serves the capability
+            for (const edge of intentEdges.rows) {
+              const alsoServesCapability = await pool.query(
+                `SELECT 1 FROM shared._edges
+                 WHERE from_id = $1 AND to_id = $2 AND rel_type = 'serves'`,
+                [edge.from_id, capNode.id]
+              );
+              if (alsoServesCapability.rows.length > 0) {
+                await upsertEdge(pool, {
+                  from_id: intent.id,
+                  to_id: capNode.id,
+                  rel_type: 'actualizes',
+                  status: 'proposed',
+                  proposed_by: 'llm'
+                });
+                linkedIntents++;
+                break;
+              }
             }
           }
         }
@@ -739,7 +778,9 @@ Return ONLY the ClojureScript code, no markdown code fences, no explanations. In
           description: cap.description,
           evidence: cap.evidence,
           confidence: cap.confidence,
-          linked_structures: linked
+          related_procedures: cap.related_procedures,
+          linked_structures: linkedStructures,
+          linked_intents: linkedIntents
         });
       }
 

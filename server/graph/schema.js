@@ -7,18 +7,18 @@ const SCHEMA_SQL = `
 -- Unified dependency/intent graph nodes
 CREATE TABLE IF NOT EXISTS shared._nodes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    node_type VARCHAR(50) NOT NULL,  -- 'table', 'column', 'form', 'control', 'intent'
+    node_type VARCHAR(50) NOT NULL,  -- 'table', 'column', 'form', 'control', 'intent', 'capability', 'expression', 'application'
     name VARCHAR(255) NOT NULL,
-    database_id VARCHAR(100),         -- NULL for intents, required for structural nodes
-    scope VARCHAR(50) NOT NULL,       -- 'global' for intents, 'local' for structural
-    origin VARCHAR(50),               -- For intents: 'llm', 'user', 'system'
+    database_id VARCHAR(100),         -- NULL for global nodes (intent/capability/application), required for local (structural/expression)
+    scope VARCHAR(50) NOT NULL,       -- 'global' for intent/capability/application, 'local' for structural/expression
+    origin VARCHAR(50),               -- 'llm', 'user', 'system', 'imported', 'observed', 'extracted'
     metadata JSONB DEFAULT '{}',
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
 
     CONSTRAINT valid_scope CHECK (
-        (node_type = 'intent' AND database_id IS NULL AND scope = 'global')
-        OR (node_type != 'intent' AND database_id IS NOT NULL AND scope = 'local')
+        (node_type IN ('intent', 'capability', 'application') AND database_id IS NULL AND scope = 'global')
+        OR (node_type NOT IN ('intent', 'capability', 'application') AND database_id IS NOT NULL AND scope = 'local')
     )
 );
 
@@ -36,12 +36,26 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_nodes_unique_null_db
   ON shared._nodes(node_type, name)
   WHERE database_id IS NULL;
 
+-- Migrate valid_scope constraint to allow capability/application nodes (for existing installs)
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'valid_scope' AND conrelid = 'shared._nodes'::regclass
+  ) THEN
+    ALTER TABLE shared._nodes DROP CONSTRAINT valid_scope;
+    ALTER TABLE shared._nodes ADD CONSTRAINT valid_scope CHECK (
+      (node_type IN ('intent', 'capability', 'application') AND database_id IS NULL AND scope = 'global')
+      OR (node_type NOT IN ('intent', 'capability', 'application') AND database_id IS NOT NULL AND scope = 'local')
+    );
+  END IF;
+END $$;
+
 -- Unified dependency/intent graph edges
 CREATE TABLE IF NOT EXISTS shared._edges (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     from_id UUID NOT NULL REFERENCES shared._nodes(id) ON DELETE CASCADE,
     to_id UUID NOT NULL REFERENCES shared._nodes(id) ON DELETE CASCADE,
-    rel_type VARCHAR(50) NOT NULL,    -- 'contains', 'references', 'bound_to', 'serves', 'requires', 'enables'
+    rel_type VARCHAR(50) NOT NULL,    -- 'contains', 'references', 'bound_to', 'serves', 'requires', 'enables', 'expresses', 'refines', 'actualizes'
     status VARCHAR(50),               -- For 'serves' edges: 'confirmed', 'proposed'
     proposed_by VARCHAR(50),          -- For 'serves': 'llm', 'user'
     metadata JSONB DEFAULT '{}',
@@ -65,6 +79,23 @@ CREATE TABLE IF NOT EXISTS shared.databases (
     description TEXT,
     last_accessed TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- Applications - business systems above databases
+-- An application is the business concept; a database is where it lives.
+-- An application may have an Access source (migration), a PG database
+-- (implementation), both, or neither (aspirational from capabilities).
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.applications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    database_id VARCHAR(100) REFERENCES shared.databases(database_id),  -- current PG home (nullable)
+    source_path TEXT,                       -- Access file it came from (nullable)
+    metadata JSONB DEFAULT '{}',            -- provenance, history, tags
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- ============================================================

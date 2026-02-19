@@ -66,7 +66,7 @@ async function upsertNode(pool, node) {
     node_type,
     name,
     database_id = null,
-    scope = node_type === 'intent' ? 'global' : 'local',
+    scope = ['intent', 'capability', 'application'].includes(node_type) ? 'global' : 'local',
     origin = null,
     metadata = {}
   } = node;

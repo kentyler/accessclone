@@ -375,18 +375,18 @@ async function populateFromReport(pool, reportName, content, databaseId) {
 }
 
 /**
- * Create or update an intent node and optionally link structures to it
+ * Create or update a potential node and optionally link structures to it
  * @param {Pool} pool
- * @param {Object} intent - { name, description, origin }
+ * @param {Object} potential - { name, description, origin }
  * @param {Array} structures - [{ node_type, name, database_id }] to link
- * @returns {Promise<Object>} - { intent: node, linked: number }
+ * @returns {Promise<Object>} - { potential: node, linked: number }
  */
-async function proposeIntent(pool, intent, structures = []) {
-  const { name, description, origin = 'llm' } = intent;
+async function proposePotential(pool, potential, structures = []) {
+  const { name, description, origin = 'llm' } = potential;
 
-  // Create intent node
-  const intentNode = await upsertNode(pool, {
-    node_type: 'intent',
+  // Create potential node
+  const potentialNode = await upsertNode(pool, {
+    node_type: 'potential',
     name: name,
     database_id: null,
     scope: 'global',
@@ -396,13 +396,13 @@ async function proposeIntent(pool, intent, structures = []) {
 
   let linked = 0;
 
-  // Link structures to intent
+  // Link structures to potential
   for (const struct of structures) {
     const structNode = await findNode(pool, struct.node_type, struct.name, struct.database_id);
     if (structNode) {
       await upsertEdge(pool, {
         from_id: structNode.id,
-        to_id: intentNode.id,
+        to_id: potentialNode.id,
         rel_type: 'serves',
         status: 'proposed',
         proposed_by: origin
@@ -411,24 +411,24 @@ async function proposeIntent(pool, intent, structures = []) {
     }
   }
 
-  console.log(`Intent "${name}" created with ${linked} linked structures`);
-  return { intent: intentNode, linked };
+  console.log(`Potential "${name}" created with ${linked} linked structures`);
+  return { potential: potentialNode, linked };
 }
 
 /**
- * Confirm a proposed intent link
+ * Confirm a proposed potential link
  * @param {Pool} pool
  * @param {string} structureId - UUID of structure node
- * @param {string} intentId - UUID of intent node
+ * @param {string} potentialId - UUID of potential node
  * @returns {Promise<boolean>}
  */
-async function confirmIntentLink(pool, structureId, intentId) {
+async function confirmPotentialLink(pool, structureId, potentialId) {
   const result = await pool.query(`
     UPDATE shared._edges
     SET status = 'confirmed'
     WHERE from_id = $1 AND to_id = $2 AND rel_type = 'serves'
     RETURNING *
-  `, [structureId, intentId]);
+  `, [structureId, potentialId]);
   return result.rowCount > 0;
 }
 
@@ -448,7 +448,7 @@ module.exports = {
   parseFormContent,
   populateFromReport,
   parseReportContent,
-  proposeIntent,
-  confirmIntentLink,
+  proposePotential,
+  confirmPotentialLink,
   clearGraph
 };

@@ -7,18 +7,18 @@ const SCHEMA_SQL = `
 -- Unified dependency/intent graph nodes
 CREATE TABLE IF NOT EXISTS shared._nodes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    node_type VARCHAR(50) NOT NULL,  -- 'table', 'column', 'form', 'control', 'intent', 'capability', 'expression', 'application'
+    node_type VARCHAR(50) NOT NULL,  -- 'table', 'column', 'form', 'control', 'capability', 'potential', 'expression'
     name VARCHAR(255) NOT NULL,
-    database_id VARCHAR(100),         -- NULL for global nodes (intent/capability/application), required for local (structural/expression)
-    scope VARCHAR(50) NOT NULL,       -- 'global' for intent/capability/application, 'local' for structural/expression
+    database_id VARCHAR(100),         -- NULL for global nodes (capability/potential), required for local (structural/expression)
+    scope VARCHAR(50) NOT NULL,       -- 'global' for capability/potential, 'local' for structural/expression
     origin VARCHAR(50),               -- 'llm', 'user', 'system', 'imported', 'observed', 'extracted'
     metadata JSONB DEFAULT '{}',
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
 
     CONSTRAINT valid_scope CHECK (
-        (node_type IN ('intent', 'capability', 'application') AND database_id IS NULL AND scope = 'global')
-        OR (node_type NOT IN ('intent', 'capability', 'application') AND database_id IS NOT NULL AND scope = 'local')
+        (node_type IN ('capability', 'potential') AND database_id IS NULL AND scope = 'global')
+        OR (node_type NOT IN ('capability', 'potential') AND database_id IS NOT NULL AND scope = 'local')
     )
 );
 
@@ -36,16 +36,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_nodes_unique_null_db
   ON shared._nodes(node_type, name)
   WHERE database_id IS NULL;
 
--- Migrate valid_scope constraint to allow capability/application nodes (for existing installs)
+-- Migrate valid_scope constraint to capability/potential (for existing installs)
 DO $$ BEGIN
+  -- Rename existing intent nodes to potential before constraint update
+  UPDATE shared._nodes SET node_type = 'potential' WHERE node_type = 'intent';
+  -- Remove any application-typed nodes (applications are expressions, not graph entities)
+  DELETE FROM shared._nodes WHERE node_type = 'application';
   IF EXISTS (
     SELECT 1 FROM pg_constraint
     WHERE conname = 'valid_scope' AND conrelid = 'shared._nodes'::regclass
   ) THEN
     ALTER TABLE shared._nodes DROP CONSTRAINT valid_scope;
     ALTER TABLE shared._nodes ADD CONSTRAINT valid_scope CHECK (
-      (node_type IN ('intent', 'capability', 'application') AND database_id IS NULL AND scope = 'global')
-      OR (node_type NOT IN ('intent', 'capability', 'application') AND database_id IS NOT NULL AND scope = 'local')
+      (node_type IN ('capability', 'potential') AND database_id IS NULL AND scope = 'global')
+      OR (node_type NOT IN ('capability', 'potential') AND database_id IS NOT NULL AND scope = 'local')
     );
   END IF;
 END $$;

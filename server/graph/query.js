@@ -6,9 +6,9 @@
 /**
  * Find a node by type, name, and optionally database_id
  * @param {Pool} pool
- * @param {string} nodeType - 'table', 'column', 'form', 'control', 'intent'
+ * @param {string} nodeType - 'table', 'column', 'form', 'control', 'capability', 'potential'
  * @param {string} name - Node name
- * @param {string|null} databaseId - Database ID (null for intents)
+ * @param {string|null} databaseId - Database ID (null for capability/potential)
  * @returns {Promise<Object|null>}
  */
 async function findNode(pool, nodeType, name, databaseId = null) {
@@ -44,7 +44,7 @@ async function findNodesByType(pool, nodeType, databaseId = null) {
   if (databaseId) {
     query = 'SELECT * FROM shared._nodes WHERE node_type = $1 AND database_id = $2 ORDER BY name';
     params = [nodeType, databaseId];
-  } else if (nodeType === 'intent') {
+  } else if (nodeType === 'potential') {
     query = 'SELECT * FROM shared._nodes WHERE node_type = $1 ORDER BY name';
     params = [nodeType];
   } else {
@@ -66,7 +66,7 @@ async function upsertNode(pool, node) {
     node_type,
     name,
     database_id = null,
-    scope = ['intent', 'capability', 'application'].includes(node_type) ? 'global' : 'local',
+    scope = ['capability', 'potential'].includes(node_type) ? 'global' : 'local',
     origin = null,
     metadata = {}
   } = node;
@@ -230,29 +230,29 @@ async function traverseDependencies(pool, nodeId, direction = 'downstream', maxD
 }
 
 /**
- * Find structures that serve an intent
+ * Find structures that serve a potential
  * @param {Pool} pool
- * @param {string} intentId - Intent node UUID
+ * @param {string} potentialId - Potential node UUID
  * @returns {Promise<Array>}
  */
-async function getStructuresForIntent(pool, intentId) {
+async function getStructuresForPotential(pool, potentialId) {
   const result = await pool.query(`
     SELECT n.*, e.status, e.proposed_by
     FROM shared._nodes n
     JOIN shared._edges e ON e.from_id = n.id
     WHERE e.to_id = $1 AND e.rel_type = 'serves'
     ORDER BY n.node_type, n.name
-  `, [intentId]);
+  `, [potentialId]);
   return result.rows;
 }
 
 /**
- * Find intents that a structure serves
+ * Find potentials that a structure serves
  * @param {Pool} pool
  * @param {string} structureId - Structure node UUID
  * @returns {Promise<Array>}
  */
-async function getIntentsForStructure(pool, structureId) {
+async function getPotentialsForStructure(pool, structureId) {
   const result = await pool.query(`
     SELECT n.*, e.status, e.proposed_by
     FROM shared._nodes n
@@ -273,6 +273,6 @@ module.exports = {
   upsertEdge,
   deleteEdge,
   traverseDependencies,
-  getStructuresForIntent,
-  getIntentsForStructure
+  getStructuresForPotential,
+  getPotentialsForStructure
 };

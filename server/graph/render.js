@@ -9,8 +9,8 @@ const {
   findNodesByType,
   getEdges,
   traverseDependencies,
-  getStructuresForIntent,
-  getIntentsForStructure
+  getStructuresForPotential,
+  getPotentialsForStructure
 } = require('./query');
 
 /**
@@ -61,53 +61,53 @@ async function renderDependenciesToProse(pool, nodeId, direction = 'downstream',
 }
 
 /**
- * Render intents for a structure to prose
+ * Render potentials for a structure to prose
  * @param {Pool} pool
  * @param {string} structureId - UUID of structure node
  * @returns {Promise<string>}
  */
-async function renderIntentsForStructure(pool, structureId) {
+async function renderPotentialsForStructure(pool, structureId) {
   const structure = await findNodeById(pool, structureId);
   if (!structure) return 'Structure not found.';
 
-  const intents = await getIntentsForStructure(pool, structureId);
+  const potentials = await getPotentialsForStructure(pool, structureId);
 
-  if (intents.length === 0) {
-    return `No intents are associated with ${structure.node_type} "${structure.name}".`;
+  if (potentials.length === 0) {
+    return `No potentials are associated with ${structure.node_type} "${structure.name}".`;
   }
 
   const lines = [];
-  lines.push(`**${structure.node_type} "${structure.name}"** serves these intents:`);
+  lines.push(`**${structure.node_type} "${structure.name}"** serves these potentials:`);
   lines.push('');
 
-  for (const intent of intents) {
-    const status = intent.status === 'proposed' ? ' (proposed)' : '';
-    const desc = intent.metadata?.description ? `: ${intent.metadata.description}` : '';
-    lines.push(`- **${intent.name}**${status}${desc}`);
+  for (const potential of potentials) {
+    const status = potential.status === 'proposed' ? ' (proposed)' : '';
+    const desc = potential.metadata?.description ? `: ${potential.metadata.description}` : '';
+    lines.push(`- **${potential.name}**${status}${desc}`);
   }
 
   return lines.join('\n');
 }
 
 /**
- * Render structures for an intent to prose
+ * Render structures for a potential to prose
  * @param {Pool} pool
- * @param {string} intentId - UUID of intent node
+ * @param {string} potentialId - UUID of potential node
  * @returns {Promise<string>}
  */
-async function renderStructuresForIntent(pool, intentId) {
-  const intent = await findNodeById(pool, intentId);
-  if (!intent) return 'Intent not found.';
+async function renderStructuresForPotential(pool, potentialId) {
+  const potential = await findNodeById(pool, potentialId);
+  if (!potential) return 'Potential not found.';
 
-  const structures = await getStructuresForIntent(pool, intentId);
+  const structures = await getStructuresForPotential(pool, potentialId);
 
   if (structures.length === 0) {
-    return `No structures are linked to intent "${intent.name}".`;
+    return `No structures are linked to potential "${potential.name}".`;
   }
 
   const lines = [];
-  const desc = intent.metadata?.description ? ` - ${intent.metadata.description}` : '';
-  lines.push(`**Intent: ${intent.name}**${desc}`);
+  const desc = potential.metadata?.description ? ` - ${potential.metadata.description}` : '';
+  lines.push(`**Potential: ${potential.name}**${desc}`);
   lines.push('');
   lines.push('Served by:');
 
@@ -131,28 +131,28 @@ async function renderStructuresForIntent(pool, intentId) {
 }
 
 /**
- * Render all intents to prose
+ * Render all potentials to prose
  * @param {Pool} pool
  * @returns {Promise<string>}
  */
-async function renderAllIntentsToProse(pool) {
-  const intents = await findNodesByType(pool, 'intent');
+async function renderAllPotentialsToProse(pool) {
+  const potentials = await findNodesByType(pool, 'potential');
 
-  if (intents.length === 0) {
-    return 'No intents have been defined yet.';
+  if (potentials.length === 0) {
+    return 'No potentials have been defined yet.';
   }
 
   const lines = [];
-  lines.push('**Defined Intents:**');
+  lines.push('**Defined Potentials:**');
   lines.push('');
 
-  for (const intent of intents) {
-    const structures = await getStructuresForIntent(pool, intent.id);
+  for (const potential of potentials) {
+    const structures = await getStructuresForPotential(pool, potential.id);
     const structCount = structures.length;
-    const desc = intent.metadata?.description ? `: ${intent.metadata.description}` : '';
-    const origin = intent.origin ? ` (${intent.origin})` : '';
+    const desc = potential.metadata?.description ? `: ${potential.metadata.description}` : '';
+    const origin = potential.origin ? ` (${potential.origin})` : '';
 
-    lines.push(`- **${intent.name}**${desc}${origin}`);
+    lines.push(`- **${potential.name}**${desc}${origin}`);
     if (structCount > 0) {
       lines.push(`  Served by ${structCount} structure(s)`);
     }
@@ -214,14 +214,14 @@ async function renderImpactAnalysis(pool, nodeType, nodeName, databaseId) {
   if (!node) return `${nodeType} "${nodeName}" not found in database "${databaseId}".`;
 
   const downstream = await traverseDependencies(pool, node.id, 'downstream', 5);
-  const intents = await getIntentsForStructure(pool, node.id);
+  const potentials = await getPotentialsForStructure(pool, node.id);
 
   const lines = [];
   lines.push(`**Impact Analysis: ${nodeType} "${nodeName}"**`);
   lines.push('');
 
-  if (downstream.length === 0 && intents.length === 0) {
-    lines.push('This object has no known dependents or intents.');
+  if (downstream.length === 0 && potentials.length === 0) {
+    lines.push('This object has no known dependents or potentials.');
     return lines.join('\n');
   }
 
@@ -246,11 +246,11 @@ async function renderImpactAnalysis(pool, nodeType, nodeName, databaseId) {
     }
   }
 
-  if (intents.length > 0) {
-    lines.push('\n**Intents that would be impacted:**');
-    for (const intent of intents) {
-      const desc = intent.metadata?.description ? `: ${intent.metadata.description}` : '';
-      lines.push(`  - ${intent.name}${desc}`);
+  if (potentials.length > 0) {
+    lines.push('\n**Potentials that would be impacted:**');
+    for (const potential of potentials) {
+      const desc = potential.metadata?.description ? `: ${potential.metadata.description}` : '';
+      lines.push(`  - ${potential.name}${desc}`);
     }
   }
 
@@ -259,9 +259,9 @@ async function renderImpactAnalysis(pool, nodeType, nodeName, databaseId) {
 
 module.exports = {
   renderDependenciesToProse,
-  renderIntentsForStructure,
-  renderStructuresForIntent,
-  renderAllIntentsToProse,
+  renderPotentialsForStructure,
+  renderStructuresForPotential,
+  renderAllPotentialsToProse,
   renderDatabaseOverview,
   renderImpactAnalysis
 };

@@ -96,23 +96,23 @@ const graphTools = [
     }
   },
   {
-    name: 'query_intent',
-    description: 'Find intents a structure serves, or structures serving an intent. Use this to understand the purpose of database objects or find objects related to a business goal.',
+    name: 'query_potential',
+    description: 'Find potentials a structure serves, or structures serving a potential. Use this to understand the purpose of database objects or find objects related to a business goal.',
     input_schema: {
       type: 'object',
       properties: {
         query_type: {
           type: 'string',
-          enum: ['intents_for_structure', 'structures_for_intent'],
-          description: 'What to query: intents for a structure, or structures for an intent'
+          enum: ['potentials_for_structure', 'structures_for_potential'],
+          description: 'What to query: potentials for a structure, or structures for a potential'
         },
         node_name: {
           type: 'string',
-          description: 'Name of the structure or intent to query'
+          description: 'Name of the structure or potential to query'
         },
         node_type: {
           type: 'string',
-          enum: ['table', 'column', 'form', 'control', 'intent'],
+          enum: ['table', 'column', 'form', 'control', 'potential'],
           description: 'Type of node (required for structure queries)'
         }
       },
@@ -120,18 +120,18 @@ const graphTools = [
     }
   },
   {
-    name: 'propose_intent',
-    description: 'Create a new intent or link structures to an intent. Use this when the user describes what a table or form is for, or when documenting business purposes.',
+    name: 'propose_potential',
+    description: 'Create a new potential or link structures to a potential. Use this when the user describes what a table or form is for, or when documenting business purposes.',
     input_schema: {
       type: 'object',
       properties: {
-        intent_name: {
+        potential_name: {
           type: 'string',
-          description: 'Short name for the intent (e.g., "Track Inventory Costs")'
+          description: 'Short name for the potential (e.g., "Track Inventory Costs")'
         },
         description: {
           type: 'string',
-          description: 'Longer description of what this intent means'
+          description: 'Longer description of what this potential means'
         },
         structures: {
           type: 'array',
@@ -142,10 +142,10 @@ const graphTools = [
               name: { type: 'string' }
             }
           },
-          description: 'List of structures that serve this intent'
+          description: 'List of structures that serve this potential'
         }
       },
-      required: ['intent_name']
+      required: ['potential_name']
     }
   }
 ];

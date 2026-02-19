@@ -22,16 +22,16 @@ const {
 const {
   populateFromSchemas,
   populateFromForm,
-  proposeIntent,
-  confirmIntentLink,
+  proposePotential,
+  confirmPotentialLink,
   clearGraph
 } = require('../graph/populate');
 
 const {
   renderDependenciesToProse,
-  renderIntentsForStructure,
-  renderStructuresForIntent,
-  renderAllIntentsToProse,
+  renderPotentialsForStructure,
+  renderStructuresForPotential,
+  renderAllPotentialsToProse,
   renderDatabaseOverview,
   renderImpactAnalysis
 } = require('../graph/render');
@@ -219,98 +219,98 @@ module.exports = function(pool) {
   });
 
   /**
-   * GET /api/graph/intents
-   * Get all intents
+   * GET /api/graph/potentials
+   * Get all potentials
    */
-  router.get('/intents', async (req, res) => {
+  router.get('/potentials', async (req, res) => {
     try {
-      const intents = await findNodesByType(pool, 'intent');
-      res.json({ intents });
+      const potentials = await findNodesByType(pool, 'potential');
+      res.json({ potentials });
     } catch (err) {
-      console.error('Error getting intents:', err);
-      logError(pool, 'GET /api/graph/intents', 'Failed to get intents', err, { databaseId: req.databaseId });
+      console.error('Error getting potentials:', err);
+      logError(pool, 'GET /api/graph/potentials', 'Failed to get potentials', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });
 
   /**
-   * GET /api/graph/intents/prose
-   * Get all intents as prose
+   * GET /api/graph/potentials/prose
+   * Get all potentials as prose
    */
-  router.get('/intents/prose', async (req, res) => {
+  router.get('/potentials/prose', async (req, res) => {
     try {
-      const prose = await renderAllIntentsToProse(pool);
+      const prose = await renderAllPotentialsToProse(pool);
       res.json({ prose });
     } catch (err) {
-      console.error('Error rendering intents:', err);
-      logError(pool, 'GET /api/graph/intents/prose', 'Failed to render intents', err, { databaseId: req.databaseId });
+      console.error('Error rendering potentials:', err);
+      logError(pool, 'GET /api/graph/potentials/prose', 'Failed to render potentials', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });
 
   /**
-   * GET /api/graph/intent/:id/structures
-   * Get structures that serve an intent
+   * GET /api/graph/potential/:id/structures
+   * Get structures that serve a potential
    */
-  router.get('/intent/:id/structures', async (req, res) => {
+  router.get('/potential/:id/structures', async (req, res) => {
     try {
-      const prose = await renderStructuresForIntent(pool, req.params.id);
+      const prose = await renderStructuresForPotential(pool, req.params.id);
       res.json({ prose });
     } catch (err) {
-      console.error('Error getting structures for intent:', err);
-      logError(pool, 'GET /api/graph/intent/:id/structures', 'Failed to get structures for intent', err, { databaseId: req.databaseId });
+      console.error('Error getting structures for potential:', err);
+      logError(pool, 'GET /api/graph/potential/:id/structures', 'Failed to get structures for potential', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });
 
   /**
-   * GET /api/graph/structure/:id/intents
-   * Get intents a structure serves
+   * GET /api/graph/structure/:id/potentials
+   * Get potentials a structure serves
    */
-  router.get('/structure/:id/intents', async (req, res) => {
+  router.get('/structure/:id/potentials', async (req, res) => {
     try {
-      const prose = await renderIntentsForStructure(pool, req.params.id);
+      const prose = await renderPotentialsForStructure(pool, req.params.id);
       res.json({ prose });
     } catch (err) {
-      console.error('Error getting intents for structure:', err);
-      logError(pool, 'GET /api/graph/structure/:id/intents', 'Failed to get intents for structure', err, { databaseId: req.databaseId });
+      console.error('Error getting potentials for structure:', err);
+      logError(pool, 'GET /api/graph/structure/:id/potentials', 'Failed to get potentials for structure', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });
 
   /**
-   * POST /api/graph/intent
-   * Create an intent and optionally link structures
+   * POST /api/graph/potential
+   * Create a potential and optionally link structures
    * Body: { name, description, origin, structures: [{ node_type, name, database_id }] }
    */
-  router.post('/intent', async (req, res) => {
+  router.post('/potential', async (req, res) => {
     try {
       const { name, description, origin, structures = [] } = req.body;
       if (!name) {
         return res.status(400).json({ error: 'name is required' });
       }
-      const result = await proposeIntent(pool, { name, description, origin }, structures);
+      const result = await proposePotential(pool, { name, description, origin }, structures);
       res.json(result);
     } catch (err) {
-      console.error('Error creating intent:', err);
-      logError(pool, 'POST /api/graph/intent', 'Failed to create intent', err, { databaseId: req.databaseId });
+      console.error('Error creating potential:', err);
+      logError(pool, 'POST /api/graph/potential', 'Failed to create potential', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });
 
   /**
-   * POST /api/graph/intent/confirm
-   * Confirm a proposed intent link
-   * Body: { structure_id, intent_id }
+   * POST /api/graph/potential/confirm
+   * Confirm a proposed potential link
+   * Body: { structure_id, potential_id }
    */
-  router.post('/intent/confirm', async (req, res) => {
+  router.post('/potential/confirm', async (req, res) => {
     try {
-      const { structure_id, intent_id } = req.body;
-      const confirmed = await confirmIntentLink(pool, structure_id, intent_id);
+      const { structure_id, potential_id } = req.body;
+      const confirmed = await confirmPotentialLink(pool, structure_id, potential_id);
       res.json({ success: confirmed });
     } catch (err) {
-      console.error('Error confirming intent:', err);
-      logError(pool, 'POST /api/graph/intent/confirm', 'Failed to confirm intent', err, { databaseId: req.databaseId });
+      console.error('Error confirming potential:', err);
+      logError(pool, 'POST /api/graph/potential/confirm', 'Failed to confirm potential', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });

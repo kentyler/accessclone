@@ -104,8 +104,8 @@ Help the user understand this query, identify issues, or suggest improvements. W
       // Graph tools context
       const graphContext = `\n\nYou also have dependency graph tools available:
 - query_dependencies: Find what depends on a database object (tables, columns, forms, controls)
-- query_intent: Find the business purpose/intent of structures, or find structures serving a business goal
-- propose_intent: Document the business purpose of database objects
+- query_potential: Find the business potential/purpose of structures, or find structures serving a business goal
+- propose_potential: Document the business purpose of database objects
 
 Use these when users ask about dependencies, impact of changes, or what structures are for.`;
 
@@ -734,24 +734,24 @@ Return ONLY the ClojureScript code, no markdown code fences, no explanations. In
           }
         }
 
-        // Link existing graph intent nodes via proposed 'actualizes' edges
-        let linkedIntents = 0;
-        const intentNodes = await pool.query(
-          `SELECT id, name FROM shared._nodes WHERE node_type = 'intent'`
+        // Link existing graph potential nodes via proposed 'actualizes' edges
+        let linkedPotentials = 0;
+        const potentialNodes = await pool.query(
+          `SELECT id, name FROM shared._nodes WHERE node_type = 'potential'`
         );
-        if (intentNodes.rows.length > 0) {
-          // Check each intent's serves edges — if it serves structures that
+        if (potentialNodes.rows.length > 0) {
+          // Check each potential's serves edges — if it serves structures that
           // also serve this capability, propose an actualizes link
-          for (const intent of intentNodes.rows) {
-            const intentEdges = await pool.query(
+          for (const potential of potentialNodes.rows) {
+            const potentialEdges = await pool.query(
               `SELECT e.from_id FROM shared._edges e
                JOIN shared._nodes n ON n.id = e.from_id
                WHERE e.to_id = $1 AND e.rel_type = 'serves'
                  AND n.database_id = $2`,
-              [intent.id, databaseId]
+              [potential.id, databaseId]
             );
-            // If any structure serving this intent also serves the capability
-            for (const edge of intentEdges.rows) {
+            // If any structure serving this potential also serves the capability
+            for (const edge of potentialEdges.rows) {
               const alsoServesCapability = await pool.query(
                 `SELECT 1 FROM shared._edges
                  WHERE from_id = $1 AND to_id = $2 AND rel_type = 'serves'`,
@@ -759,13 +759,13 @@ Return ONLY the ClojureScript code, no markdown code fences, no explanations. In
               );
               if (alsoServesCapability.rows.length > 0) {
                 await upsertEdge(pool, {
-                  from_id: intent.id,
+                  from_id: potential.id,
                   to_id: capNode.id,
                   rel_type: 'actualizes',
                   status: 'proposed',
                   proposed_by: 'llm'
                 });
-                linkedIntents++;
+                linkedPotentials++;
                 break;
               }
             }
@@ -780,7 +780,7 @@ Return ONLY the ClojureScript code, no markdown code fences, no explanations. In
           confidence: cap.confidence,
           related_procedures: cap.related_procedures,
           linked_structures: linkedStructures,
-          linked_intents: linkedIntents
+          linked_potentials: linkedPotentials
         });
       }
 

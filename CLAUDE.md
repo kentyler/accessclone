@@ -166,16 +166,17 @@ Three endpoints for validating form and report definitions:
 
 Save flow in both editors: lint first → if valid, save; if invalid, show errors in `.lint-errors-panel`; if lint endpoint fails, save anyway (graceful degradation). Cross-object checks use `getSchemaInfo()` which queries `information_schema` for all tables/views and their columns.
 
-### Dependency/Intent Graph (server/graph/)
-A unified graph in `shared._nodes` and `shared._edges` that tracks:
-- **Structural nodes**: tables, columns, forms, controls (with database_id)
-- **Intent nodes**: business purposes like "Track Inventory Costs" (global, no database_id)
-- **Edges**: contains, references, bound_to, serves (structure→intent)
+### Dependency/Potential Graph (server/graph/)
+A unified graph in `shared._nodes` and `shared._edges` that tracks three layers:
+- **Structural nodes**: tables, columns, forms, controls (with database_id, scope='local')
+- **Capability nodes**: lightweight names whose meaning emerges from linked expressions (global, no database_id)
+- **Potential nodes**: what's implied or intended — the universal middle layer (global, no database_id)
+- **Edges**: contains, references, bound_to, serves (structure→potential), actualizes (potential→capability)
 
 Populated once on first startup from schemas. Forms auto-update when saved.
 After schema changes (new tables/columns), call `POST /api/graph/populate` to sync.
 
-LLM tools in chat: `query_dependencies`, `query_intent`, `propose_intent`
+LLM tools in chat: `query_dependencies`, `query_potential`, `propose_potential`
 
 ### LLM Chat Context (server/routes/chat.js)
 The chat system prompt includes context based on the active tab:
@@ -226,6 +227,7 @@ See `/skills/` directory for conversion and design guidance:
 - `codebase-guide.md` - Guided tour of the codebase for LLMs or humans trying to understand the project
 - `writing-skills.md` - Meta-guide for writing skill files (cross-platform patterns, checklist)
 - `testing.md` - Full testing guide for LLMs — what tests exist, when to run them, how to add new ones
+- `capability-ontology.md` - Three-layer model: capability → potential → expression
 
 ## Testing
 

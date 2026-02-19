@@ -9,6 +9,8 @@ const { logError } = require('../../lib/events');
 const { dataTools, graphTools, moduleTools, queryTools } = require('./tools');
 const { summarizeDefinition, checkImportCompleteness, formatMissingList, buildAppInventory, buildGraphContext, formatGraphContext, checkIntentDependencies, autoResolveGaps } = require('./context');
 const { executeTool } = require('./tool-handlers');
+const { deriveCapabilities } = require('../../lib/capability-deriver');
+const { upsertNode, upsertEdge, findNode } = require('../../graph/query');
 
 module.exports = function(pool, secrets) {
   /**
@@ -639,6 +641,113 @@ Return ONLY the ClojureScript code, no markdown code fences, no explanations. In
     } catch (err) {
       console.error('Error generating wiring:', err);
       logError(pool, 'POST /api/chat/generate-wiring', 'Wiring generation failed', err, { databaseId: database_id });
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * POST /api/chat/derive-capabilities
+   * Synthesize capability nodes from extracted intents + structural context.
+   * Loads all modules with intents for the database, sends to LLM, creates
+   * proposed capability nodes in the graph.
+   */
+  router.post('/derive-capabilities', async (req, res) => {
+    const databaseId = req.body.database_id || req.headers['x-database-id'];
+    if (!databaseId) {
+      return res.status(400).json({ error: 'database_id is required' });
+    }
+
+    const apiKey = secrets.anthropic?.api_key || process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: 'Anthropic API key not configured in secrets.json' });
+    }
+
+    try {
+      // Load all modules with intents
+      const modulesRes = await pool.query(
+        `SELECT DISTINCT ON (name) name, intents
+         FROM shared.modules
+         WHERE database_id = $1 AND is_current = true AND intents IS NOT NULL
+         ORDER BY name, version DESC`,
+        [databaseId]
+      );
+
+      if (modulesRes.rows.length === 0) {
+        return res.json({ capabilities: [], message: 'No modules with extracted intents found. Extract intents first.' });
+      }
+
+      // Build structural context
+      const graphContext = await buildGraphContext(pool, databaseId);
+      const structuralText = graphContext ? formatGraphContext(graphContext) : 'No structural context available.';
+
+      // Get database name
+      const dbRes = await pool.query(
+        'SELECT name FROM shared.databases WHERE database_id = $1',
+        [databaseId]
+      );
+      const databaseName = dbRes.rows[0]?.name || databaseId;
+
+      // Derive capabilities via LLM
+      const capabilities = await deriveCapabilities({
+        modules: modulesRes.rows,
+        structuralContext: structuralText,
+        databaseName,
+        apiKey
+      });
+
+      // Create capability nodes in the graph
+      const created = [];
+      for (const cap of capabilities) {
+        const capNode = await upsertNode(pool, {
+          node_type: 'capability',
+          name: cap.name,
+          database_id: null,
+          scope: 'global',
+          origin: 'llm',
+          metadata: {
+            description: cap.description,
+            evidence: cap.evidence,
+            confidence: cap.confidence,
+            derived_from: databaseId,
+            history: [{ event: 'derived', source: databaseId, at: new Date().toISOString() }]
+          }
+        });
+
+        // Link related structures via proposed 'serves' edges
+        let linked = 0;
+        for (const structName of cap.related_structures) {
+          // Try as form, table, or report
+          for (const nodeType of ['form', 'table', 'report']) {
+            const structNode = await findNode(pool, nodeType, structName, databaseId);
+            if (structNode) {
+              await upsertEdge(pool, {
+                from_id: structNode.id,
+                to_id: capNode.id,
+                rel_type: 'serves',
+                status: 'proposed',
+                proposed_by: 'llm'
+              });
+              linked++;
+              break;
+            }
+          }
+        }
+
+        created.push({
+          id: capNode.id,
+          name: cap.name,
+          description: cap.description,
+          evidence: cap.evidence,
+          confidence: cap.confidence,
+          linked_structures: linked
+        });
+      }
+
+      console.log(`Derived ${created.length} capabilities for ${databaseName}`);
+      res.json({ capabilities: created });
+    } catch (err) {
+      console.error('Error deriving capabilities:', err);
+      logError(pool, 'POST /api/chat/derive-capabilities', 'Capability derivation failed', err, { databaseId });
       res.status(500).json({ error: err.message });
     }
   });

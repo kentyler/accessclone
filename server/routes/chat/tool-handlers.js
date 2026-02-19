@@ -4,11 +4,11 @@
 
 const { logEvent } = require('../../lib/events');
 const { findNode } = require('../../graph/query');
-const { proposeIntent } = require('../../graph/populate');
+const { proposePotential } = require('../../graph/populate');
 const {
   renderDependenciesToProse,
-  renderIntentsForStructure,
-  renderStructuresForIntent
+  renderPotentialsForStructure,
+  renderStructuresForPotential
 } = require('../../graph/render');
 
 /**
@@ -41,44 +41,44 @@ async function executeTool(toolName, input, ctx) {
       toolResult = { error: err.message };
     }
 
-  } else if (toolName === 'query_intent') {
+  } else if (toolName === 'query_potential') {
     const { query_type, node_name, node_type } = input;
     try {
-      if (query_type === 'intents_for_structure') {
+      if (query_type === 'potentials_for_structure') {
         const node = await findNode(pool, node_type || 'table', node_name, database_id);
         if (node) {
-          const prose = await renderIntentsForStructure(pool, node.id);
+          const prose = await renderPotentialsForStructure(pool, node.id);
           toolResult = { prose };
         } else {
           toolResult = { error: `${node_type || 'structure'} "${node_name}" not found` };
         }
-      } else if (query_type === 'structures_for_intent') {
-        const node = await findNode(pool, 'intent', node_name, null);
+      } else if (query_type === 'structures_for_potential') {
+        const node = await findNode(pool, 'potential', node_name, null);
         if (node) {
-          const prose = await renderStructuresForIntent(pool, node.id);
+          const prose = await renderStructuresForPotential(pool, node.id);
           toolResult = { prose };
         } else {
-          toolResult = { error: `Intent "${node_name}" not found` };
+          toolResult = { error: `Potential "${node_name}" not found` };
         }
       }
     } catch (err) {
-      logEvent(pool, 'warning', 'POST /api/chat/tool', 'Chat tool error: query_intent', { databaseId: req.databaseId, details: { tool: 'query_intent', error: err.message } });
+      logEvent(pool, 'warning', 'POST /api/chat/tool', 'Chat tool error: query_potential', { databaseId: req.databaseId, details: { tool: 'query_potential', error: err.message } });
       toolResult = { error: err.message };
     }
 
-  } else if (toolName === 'propose_intent') {
-    const { intent_name, description, structures = [] } = input;
+  } else if (toolName === 'propose_potential') {
+    const { potential_name, description, structures = [] } = input;
     try {
       const structsWithDb = structures.map(s => ({ ...s, database_id }));
-      const result = await proposeIntent(pool, { name: intent_name, description, origin: 'llm' }, structsWithDb);
+      const result = await proposePotential(pool, { name: potential_name, description, origin: 'llm' }, structsWithDb);
       toolResult = {
         success: true,
-        intent: result.intent.name,
+        potential: result.potential.name,
         linked_structures: result.linked,
-        message: `Created intent "${intent_name}" and linked ${result.linked} structure(s)`
+        message: `Created potential "${potential_name}" and linked ${result.linked} structure(s)`
       };
     } catch (err) {
-      logEvent(pool, 'warning', 'POST /api/chat/tool', 'Chat tool error: propose_intent', { databaseId: req.databaseId, details: { tool: 'propose_intent', error: err.message } });
+      logEvent(pool, 'warning', 'POST /api/chat/tool', 'Chat tool error: propose_potential', { databaseId: req.databaseId, details: { tool: 'propose_potential', error: err.message } });
       toolResult = { error: err.message };
     }
 

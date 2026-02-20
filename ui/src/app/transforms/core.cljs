@@ -18,7 +18,8 @@
             [app.transforms.macro :as macro]
             [app.transforms.logs :as logs]
             [app.transforms.sql-function :as sql-function]
-            [app.transforms.app :as app]))
+            [app.transforms.app :as app]
+            [app.transforms.notes :as notes]))
 
 ;; ============================================================
 ;; TRANSFORM REGISTRY
@@ -149,7 +150,15 @@
    :set-all-gap-selections   app/set-all-gap-selections
    :set-module-pipeline-status   app/set-module-pipeline-status
    :set-module-pipeline-statuses app/set-module-pipeline-statuses
-   :set-pipeline-running         app/set-pipeline-running})
+   :set-pipeline-running         app/set-pipeline-running
+
+   ;; Notes/Corpus domain (6)
+   :set-notes-entries       notes/set-notes-entries
+   :add-notes-entry         notes/add-notes-entry
+   :set-notes-selected      notes/set-notes-selected
+   :set-notes-input         notes/set-notes-input
+   :set-notes-loading       notes/set-notes-loading
+   :set-notes-read-entry    notes/set-notes-read-entry})
 
 ;; ============================================================
 ;; DISPATCH

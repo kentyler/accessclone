@@ -27,6 +27,14 @@
            :current-page :hub  ; :hub, :notes, :meetings, :messaging, :email, :accessclone
            :hub-selected :home  ; :home, :notes, :meetings, :messaging, :email, :accessclone
 
+           ;; Notes/corpus state
+           :notes-entries []
+           :notes-selected-id nil
+           :notes-input ""
+           :notes-loading? false
+           :notes-read-entry nil
+           :notes-read-response nil
+
            ;; UI state
            :loading? false
            :error nil

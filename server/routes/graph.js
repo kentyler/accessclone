@@ -24,7 +24,8 @@ const {
   populateFromForm,
   proposePotential,
   confirmPotentialLink,
-  clearGraph
+  clearGraph,
+  seedPrimitives
 } = require('../graph/populate');
 
 const {
@@ -352,15 +353,31 @@ module.exports = function(pool) {
 
   /**
    * POST /api/graph/populate
-   * Trigger schema population
+   * Trigger schema population + seed architectural primitives
    */
   router.post('/populate', async (req, res) => {
     try {
-      const stats = await populateFromSchemas(pool);
-      res.json({ success: true, stats });
+      const schemaStats = await populateFromSchemas(pool);
+      const primitiveStats = await seedPrimitives(pool);
+      res.json({ success: true, stats: { schema: schemaStats, primitives: primitiveStats } });
     } catch (err) {
       console.error('Error populating graph:', err);
       logError(pool, 'POST /api/graph/populate', 'Failed to populate graph', err, { databaseId: req.databaseId });
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * POST /api/graph/seed-primitives
+   * Seed only the four architectural primitives (Boundary, Transduction, Resolution, Trace)
+   */
+  router.post('/seed-primitives', async (req, res) => {
+    try {
+      const stats = await seedPrimitives(pool);
+      res.json({ success: true, stats });
+    } catch (err) {
+      console.error('Error seeding primitives:', err);
+      logError(pool, 'POST /api/graph/seed-primitives', 'Failed to seed primitives', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });

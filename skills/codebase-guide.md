@@ -181,7 +181,7 @@ The Express server serves both the API and the static frontend.
 
 | File | Responsibility |
 |------|---------------|
-| `populate.js` | Builds graph from database schemas |
+| `populate.js` | Builds graph from database schemas + seeds four architectural primitives |
 | `query.js` | Queries nodes/edges for dependencies |
 | `render.js` | Formats graph data for display |
 | `schema.js` | Graph table DDL |
@@ -221,7 +221,8 @@ ClojureScript with Reagent (a React wrapper). Single-page app.
 | `access_database_viewer.cljs` | Import UI | Scans Access DB, shows objects, drives import workflow. |
 | `sidebar.cljs` | Navigation | Object tree grouped by type. Database switcher. |
 | `tabs.cljs` | Tab bar | Manages open tabs, reactivation, close. |
-| `main.cljs` | Layout | Top-level layout: sidebar + tabs + content. |
+| `hub.cljs` | Hub home | Hub landing page: left menu, center content (3-layer architecture), right panel, chat. Default page. |
+| `main.cljs` | Layout | Top-level routing: `:hub` → hub page, `:accessclone` → full AccessClone app, stub pages for notes/meetings/messaging/email. |
 | `editor_utils.cljs` | Shared | Grid snapping, field resolution, value formatting, `display-text` (returns hiccup with &-hotkey underlines), `render-hotkey-text`, `strip-access-hotkey`, `extract-hotkey`. |
 | `expressions.cljs` | Shared | Frontend expression evaluation. |
 | `logs_viewer.cljs` | Diagnostics | Event log viewer. |
@@ -242,8 +243,8 @@ Every object type has a chat panel. The system prompt includes full context abou
 - `analyze_data` — Run analytical queries on form data
 - `navigate_to_record` — Jump to a specific record in form view
 - `query_dependencies` — Query the dependency graph
-- `query_intent` — Find business intent for objects
-- `propose_intent` — Suggest intent relationships
+- `query_potential` — Find potentials for a structure, or structures for a potential
+- `propose_potential` — Create a new potential and link structures to it
 - `update_translation` — Write ClojureScript translation for modules
 
 **Auto-analyze:** When a form, report, or module is opened with no existing chat transcript, the system automatically asks the AI to describe its structure, purpose, and potential issues. The result is saved as the transcript so it doesn't re-fire.
@@ -316,7 +317,7 @@ If the user asks about:
 > It's a multi-step pipeline: (1) PowerShell scripts use COM automation to extract objects from the .accdb file as JSON. (2) Tables are imported server-side — the server creates PostgreSQL tables, batch-inserts data, and rebuilds indexes. (3) Forms and reports are imported client-side — the frontend sends the JSON definition to the server which stores it in shared.forms/shared.reports. (4) Queries are imported server-side — the query converter transforms Access SQL to PostgreSQL views/functions, with LLM fallback for complex cases. (5) Modules are stored as-is for later AI-assisted translation. Import order matters: tables first, then forms/reports (to populate control mappings), then queries (which may reference form state).
 
 **"What is the dependency graph?"**
-> The graph in `shared._nodes` and `shared._edges` tracks two kinds of relationships: (1) Structural — tables contain columns, forms bind to fields, controls reference columns. (2) Intent — business purposes like "Track Inventory Costs" that structural objects serve. It's populated from database schemas on first startup and updated when forms/reports are saved. The AI chat can query it to answer questions like "What tables does this form depend on?"
+> The graph in `shared._nodes` and `shared._edges` tracks three kinds of relationships: (1) Structural — tables contain columns, forms bind to fields, controls reference columns. (2) Potential — business purposes like "Track Inventory Costs" that structural objects serve. (3) Capability — four architectural primitives (Boundary, Transduction, Resolution, Trace) with their manifestations. The primitives are seeded by `seedPrimitives()` and represent the system's own generating conditions. Populated from schemas on first startup, updated when forms/reports are saved. The AI chat can query it to answer questions like "What tables does this form depend on?" or "What actualizes Transduction?"
 
 **"What are skills files?"**
 > Skills are LLM-facing instruction documents in the `skills/` folder. Each one is a guide that can be given to an AI assistant to help with a specific task — installing AccessClone, converting an Access database, designing forms, etc. They contain step-by-step procedures, context, troubleshooting tips, and common questions. Think of them as specialized training documents for AI collaborators.

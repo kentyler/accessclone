@@ -28,11 +28,301 @@ body {
   line-height: 1.5;
 }
 
-/* App Layout */
-.app {
+/* Hub shell — wraps site-nav + page content */
+.app-shell {
   display: flex;
   flex-direction: column;
   height: 100vh;
+}
+
+/* Site-wide navigation bar */
+.site-nav {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: #1e293b;
+  padding: 0 1rem;
+  height: 40px;
+  flex-shrink: 0;
+}
+
+.site-nav-link {
+  padding: 0.5rem 1.25rem;
+  color: #94a3b8;
+  text-decoration: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.site-nav-link:hover { color: white; }
+.site-nav-link.active { color: white; border-bottom-color: white; }
+
+/* Stub pages (Notes, Meetings, Messaging, Email) */
+.stub-page {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+}
+
+.stub-page h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+.stub-page .back-to-hub { position: absolute; top: 0.75rem; left: 1rem; }
+
+/* Back to hub link */
+.back-to-hub {
+  display: inline-block;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--primary);
+  cursor: pointer;
+  text-decoration: none;
+  background: none;
+  border: none;
+}
+.back-to-hub:hover { text-decoration: underline; }
+
+/* ============================================================
+   Hub page layout
+   ============================================================ */
+.hub-page {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Left sidebar menu */
+.hub-left {
+  width: 220px;
+  flex-shrink: 0;
+  background: #1e293b;
+  color: #cbd5e1;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #334155;
+}
+
+.hub-logo {
+  padding: 1rem 1.25rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: white;
+  border-bottom: 1px solid #334155;
+}
+
+.hub-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 1.25rem;
+  cursor: pointer;
+  transition: background 0.15s;
+  border-left: 3px solid transparent;
+}
+.hub-menu-item:hover { background: #334155; }
+.hub-menu-item.active {
+  background: #334155;
+  color: white;
+  border-left-color: white;
+}
+
+.hub-menu-label { font-size: 0.9rem; }
+
+.hub-open-btn {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  background: transparent;
+  border: 1px solid #64748b;
+  color: #94a3b8;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.hub-open-btn:hover {
+  background: #475569;
+  color: white;
+  border-color: #94a3b8;
+}
+
+/* Center content area */
+.hub-center {
+  flex: 1;
+  overflow-y: auto;
+  padding: 2rem;
+  background: var(--gray-50);
+}
+
+/* Right sidebar */
+.hub-right {
+  width: 220px;
+  flex-shrink: 0;
+  background: white;
+  border-left: 1px solid var(--gray-200);
+  padding: 1rem;
+  overflow-y: auto;
+}
+
+.hub-right h4 {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--gray-500);
+  margin-bottom: 0.5rem;
+}
+
+.hub-right-placeholder {
+  color: var(--gray-500);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.hub-right-list {
+  list-style: none;
+  padding: 0;
+}
+.hub-right-list li {
+  padding: 0.3rem 0;
+  font-size: 0.85rem;
+  color: var(--gray-700);
+}
+
+/* Hub chat panel */
+.hub-chat {
+  width: 320px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: white;
+  border-left: 1px solid var(--gray-200);
+}
+.hub-chat.collapsed { width: auto; }
+
+/* Home content — 3-layer architecture */
+.hub-home-content { max-width: 720px; }
+
+.hub-home-content h2 {
+  font-size: 1.3rem;
+  margin-bottom: 0.15rem;
+  color: var(--gray-900);
+}
+
+.hub-home-subtitle {
+  color: var(--gray-500);
+  font-size: 0.85rem;
+  font-style: italic;
+  margin-bottom: 1.5rem;
+}
+
+.hub-layers {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.hub-layer {
+  background: white;
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  padding: 1rem 1.25rem;
+}
+
+.hub-layer-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+.hub-layer-header h3 {
+  font-size: 1rem;
+  color: var(--gray-900);
+}
+
+.hub-layer-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: white;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.hub-layer p {
+  color: var(--gray-700);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  margin-bottom: 0.4rem;
+}
+.hub-layer p:last-child { margin-bottom: 0; }
+
+.hub-layer-deleuze {
+  color: var(--gray-500);
+  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
+}
+
+.hub-layer-arrow {
+  display: flex;
+  justify-content: center;
+  gap: 2rem;
+  padding: 0.3rem 0;
+  color: var(--gray-500);
+  font-size: 0.8rem;
+}
+
+.hub-key-properties {
+  margin-top: 1.5rem;
+}
+
+.hub-key-properties h4 {
+  font-size: 0.95rem;
+  margin-bottom: 0.5rem;
+  color: var(--gray-900);
+}
+
+.hub-key-properties p {
+  font-size: 0.9rem;
+  color: var(--gray-700);
+  line-height: 1.6;
+  margin-bottom: 0.6rem;
+}
+.hub-key-properties p:last-child { margin-bottom: 0; }
+
+.hub-read-more {
+  margin-top: 1rem;
+  font-size: 0.9rem;
+}
+.hub-read-more a {
+  color: var(--primary);
+  text-decoration: none;
+}
+.hub-read-more a:hover { text-decoration: underline; }
+
+/* Preview content for non-home sections */
+.hub-preview h2 {
+  font-size: 1.3rem;
+  margin-bottom: 0.5rem;
+  color: var(--gray-900);
+}
+
+.hub-preview p {
+  color: var(--gray-500);
+  font-size: 0.95rem;
+}
+
+/* App Layout — AccessClone section */
+.app {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
 }
 
 .app-body {

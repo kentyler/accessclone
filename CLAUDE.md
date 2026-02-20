@@ -112,6 +112,26 @@ AutoExec macros are now handled automatically by the import pipeline:
 - `export_table.ps1` uses a custom `ConvertTo-SafeJson` serializer instead of `ConvertTo-Json` — PowerShell's built-in cmdlet has known bugs with embedded double quotes in large strings (e.g. HTML in memo fields). The custom serializer handles escaping of `"`, `\`, `\r`, `\n`, `\t` correctly.
 - `list_modules.ps1`, `export_module.ps1`, `export_modules_batch.ps1` handle Form_/Report_ class modules (VBE type 100) with a design-view fallback: if `CodeModule.CountOfLines` is inaccessible (common with `AutomationSecurity=3`), the script opens the form/report in design view via `DoCmd.OpenForm`/`DoCmd.OpenReport` to force the code module to load, then closes it after reading. The listing script only skips type 100 modules with *confirmed* zero lines (not inaccessible ones).
 
+### Hub Page (ui/src/app/views/hub.cljs)
+The default landing page (`:current-page :hub`). A 3-column layout:
+- **Left menu** (`hub-left-menu`): Home, Notes, Meetings, Messages, Email, AccessClone. Clicking selects (changes center/right). "Open" buttons navigate to full pages via `:current-page`.
+- **Center content** (`hub-center-content`): Home shows the three-layer architecture (Could Do / Should Do / Doing Now) with Deleuzian reading. Other sections show preview text.
+- **Right panel** (`hub-right-panel`): Contextual sidebar varying by selection.
+- **Chat panel** (`hub-chat-panel`): Shares the same chat state keys as the main chat panel.
+- State: `:current-page :hub` (default), `:hub-selected :home` (which section is highlighted)
+- Routing in `main.cljs`: `:hub` → `hub-page`, `:accessclone` → `accessclone-app` (with back-to-hub link), stub pages for `:notes`/`:meetings`/`:messaging`/`:email`
+- Standalone architecture page: `ui/resources/public/architecture.html` linked from hub home
+
+### Graph Primitives (server/graph/populate.js — seedPrimitives)
+Four architectural primitives seeded as capability nodes in the graph:
+- **Boundary** — Enclosure (schema isolation, tab workspaces, form/report sections)
+- **Transduction** — Isomorphism (SQL conversion, VBA→CLJS, intent extraction, graph population)
+- **Resolution** — Gradient descent (multi-pass retry, gap decisions, LLM fallback, lint)
+- **Trace** (invariant) — Lineage (append-only versioning, event logging, transcript persistence)
+- 21 potential nodes (manifestations) linked via `actualizes` edges, Trace linked to other 3 via `refines`
+- Endpoints: `POST /api/graph/seed-primitives`, also runs on `POST /api/graph/populate`
+- Idempotent — safe to call multiple times
+
 ### State Management
 State is split across three modules that share a single Reagent atom (`app-state`):
 
@@ -227,7 +247,7 @@ See `/skills/` directory for conversion and design guidance:
 - `codebase-guide.md` - Guided tour of the codebase for LLMs or humans trying to understand the project
 - `writing-skills.md` - Meta-guide for writing skill files (cross-platform patterns, checklist)
 - `testing.md` - Full testing guide for LLMs — what tests exist, when to run them, how to add new ones
-- `capability-ontology.md` - Three-layer model: capability → potential → expression
+- `capability-ontology.md` - Three-layer model (Could Do / Should Do / Doing Now), four primitives (Boundary, Transduction, Resolution, Trace), Deleuzian reading
 
 ## Testing
 

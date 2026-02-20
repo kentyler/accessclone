@@ -6,7 +6,26 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 
 ## Current State
 
-### Just Shipped (2026-02-18)
+### Just Shipped (2026-02-19)
+- **Hub home page**: Replaced the top nav bar with a proper hub landing page. 3-column layout: left menu (Home, Notes, Meetings, Messages, Email, AccessClone), center content (changes by selection), right contextual panel, collapsible chat. Default page is now `:hub` instead of `:accessclone`. Each section has an "Open" button that navigates to its full page; full pages have "Back to Hub" links.
+  - Files: `ui/src/app/views/hub.cljs` (new), `ui/src/app/views/main.cljs` (restructured routing, removed `site-nav`), stub pages updated with back-to-hub links, CSS additions in `style.css`.
+  - State: `:current-page :hub` (default), `:hub-selected :home` in `app-state`.
+- **Three-layer architecture on hub home**: The home page center content presents a Deleuzian reading of the system's three-layer model:
+  - **Could Do** — the virtual, the plane of consistency ("your wildest dreams")
+  - **Should Do** — the abstract machine, the diagram ("sketches on the back of an envelope")
+  - **Doing Now** — the concrete assemblage, the stratum ("the hurly-burly, the daily grind")
+  - Plus sections on "Why Three Layers" and "Bidirectional Movement" (actualization ↓, deterritorialization ↑)
+- **Standalone architecture page**: `ui/resources/public/architecture.html` — self-contained HTML page with the full explanation (three layers + four primitives + bidirectional movement + reflexivity). Linked from hub home with "Read the full explanation →".
+- **Four architectural primitives seeded into graph**: `seedPrimitives()` in `server/graph/populate.js` creates 4 capability nodes and 21 potential nodes (manifestations) with `actualizes` edges, plus 3 `refines` edges (Trace as invariant-of the other three):
+  - **Boundary** — Enclosure (schema isolation, tab workspaces, module namespaces, form/report sections)
+  - **Transduction** — Isomorphism (SQL conversion, VBA→CLJS, intent extraction, form normalization, graph population)
+  - **Resolution** — Gradient descent (multi-pass retry, batch code gen, gap decisions, LLM fallback, lint validation)
+  - **Trace** (invariant) — Lineage (append-only versioning, event logging, transcript persistence, import history, edge provenance)
+  - Endpoints: `POST /api/graph/seed-primitives` (standalone), also runs automatically on `POST /api/graph/populate`
+  - Idempotent — safe to call multiple times
+- **capability-ontology.md rewritten**: Updated to reflect Could Do / Should Do / Doing Now framing, four primitives, reflexivity vision.
+
+### Previously Shipped (2026-02-18)
 - **Capability ontology: intent → potential rename** (PR #31): Graph node type `intent` renamed to `potential` throughout. The three-layer model is now: capability (names) → potential (what's implied) → expression (what exists). `application` removed as a graph node type — applications are expressions. Schema migration renames existing nodes automatically on server restart.
 - **Per-database folder structure**: `databases/accessclone/` and `databases/threehorse/` created with `source/`, `modules/`, and `notes.md`. `.gitignore` excludes `.accdb`/`.mdb` files from git.
 - **Two new databases registered**: AccessClone (`db_accessclone`) and ThreeHorse (`db_threehorse`) schemas created in PostgreSQL via the app, registered in `shared.databases`.
@@ -36,9 +55,19 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 - **Tested against two databases**: Northwind and a second Access database both import fully (tables, forms, reports, queries, modules, macros) without errors.
 
 ### In Progress / Uncommitted
-5 uncommitted files from prior work (pre-existing before 2026-02-18 session):
+Files from 2026-02-19 session (hub + primitives work):
+- `ui/src/app/views/hub.cljs` (new)
+- `ui/src/app/views/main.cljs` (restructured routing)
+- `ui/src/app/views/notes.cljs`, `meetings.cljs`, `messaging.cljs`, `email.cljs` (back-to-hub links)
+- `ui/src/app/state.cljs` (hub state keys)
+- `ui/resources/public/css/style.css` (hub styles)
+- `ui/resources/public/architecture.html` (new standalone page)
+- `server/graph/populate.js` (seedPrimitives function)
+- `server/routes/graph.js` (seed-primitives endpoint)
+- `skills/capability-ontology.md` (rewritten)
+
+Plus 5 uncommitted files from prior work (pre-existing before 2026-02-18 session):
 - `server/lib/vba-intent-extractor.js` (8 lines changed)
-- `ui/resources/public/css/style.css` (39 lines added)
 - `ui/src/app/flows/app.cljs` (392 lines changed)
 - `ui/src/app/state_query.cljs` (2 lines changed)
 - `ui/src/app/views/access_database_viewer.cljs` (65 lines changed)
@@ -46,21 +75,19 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 
 **Review these before starting new work** — decide whether to commit, discard, or branch them.
 
-### Server Restart Required
-The schema migration in `server/graph/schema.js` needs to run to:
-1. Rename existing `intent` nodes to `potential` in `shared._nodes`
-2. Remove any `application`-typed nodes
-3. Update the `valid_scope` constraint
-
-**Just restart the server** — the migration runs automatically on startup.
+### Graph Primitives Seeded
+The four architectural primitives (Boundary, Transduction, Resolution, Trace) have been seeded into the graph via `POST /api/graph/seed-primitives`. These are queryable through the LLM chat tools (`query_potential`, `query_dependencies`).
 
 ### Next Up
+- Connect the hub sections to real functionality (Notes, Meetings, Messaging, Email are still stubs)
+- Link structural expression nodes to the seeded primitive potentials (e.g., link actual schema tables to "Schema Isolation" potential)
+- Explore reflexivity: can the system reason about which primitives apply to a new migration target?
 - Place `.accdb` source files in `databases/accessclone/source/` and `databases/threehorse/source/`
 - Start importing into the new databases
 - Clean up stale feature branches (22 listed)
 - Test batch pipeline end-to-end: extract all → resolve gaps → generate all code against a real database
 - Test .mdb → .accdb conversion end-to-end with a real .mdb file
-- Test runtime form state sync end-to-end: open a form, navigate records, verify `form_control_state` populated and dependent views filter correctly
+- Test runtime form state sync end-to-end
 - OpenClaw skill prototype: export intent graph + form definitions in a format an OpenClaw agent can consume
 
 ---

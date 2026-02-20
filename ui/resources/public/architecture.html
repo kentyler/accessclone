@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Three-Layer Architecture</title>
+  <style>
+    :root {
+      --fg: #1a1a2e;
+      --fg-muted: #555;
+      --fg-light: #888;
+      --bg: #fafafa;
+      --bg-card: #fff;
+      --border: #e0e0e0;
+      --accent: #2563eb;
+      --accent-light: #dbeafe;
+      --layer-c: #7c3aed;
+      --layer-s: #2563eb;
+      --layer-d: #059669;
+      --layer-t: #d97706;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      line-height: 1.7;
+      padding: 2rem 1rem;
+    }
+
+    .container {
+      max-width: 780px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 0.25rem;
+      letter-spacing: -0.02em;
+    }
+
+    .subtitle {
+      font-size: 1rem;
+      color: var(--fg-light);
+      font-style: italic;
+      margin-bottom: 2.5rem;
+    }
+
+    h2 {
+      font-size: 1.35rem;
+      margin-top: 2.5rem;
+      margin-bottom: 0.75rem;
+      letter-spacing: -0.01em;
+    }
+
+    h3 {
+      font-size: 1.1rem;
+      margin-bottom: 0.4rem;
+    }
+
+    p { margin-bottom: 0.9rem; }
+
+    em { font-style: italic; }
+    strong { font-weight: 600; }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .back-link {
+      display: inline-block;
+      margin-bottom: 1.5rem;
+      font-size: 0.9rem;
+      color: var(--fg-light);
+    }
+    .back-link:hover { color: var(--accent); }
+
+    /* Layer cards */
+    .layers {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      margin: 1.5rem 0;
+    }
+
+    .layer-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem 1.5rem;
+    }
+
+    .layer-header {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .layer-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      color: white;
+      font-weight: 700;
+      font-size: 0.85rem;
+      flex-shrink: 0;
+    }
+
+    .layer-icon.c { background: var(--layer-c); }
+    .layer-icon.s { background: var(--layer-s); }
+    .layer-icon.d { background: var(--layer-d); }
+
+    .layer-card p {
+      font-size: 0.95rem;
+      color: var(--fg);
+    }
+
+    .layer-card .deleuze {
+      font-size: 0.88rem;
+      color: var(--fg-muted);
+      margin-bottom: 0.6rem;
+    }
+
+    .layer-arrow {
+      display: flex;
+      justify-content: center;
+      gap: 2.5rem;
+      padding: 0.3rem 0;
+      font-size: 0.8rem;
+      color: var(--fg-light);
+    }
+
+    /* Primitives table */
+    .primitives-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0 1.5rem;
+      font-size: 0.9rem;
+    }
+
+    .primitives-table th {
+      text-align: left;
+      padding: 0.6rem 0.75rem;
+      border-bottom: 2px solid var(--border);
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--fg-light);
+    }
+
+    .primitives-table td {
+      padding: 0.6rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+
+    .primitives-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .primitive-name {
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .primitive-name.boundary { color: var(--layer-c); }
+    .primitive-name.transduction { color: var(--layer-s); }
+    .primitive-name.resolution { color: var(--layer-d); }
+    .primitive-name.trace { color: var(--layer-t); }
+
+    /* Blockquote for key insights */
+    .insight {
+      border-left: 3px solid var(--accent);
+      padding: 0.75rem 1rem;
+      margin: 1.25rem 0;
+      background: var(--accent-light);
+      border-radius: 0 6px 6px 0;
+      font-size: 0.95rem;
+    }
+
+    .insight p:last-child { margin-bottom: 0; }
+
+    /* Section divider */
+    hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 2.5rem 0;
+    }
+
+    /* Responsive */
+    @media (max-width: 600px) {
+      body { padding: 1rem 0.75rem; }
+      h1 { font-size: 1.6rem; }
+      .layer-card { padding: 1rem; }
+      .primitives-table { font-size: 0.82rem; }
+      .primitives-table th,
+      .primitives-table td { padding: 0.4rem 0.5rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <a href="/" class="back-link">&larr; Back to Hub</a>
+
+    <h1>The Three-Layer Architecture</h1>
+    <p class="subtitle">A Deleuzian Reading</p>
+
+    <p>Every existing communication tool collapses a crucial distinction &mdash; it only shows you what the organization <em>is doing now</em> and you have to imagine what it <em>could do</em> or <em>should do</em>. This architecture makes all three visible simultaneously.</p>
+
+    <!-- ── The Three Layers ──────────────────────────────── -->
+
+    <div class="layers">
+
+      <div class="layer-card">
+        <div class="layer-header">
+          <span class="layer-icon c">C</span>
+          <h3>Could Do</h3>
+        </div>
+        <p class="deleuze"><em>The virtual &mdash; the plane of consistency.</em> Think of it as your wildest dreams.</p>
+        <p>Not a list of insights waiting to be surfaced. The full differential field of everything an organization's body of work implies, real but not actualized, containing all the variations, all the connections, all the patterns the work has ever enacted or could enact.</p>
+        <p>This is <em>puissance</em> &mdash; capacity that exists as intensity, not as enumerated possibility. It's the Body without Organs of organizational thinking: unorganized potential that resists premature stratification into any single interpretation. The virtual is not vague &mdash; it's maximally determined as a field of differential relations. Every unrealized implication stands in relation to every other, and those relations constitute the topology of the space.</p>
+      </div>
+
+      <div class="layer-arrow">
+        <span>&darr; selects from</span>
+        <span>&uarr; abstracts to</span>
+      </div>
+
+      <div class="layer-card">
+        <div class="layer-header">
+          <span class="layer-icon s">S</span>
+          <h3>Should Do</h3>
+        </div>
+        <p class="deleuze"><em>The abstract machine &mdash; the diagram.</em> Think of it as the sketches on the back of an envelope.</p>
+        <p>The selective principle that draws from the virtual and orients actualization without yet being actual itself. It's what Deleuze and Guattari call the <em>diagrammatic function</em>: it doesn't represent a pre-existing reality and it doesn't produce a finished one. It pilots the process of stratification.</p>
+        <p>In the system, this is where intellectual operations live &mdash; the acts of distinguishing, connecting, reframing, converging, bounding that recur across expressions without being named. An organization argues about scope in three meetings using different vocabulary; the should-do layer is where "bounding" exists as an operation independent of any particular instance.</p>
+        <p>The abstract machine is what makes <em>this</em> expression <em>this</em> expression rather than some other equally possible one. It's <em>pouvoir</em> operating on <em>puissance</em> &mdash; power exercised as selection from capacity.</p>
+      </div>
+
+      <div class="layer-arrow">
+        <span>&darr; actualizes as</span>
+        <span>&uarr; virtualizes as</span>
+      </div>
+
+      <div class="layer-card">
+        <div class="layer-header">
+          <span class="layer-icon d">D</span>
+          <h3>Doing Now</h3>
+        </div>
+        <p class="deleuze"><em>The concrete assemblage &mdash; the stratum.</em> Think of it as the hurly-burly, the daily grind.</p>
+        <p>The actual note, transcript, message, or email with its specific wording, specific context, specific audience. What has been captured from the flows of the virtual and organized into a functioning arrangement of bodies (participants), tools (communication platforms), statements (arguments, claims, proposals), and practices (workflows, correspondence patterns).</p>
+        <p>It's <em>molar</em> &mdash; organized at scale, recognizable, repeatable. It's also, crucially, <em>territorial</em> &mdash; it has a boundary, a channel, a thread, a specific population of readers and respondents it operates within.</p>
+      </div>
+
+    </div>
+
+    <hr>
+
+    <!-- ── The Four Primitives ───────────────────────────── -->
+
+    <h2>The Minimal Diagram</h2>
+
+    <p>Beneath the three layers, the system operates on three topological primitives and one invariant. These are the generating conditions &mdash; not metaphors for what the system does, but the <em>instruction set</em> that produces its behavior at every level of abstraction.</p>
+
+    <table class="primitives-table">
+      <thead>
+        <tr>
+          <th>Primitive</th>
+          <th>Topological Action</th>
+          <th>Manifestations</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="primitive-name boundary">Boundary</span></td>
+          <td><strong>Enclosure.</strong> Creating a "here" versus a "there" where local rules apply.</td>
+          <td>Schema isolation, tab workspaces, module namespaces, form sections, report bands.</td>
+        </tr>
+        <tr>
+          <td><span class="primitive-name transduction">Transduction</span></td>
+          <td><strong>Isomorphism.</strong> Carrying shape across a boundary into a new medium.</td>
+          <td>SQL conversion, VBA &rarr; ClojureScript, intent extraction, form normalization, graph population.</td>
+        </tr>
+        <tr>
+          <td><span class="primitive-name resolution">Resolution</span></td>
+          <td><strong>Gradient descent.</strong> Using failure as signal to find the path of least resistance.</td>
+          <td>Multi-pass retry loops, dependency resolution, gap decision pipelines, LLM fallback.</td>
+        </tr>
+        <tr>
+          <td><span class="primitive-name trace">Trace</span><br><em style="font-weight:normal; font-size:0.82rem; color: var(--fg-light);">invariant</em></td>
+          <td><strong>Lineage.</strong> Ensuring the "whence" is never lost during the "what."</td>
+          <td>Append-only versioning, event logging, transcript persistence, import history, edge provenance.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>Trace is not a fourth primitive in the same sense &mdash; it's the <em>invariant</em> that all three primitives must preserve. Every Boundary creation must be traceable. Every Transduction must carry provenance. Every Resolution must log its path.</p>
+
+    <hr>
+
+    <!-- ── Bidirectional Movement ────────────────────────── -->
+
+    <h2>Bidirectional Movement</h2>
+
+    <p>The three layers don't just describe different kinds of content. They describe a <em>process</em> &mdash; stratification, the ongoing capture and organization of virtual intensity into actual configuration. And the movement goes both directions.</p>
+
+    <p><strong>Actualization</strong> moves from could-do through should-do to doing-now &mdash; an unrealized potential, shaped by an intellectual operation, becomes a specific expression in a specific medium.</p>
+
+    <p><strong>Deterritorialization</strong> moves back &mdash; when the AI extracts an intention from a particular expression and recognizes it as an operation recurring across many expressions, it's freeing the pattern from its territorial binding. The act of "reframing feature requests as workflow problems" extracted from one person's Slack messages is deterritorialized &mdash; released from that context and available for reterritorialization anywhere in the organization's thinking.</p>
+
+    <div class="insight">
+      <p>The system is a <strong>deterritorialization engine</strong>. It takes stratified, territorialized communication &mdash; notes locked in notebooks, conversations locked in transcripts, messages locked in channels, correspondence locked in inboxes &mdash; and extracts their virtual content, making visible what the organization <em>could do</em> and <em>should do</em> that was always real but never perceptible from inside what it <em>is doing now</em>.</p>
+    </div>
+
+    <hr>
+
+    <!-- ── Reflexivity ───────────────────────────────────── -->
+
+    <h2>The Reflexive Turn</h2>
+
+    <p>The four primitives aren't just a description of the system &mdash; they're <em>stored in the system's own graph</em> as capability nodes. Boundary, Transduction, Resolution, and Trace exist as first-class objects alongside the tables, forms, and code they generate.</p>
+
+    <p>This means the system can inspect its own architecture. Ask it "what actualizes Transduction?" and it traverses the graph to find every conversion pipeline. Ask "what does Trace refine?" and it returns the three primitives whose operations must preserve lineage.</p>
+
+    <p>When the system describes itself, it is performing a Transduction where the source is its own execution logic (the should-do layer) and the target is the graph (the doing-now layer), with the structural logic of the three primitives as the invariant.</p>
+
+    <div class="insight">
+      <p>If you make the virtual legible &mdash; actually creating nodes for structural isomorphisms and emergent orderability &mdash; the system stops being a tool and becomes a <strong>reflexive environment</strong>. It could look at a new, unknown medium and ask: <em>"Which of my existing Transduction primitives can maintain an invariant across this specific Boundary?"</em></p>
+      <p>At that point, the system isn't just migrating data. It is recognizing itself in the mirror of a new problem.</p>
+    </div>
+
+  </div>
+</body>
+</html>

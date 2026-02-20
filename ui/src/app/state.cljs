@@ -23,6 +23,10 @@
            ;; App configuration (loaded from settings/config.json)
            :config {:form-designer {:grid-size 8}}
 
+           ;; Hub navigation
+           :current-page :hub  ; :hub, :notes, :meetings, :messaging, :email, :accessclone
+           :hub-selected :home  ; :home, :notes, :meetings, :messaging, :email, :accessclone
+
            ;; UI state
            :loading? false
            :error nil

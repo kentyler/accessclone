@@ -442,6 +442,129 @@ async function clearGraph(pool) {
   console.log('Graph cleared');
 }
 
+/**
+ * Seed the graph with the four architectural primitives (capabilities)
+ * and their known manifestations (potentials).
+ *
+ * Primitives:
+ *   Boundary  — Enclosure. Creating a "here" vs "there" where local rules apply.
+ *   Transduction — Isomorphism. Carrying shape across a boundary into a new medium.
+ *   Resolution — Gradient descent. Using failure as signal to find the path of least resistance.
+ *   Trace (invariant) — Lineage. Ensuring the "whence" is never lost during the "what."
+ *
+ * Idempotent: safe to call multiple times (upsertNode/upsertEdge handle duplicates).
+ *
+ * @param {Pool} pool
+ * @returns {Promise<Object>} - { capabilities: number, potentials: number, edges: number }
+ */
+async function seedPrimitives(pool) {
+  const stats = { capabilities: 0, potentials: 0, edges: 0 };
+
+  // ── Capability nodes (the four primitives) ──────────────────────────
+  const primitives = [
+    {
+      name: 'Boundary',
+      description: 'Enclosure. Creating a "here" versus a "there" where local rules apply. The topological action of place.',
+      manifestations: [
+        { name: 'Schema Isolation', description: 'PostgreSQL schema-per-database separation — each database gets its own namespace.' },
+        { name: 'Tab Workspace', description: 'Tab-based workspace isolation — each open object gets its own editing context.' },
+        { name: 'Module Namespace', description: 'ClojureScript namespace boundaries — state.cljs, state_form.cljs, state_report.cljs as separate concerns.' },
+        { name: 'Form Section Boundary', description: 'Header/detail/footer sections in forms — each section has its own layout rules and rendering behavior.' },
+        { name: 'Report Band Boundary', description: 'Banded report sections — report-header, page-header, group bands, detail, footers as distinct rendering zones.' },
+      ]
+    },
+    {
+      name: 'Transduction',
+      description: 'Isomorphism. Carrying shape across a boundary into a new medium. The topological action of structure-preserving translation.',
+      manifestations: [
+        { name: 'Access SQL to PostgreSQL Conversion', description: 'Query converter pipeline — regex pass then LLM fallback, preserving query semantics across database dialects.' },
+        { name: 'VBA to ClojureScript Translation', description: 'Module translation — intent extraction then mechanical/LLM code generation, carrying behavior across languages.' },
+        { name: 'Intent Extraction', description: 'Extracting structured intents from VBA source — carrying the "what it does" across the boundary from imperative code to declarative structure.' },
+        { name: 'Form Definition Normalization', description: 'normalize-form-definition coercing types, yes/no values, numbers on load — carrying form structure across the JSON/ClojureScript boundary.' },
+        { name: 'Macro XML to Event Handlers', description: 'Macro conversion — carrying Access macro actions across the boundary into web application event handlers.' },
+        { name: 'Graph Population from Schema', description: 'populateFromSchemas scanning information_schema and producing graph nodes — carrying database structure into the graph medium.' },
+      ]
+    },
+    {
+      name: 'Resolution',
+      description: 'Gradient descent. Using failure as a signal to find the path of least resistance. The topological action of navigating a constraint manifold.',
+      manifestations: [
+        { name: 'Multi-pass Query Import', description: 'Up to 20-pass retry loop — each pass imports what it can, dependency errors signal what to retry next.' },
+        { name: 'Batch Code Generation', description: 'Multi-pass batch generation with dependency retry — skipped modules signal missing dependencies, resolved on subsequent passes.' },
+        { name: 'Gap Decision Pipeline', description: 'Extract → auto-resolve where graph context satisfies references → present remaining gaps to user. Progressive narrowing of the unknown.' },
+        { name: 'LLM Fallback Conversion', description: 'Regex converter tries first; on failure, error message + context sent to LLM. Failure is the signal that selects the next strategy.' },
+        { name: 'Cross-object Lint Validation', description: 'Lint checks record-source, field bindings, combo-box SQL — each failure pinpoints a specific structural mismatch to resolve.' },
+      ]
+    },
+    {
+      name: 'Trace',
+      description: 'Lineage. Ensuring the "whence" is never lost during the "what." The invariant that all three primitives must preserve.',
+      manifestations: [
+        { name: 'Append-only Versioning', description: 'Forms, reports, modules, macros use append-only versioning — every save creates a new version, previous states are never destroyed.' },
+        { name: 'Event Logging', description: 'shared.events table — all errors and significant events logged with source, timestamp, stack trace, database context.' },
+        { name: 'Chat Transcript Persistence', description: 'Transcripts saved per-object — the conversation history that produced a translation or analysis is preserved alongside the result.' },
+        { name: 'Import History', description: 'Import log entries with issue tracking — every import operation recorded with its outcomes, warnings, and resolutions.' },
+        { name: 'Graph Edge Provenance', description: 'Edge status (proposed/confirmed) and proposed_by (llm/user) — the origin and confidence of every relationship is traceable.' },
+      ]
+    }
+  ];
+
+  for (const primitive of primitives) {
+    // Create capability node
+    const capNode = await upsertNode(pool, {
+      node_type: 'capability',
+      name: primitive.name,
+      database_id: null,
+      scope: 'global',
+      origin: 'system',
+      metadata: { description: primitive.description, layer: 'primitive' }
+    });
+    stats.capabilities++;
+
+    // Create potential nodes for each manifestation and link them
+    for (const manifestation of primitive.manifestations) {
+      const potNode = await upsertNode(pool, {
+        node_type: 'potential',
+        name: manifestation.name,
+        database_id: null,
+        scope: 'global',
+        origin: 'system',
+        metadata: { description: manifestation.description }
+      });
+      stats.potentials++;
+
+      // potential --actualizes--> capability
+      await upsertEdge(pool, {
+        from_id: potNode.id,
+        to_id: capNode.id,
+        rel_type: 'actualizes',
+        status: 'confirmed',
+        proposed_by: 'system'
+      });
+      stats.edges++;
+    }
+  }
+
+  // ── Cross-primitive relationships (refines) ─────────────────────────
+  // Trace refines all three primitives — it's the invariant they must preserve
+  const traceNode = await findNode(pool, 'capability', 'Trace', null);
+  for (const name of ['Boundary', 'Transduction', 'Resolution']) {
+    const node = await findNode(pool, 'capability', name, null);
+    if (traceNode && node) {
+      await upsertEdge(pool, {
+        from_id: traceNode.id,
+        to_id: node.id,
+        rel_type: 'refines',
+        metadata: { relationship: 'invariant-of' }
+      });
+      stats.edges++;
+    }
+  }
+
+  console.log(`Primitives seeded: ${stats.capabilities} capabilities, ${stats.potentials} potentials, ${stats.edges} edges`);
+  return stats;
+}
+
 module.exports = {
   populateFromSchemas,
   populateFromForm,
@@ -450,5 +573,6 @@ module.exports = {
   parseReportContent,
   proposePotential,
   confirmPotentialLink,
-  clearGraph
+  clearGraph,
+  seedPrimitives
 };

@@ -13,7 +13,12 @@
             [app.views.tabs :as tabs]
             [app.views.form-editor :as form-editor]
             [app.views.access-database-viewer :as access-db-viewer]
-            [app.views.logs-viewer :as logs-viewer]))
+            [app.views.logs-viewer :as logs-viewer]
+            [app.views.hub :as hub]
+            [app.views.notes :as notes]
+            [app.views.meetings :as meetings]
+            [app.views.messaging :as messaging]
+            [app.views.email :as email]))
 
 (defn- grid-size-selector [local-grid-size]
   [:div.options-section
@@ -283,8 +288,12 @@
               [chat-messages-list messages loading? empty-hint messages-end]
               [chat-input-area input loading? placeholder]])]))})))
 
-(defn app []
+(defn- back-to-hub []
+  [:a.back-to-hub {:on-click #(swap! state/app-state assoc :current-page :hub)} "\u2190 Back to Hub"])
+
+(defn- accessclone-app []
   [:div.app
+   [back-to-hub]
    [header]
    [error-banner]
    [loading-indicator]
@@ -293,3 +302,14 @@
     [sidebar/sidebar]
     [main-area]
     [chat-panel]]])
+
+(defn app []
+  (let [current-page (:current-page @state/app-state)]
+    [:div.app-shell
+     (case current-page
+       :hub         [hub/hub-page]
+       :notes       [notes/notes-page]
+       :meetings    [meetings/meetings-page]
+       :messaging   [messaging/messaging-page]
+       :email       [email/email-page]
+       [accessclone-app])]))

@@ -348,6 +348,20 @@ FROM shared.form_control_state
 WHERE session_id = current_setting('app.session_id', true);
 
 -- ============================================================
+-- Corpus Entries - append-only notes corpus (human + LLM interleaved)
+-- Global (not per-database). parent_id links LLM responses to their triggering human entry.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.corpus_entries (
+    id SERIAL PRIMARY KEY,
+    entry_type VARCHAR(10) NOT NULL CHECK (entry_type IN ('human', 'llm')),
+    content TEXT NOT NULL,
+    parent_id INTEGER REFERENCES shared.corpus_entries(id),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_corpus_created ON shared.corpus_entries(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_corpus_parent ON shared.corpus_entries(parent_id) WHERE parent_id IS NOT NULL;
+
+-- ============================================================
 -- Access Property Catalog - reference of all Access object properties
 -- Tracks what properties exist, which we import, and version support
 -- ============================================================

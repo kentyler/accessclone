@@ -5,7 +5,8 @@
             [app.state :as state]
             [app.transforms.core :as t]
             [app.flows.core :as f]
-            [app.flows.chat :as chat-flow]))
+            [app.flows.chat :as chat-flow]
+            [app.flows.notes :as notes-flow]))
 
 ;; ============================================================
 ;; LEFT MENU
@@ -92,7 +93,7 @@
     [:div.hub-center
      (case selected
        :home         [home-content]
-       :notes        [preview-content "Notes" "Personal and shared notes, organized by topic. Open to use the full editor."]
+       :notes        [preview-content "Notes" "A corpus that writes back. Write entries and an LLM reads each one against everything that came before."]
        :meetings     [preview-content "Meetings" "Schedule, agenda, and meeting notes. Open to manage your calendar."]
        :messaging    [preview-content "Messages" "Direct and group messaging. Open for the full messaging interface."]
        :email        [preview-content "Email" "Email inbox and composition. Open for the full email client."]
@@ -112,7 +113,21 @@
               [:p "Select a section from the menu to preview it, or click Open to go to its full page."]]
        :notes [:div
                [:h4 "Recent Notes"]
-               [:p.hub-right-placeholder "No recent notes."]]
+               (let [entries (take 5 (:notes-entries @state/app-state))]
+                 (if (seq entries)
+                   [:ul.hub-recent-notes-list
+                    (for [entry entries]
+                      ^{:key (:id entry)}
+                      [:li.hub-recent-note
+                       {:class (name (:entry_type entry))
+                        :on-click (fn []
+                                    (swap! state/app-state assoc :current-page :notes)
+                                    (f/run-fire-and-forget! notes-flow/select-entry-flow {:id (:id entry)}))}
+                       (let [line (first (str/split-lines (or (:content entry) "")))]
+                         (if (> (count line) 50)
+                           (str (subs line 0 50) "...")
+                           line))])]
+                   [:p.hub-right-placeholder "No recent notes."]))]
        :meetings [:div
                   [:h4 "Upcoming"]
                   [:p.hub-right-placeholder "No upcoming meetings."]]
@@ -198,8 +213,15 @@
 ;; ============================================================
 
 (defn hub-page []
-  [:div.hub-page
-   [hub-left-menu]
-   [hub-center-content]
-   [hub-right-panel]
-   [hub-chat-panel]])
+  (r/create-class
+    {:component-did-mount
+     (fn [_]
+       ;; Load notes so "Recent Notes" panel has data
+       (f/run-fire-and-forget! notes-flow/load-notes-flow))
+     :reagent-render
+     (fn []
+       [:div.hub-page
+        [hub-left-menu]
+        [hub-center-content]
+        [hub-right-panel]
+        [hub-chat-panel]])}))

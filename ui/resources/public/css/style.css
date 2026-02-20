@@ -317,6 +317,225 @@ body {
   font-size: 0.95rem;
 }
 
+/* ============================================================
+   Notes / Corpus — three-pane layout
+   ============================================================ */
+.notes-page-wrapper {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+.notes-page-wrapper .back-to-hub {
+  padding: 0.5rem 1rem;
+  flex-shrink: 0;
+}
+.notes-page {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Sidebar */
+.notes-sidebar {
+  width: 280px;
+  flex-shrink: 0;
+  background: #f8fafc;
+  border-right: 1px solid var(--gray-200);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.notes-sidebar-header {
+  padding: 0.75rem 1rem;
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--gray-500);
+  border-bottom: 1px solid var(--gray-200);
+}
+.notes-sidebar-list {
+  flex: 1;
+  overflow-y: auto;
+}
+.notes-sidebar-empty {
+  padding: 1.5rem 1rem;
+  color: var(--gray-400);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+.notes-sidebar-item {
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--gray-100);
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: background 0.1s;
+}
+.notes-sidebar-item:hover {
+  background: #eef2ff;
+}
+.notes-sidebar-item.selected {
+  background: #e0e7ff;
+}
+.notes-sidebar-item.human {
+  border-left-color: #3b82f6;
+}
+.notes-sidebar-item.llm {
+  border-left-color: #8b5cf6;
+}
+.notes-sidebar-preview {
+  font-size: 0.85rem;
+  color: var(--gray-700);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.notes-sidebar-time {
+  font-size: 0.75rem;
+  color: var(--gray-400);
+  margin-top: 0.2rem;
+}
+
+/* Entry pane (center — write) */
+.notes-entry-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--gray-200);
+  min-width: 0;
+}
+.notes-entry-header {
+  padding: 0.75rem 1rem;
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--gray-500);
+  border-bottom: 1px solid var(--gray-200);
+}
+.notes-textarea {
+  flex: 1;
+  padding: 1rem;
+  border: none;
+  resize: none;
+  font-family: inherit;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--gray-800);
+  outline: none;
+}
+.notes-textarea::placeholder {
+  color: var(--gray-400);
+}
+.notes-entry-footer {
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--gray-200);
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+.notes-submit-btn {
+  padding: 0.5rem 1.25rem;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.notes-submit-btn:hover:not(:disabled) {
+  background: #2563eb;
+}
+.notes-submit-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.notes-loading-indicator {
+  color: #8b5cf6;
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+/* Read pane (right) */
+.notes-read-pane {
+  width: 400px;
+  flex-shrink: 0;
+  background: #fafafa;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.notes-read-placeholder {
+  padding: 2rem 1.5rem;
+  color: var(--gray-400);
+  font-style: italic;
+  font-size: 0.9rem;
+}
+.notes-read-content {
+  padding: 1.5rem;
+}
+.notes-read-entry.human {
+  border-left: 3px solid #3b82f6;
+  padding-left: 1rem;
+}
+.notes-read-entry.llm {
+  border-left: 3px solid #8b5cf6;
+  padding-left: 1rem;
+}
+.notes-read-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+.notes-read-type {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--gray-500);
+}
+.notes-read-time {
+  font-size: 0.75rem;
+  color: var(--gray-400);
+}
+.notes-read-text {
+  font-size: 0.95rem;
+  line-height: 1.7;
+  color: var(--gray-800);
+  white-space: pre-wrap;
+}
+.notes-read-separator {
+  height: 1px;
+  background: var(--gray-200);
+  margin: 1.5rem 0;
+}
+
+/* Hub right panel — recent notes */
+.hub-recent-notes-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.hub-recent-note {
+  padding: 0.4rem 0;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--gray-600);
+  border-left: 2px solid transparent;
+  padding-left: 0.5rem;
+  transition: color 0.1s;
+}
+.hub-recent-note:hover {
+  color: var(--gray-900);
+}
+.hub-recent-note.human {
+  border-left-color: #3b82f6;
+}
+.hub-recent-note.llm {
+  border-left-color: #8b5cf6;
+}
+
 /* App Layout — AccessClone section */
 .app {
   display: flex;

@@ -122,6 +122,18 @@ The default landing page (`:current-page :hub`). A 3-column layout:
 - Routing in `main.cljs`: `:hub` → `hub-page`, `:accessclone` → `accessclone-app` (with back-to-hub link), stub pages for `:notes`/`:meetings`/`:messaging`/`:email`
 - Standalone architecture page: `ui/resources/public/architecture.html` linked from hub home
 
+### Notes Corpus (ui/src/app/views/notes.cljs)
+An append-only corpus where the human writes entries and an LLM reads each new entry against everything that came before, responding with what changed, connected, or was revealed. Not a chatbot — a second reader's marginalia.
+- **Three-pane layout**: sidebar (entry list), center (write/view entry), right (LLM response)
+- **Database**: `shared.corpus_entries` table — global (not per-database), `entry_type` is `'human'` or `'llm'`, LLM entries have `parent_id` pointing to the human entry they respond to
+- **API**: `GET /api/notes` (list), `GET /api/notes/:id` (entry + response), `POST /api/notes` (create entry, generate LLM response). Mounted in `app.js`, excluded from schema routing middleware.
+- **LLM prompt**: System prompt instructs four unnamed operations — Boundary (what the entry encloses), Transduction (what it converts), Resolution (what it settles or destabilizes), Trace (what it reveals about the corpus topology). Plain prose, no formatting.
+- **Model**: `claude-sonnet-4-20250514`, max_tokens 2048, context is the last 50 entries formatted as `[H]`/`[R]` markers
+- **Frontend**: 6 pure transforms in `transforms/notes.cljs`, 3 flows in `flows/notes.cljs` (load, submit, select), state keys `:notes-entries`, `:notes-selected-id`, `:notes-input`, `:notes-loading?`, `:notes-read-entry`, `:notes-read-response`
+- **Hub integration**: Notes appears in hub left menu, right panel shows 5 most recent entries, "Open" navigates to full page
+- **Graceful degradation**: Works without API key — entries save, no LLM responses generated
+- See `skills/notes-corpus.md` for full architecture documentation
+
 ### Graph Primitives (server/graph/populate.js — seedPrimitives)
 Four architectural primitives seeded as capability nodes in the graph:
 - **Boundary** — Enclosure (schema isolation, tab workspaces, form/report sections)
@@ -248,6 +260,7 @@ See `/skills/` directory for conversion and design guidance:
 - `writing-skills.md` - Meta-guide for writing skill files (cross-platform patterns, checklist)
 - `testing.md` - Full testing guide for LLMs — what tests exist, when to run them, how to add new ones
 - `capability-ontology.md` - Three-layer model (Could Do / Should Do / Doing Now), four primitives (Boundary, Transduction, Resolution, Trace), Deleuzian reading
+- `notes-corpus.md` - Notes feature architecture — append-only corpus with LLM reader, three-pane UI, all files and data flow
 
 ## Testing
 

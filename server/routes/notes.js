@@ -119,7 +119,7 @@ module.exports = function(pool, secrets) {
       }).join('\n\n---\n\n');
 
       // Call Anthropic API
-      const apiKey = secrets.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY;
+      const apiKey = secrets.anthropic?.api_key || process.env.ANTHROPIC_API_KEY;
       if (!apiKey) {
         // No API key — return human entry without LLM response
         return res.json({ entry: humanEntry, response: null });

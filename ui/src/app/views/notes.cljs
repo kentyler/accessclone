@@ -58,58 +58,71 @@
            [:div.notes-sidebar-time (relative-time (:created_at entry))]]))]]))
 
 ;; ============================================================
-;; ENTRY PANE — write new entries
+;; ENTRY PANE — write new entries / view selected prompt
 ;; ============================================================
 
 (defn- notes-entry-pane []
   (let [input (:notes-input @state/app-state)
-        loading? (:notes-loading? @state/app-state)]
+        loading? (:notes-loading? @state/app-state)
+        selected-entry (:notes-read-entry @state/app-state)
+        ;; Show the selected human entry's content when viewing, otherwise the input textarea
+        viewing? (and selected-entry (not (str/blank? (:content selected-entry ""))))]
     [:div.notes-entry-pane
-     [:div.notes-entry-header "Write"]
-     [:textarea.notes-textarea
-      {:value input
-       :placeholder "Write an entry..."
-       :disabled loading?
-       :on-change #(t/dispatch! :set-notes-input (.. % -target -value))
-       :on-key-down (fn [e]
-                      (when (and (= (.-key e) "Enter")
-                                 (.-ctrlKey e))
-                        (.preventDefault e)
-                        (f/run-fire-and-forget! notes-flow/submit-entry-flow)))}]
+     [:div.notes-entry-header
+      [:span (if viewing? "Entry" "Write")]
+      [:div.notes-header-actions
+       (when-not viewing?
+         (if loading?
+           [:span.notes-loading-indicator "Reading the corpus..."]
+           [:button.notes-submit-btn
+            {:on-click #(f/run-fire-and-forget! notes-flow/submit-entry-flow)
+             :disabled (or loading? (str/blank? input))}
+            "Submit (Ctrl+Enter)"]))
+       [:button.notes-new-btn
+        {:on-click (fn []
+                     (t/dispatch! :set-notes-selected nil)
+                     (t/dispatch! :set-notes-read-entry nil nil)
+                     (t/dispatch! :set-notes-input ""))
+         :title "New entry"}
+        "+"]]]
+     (if viewing?
+       [:div.notes-view-content
+        [:div.notes-read-text (:content selected-entry)]]
+       [:textarea.notes-textarea
+        {:value input
+         :placeholder "Write an entry..."
+         :disabled loading?
+         :on-change #(t/dispatch! :set-notes-input (.. % -target -value))
+         :on-key-down (fn [e]
+                        (when (and (= (.-key e) "Enter")
+                                   (.-ctrlKey e))
+                          (.preventDefault e)
+                          (f/run-fire-and-forget! notes-flow/submit-entry-flow)))}])
      [:div.notes-entry-footer
       (if loading?
         [:span.notes-loading-indicator "Reading the corpus..."]
-        [:button.notes-submit-btn
-         {:on-click #(f/run-fire-and-forget! notes-flow/submit-entry-flow)
-          :disabled (or loading? (str/blank? input))}
-         "Submit (Ctrl+Enter)"])]]))
+        (when-not viewing?
+          [:button.notes-submit-btn
+           {:on-click #(f/run-fire-and-forget! notes-flow/submit-entry-flow)
+            :disabled (or loading? (str/blank? input))}
+           "Submit (Ctrl+Enter)"]))]]))
 
 ;; ============================================================
-;; READ PANE — view entry + response
+;; READ PANE — response only
 ;; ============================================================
 
 (defn- notes-read-pane []
-  (let [entry (:notes-read-entry @state/app-state)
-        response (:notes-read-response @state/app-state)]
+  (let [response (:notes-read-response @state/app-state)]
     [:div.notes-read-pane
-     (if entry
+     [:div.notes-entry-header "Response"]
+     (if response
        [:div.notes-read-content
-        [:div.notes-read-entry
-         {:class (name (:entry_type entry))}
+        [:div.notes-read-entry.llm
          [:div.notes-read-meta
-          [:span.notes-read-type (if (= (:entry_type entry) "human") "You" "Response")]
-          [:span.notes-read-time (relative-time (:created_at entry))]]
-         [:div.notes-read-text (:content entry)]]
-        (when response
-          [:<>
-           [:div.notes-read-separator]
-           [:div.notes-read-entry.llm
-            [:div.notes-read-meta
-             [:span.notes-read-type "Response"]
-             [:span.notes-read-time (relative-time (:created_at response))]]
-            [:div.notes-read-text (:content response)]]])]
+          [:span.notes-read-time (relative-time (:created_at response))]]
+         [:div.notes-read-text (:content response)]]]
        [:div.notes-read-placeholder
-        "Select an entry from the sidebar to read it here."])]))
+        "Write an entry to see the corpus respond."])]))
 
 ;; ============================================================
 ;; NOTES PAGE

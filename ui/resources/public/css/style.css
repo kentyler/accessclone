@@ -413,6 +413,37 @@ body {
   letter-spacing: 0.05em;
   color: var(--gray-500);
   border-bottom: 1px solid var(--gray-200);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.notes-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.notes-new-btn {
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--gray-300);
+  border-radius: 4px;
+  background: white;
+  color: var(--gray-500);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.notes-new-btn:hover {
+  background: var(--gray-100);
+  color: var(--gray-700);
+}
+.notes-view-content {
+  flex: 1;
+  padding: 1rem;
+  overflow-y: auto;
 }
 .notes-textarea {
   flex: 1;
@@ -457,14 +488,14 @@ body {
   font-style: italic;
 }
 
-/* Read pane (right) */
+/* Read pane (right half) */
 .notes-read-pane {
-  width: 400px;
-  flex-shrink: 0;
+  flex: 1;
   background: #fafafa;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 .notes-read-placeholder {
   padding: 2rem 1.5rem;

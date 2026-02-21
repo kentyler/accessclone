@@ -6,7 +6,15 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 
 ## Current State
 
-### Just Shipped (2026-02-19)
+### Just Shipped (2026-02-20)
+- **Notes corpus** (PR #32): Append-only corpus where a human writes entries and an LLM reads each new entry against everything that came before. Three-pane UI: sidebar (entry list), center (write/view), right (LLM response). Global (not per-database), chronological, no categories or tags.
+  - Server: `server/routes/notes.js` — API endpoints, LLM prompt (four unnamed operations: boundary, transduction, resolution, trace), corpus context building. Model: Claude Sonnet, max 2048 tokens. Graceful degradation without API key.
+  - Database: `shared.corpus_entries` table with `entry_type` ('human'/'llm'), `parent_id` linking responses to entries.
+  - Frontend: 6 transforms, 3 flows (load, submit, select), three-pane view component. Hub integration shows 5 most recent notes.
+  - Entry pane shows selected entry content in view mode; read pane shows response only; "+" button for new entries.
+- **Notes documentation**: `skills/notes-corpus.md` created with full architecture documentation. Notes section added to CLAUDE.md.
+
+### Previously Shipped (2026-02-19)
 - **Hub home page**: Replaced the top nav bar with a proper hub landing page. 3-column layout: left menu (Home, Notes, Meetings, Messages, Email, AccessClone), center content (changes by selection), right contextual panel, collapsible chat. Default page is now `:hub` instead of `:accessclone`. Each section has an "Open" button that navigates to its full page; full pages have "Back to Hub" links.
   - Files: `ui/src/app/views/hub.cljs` (new), `ui/src/app/views/main.cljs` (restructured routing, removed `site-nav`), stub pages updated with back-to-hub links, CSS additions in `style.css`.
   - State: `:current-page :hub` (default), `:hub-selected :home` in `app-state`.
@@ -55,31 +63,10 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 - **Tested against two databases**: Northwind and a second Access database both import fully (tables, forms, reports, queries, modules, macros) without errors.
 
 ### In Progress / Uncommitted
-Files from 2026-02-19 session (hub + primitives work):
-- `ui/src/app/views/hub.cljs` (new)
-- `ui/src/app/views/main.cljs` (restructured routing)
-- `ui/src/app/views/notes.cljs`, `meetings.cljs`, `messaging.cljs`, `email.cljs` (back-to-hub links)
-- `ui/src/app/state.cljs` (hub state keys)
-- `ui/resources/public/css/style.css` (hub styles)
-- `ui/resources/public/architecture.html` (new standalone page)
-- `server/graph/populate.js` (seedPrimitives function)
-- `server/routes/graph.js` (seed-primitives endpoint)
-- `skills/capability-ontology.md` (rewritten)
-
-Plus 5 uncommitted files from prior work (pre-existing before 2026-02-18 session):
-- `server/lib/vba-intent-extractor.js` (8 lines changed)
-- `ui/src/app/flows/app.cljs` (392 lines changed)
-- `ui/src/app/state_query.cljs` (2 lines changed)
-- `ui/src/app/views/access_database_viewer.cljs` (65 lines changed)
-- `scripts/dump-form-definitions.js` (untracked)
-
-**Review these before starting new work** — decide whether to commit, discard, or branch them.
-
-### Graph Primitives Seeded
-The four architectural primitives (Boundary, Transduction, Resolution, Trace) have been seeded into the graph via `POST /api/graph/seed-primitives`. These are queryable through the LLM chat tools (`query_potential`, `query_dependencies`).
+Working tree is clean as of 2026-02-20. All hub, primitives, and notes work has been committed and pushed.
 
 ### Next Up
-- Connect the hub sections to real functionality (Notes, Meetings, Messaging, Email are still stubs)
+- Connect remaining hub sections to real functionality (Meetings, Messaging, Email are still stubs — Notes is now live)
 - Link structural expression nodes to the seeded primitive potentials (e.g., link actual schema tables to "Schema Isolation" potential)
 - Explore reflexivity: can the system reason about which primitives apply to a new migration target?
 - Place `.accdb` source files in `databases/accessclone/source/` and `databases/threehorse/source/`

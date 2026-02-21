@@ -13,6 +13,9 @@
 
 ## Completed
 
+- [x] **Notes corpus** — Append-only corpus with LLM response (PR #32). Three-pane UI, global chronological entries, four unnamed LLM operations. (2026-02-20)
+- [x] **Hub home page** — 3-column hub landing page with three-layer architecture, standalone architecture page, graph primitives seeded. (2026-02-19)
+- [x] **Capability ontology rename** — Graph node type `intent` → `potential`, `application` removed (PR #31). (2026-02-18)
 - [x] **Batch pipeline** — App Viewer 3-step pipeline: Extract All → Resolve Gaps → Generate All Code with multi-pass dependency retry. (2026-02-17)
 - [x] **Automatic .mdb → .accdb conversion** — `convert_mdb.ps1` converts .mdb files silently during import. (2026-02-17)
 - [x] **Automatic AutoExec disabling** — `disable_autoexec.ps1` handles AutoExec macros via DAO. (2026-02-17)

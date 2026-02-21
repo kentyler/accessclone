@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Notes corpus** (PR #32) — append-only corpus where a human writes entries and an LLM reads each new entry against everything that came before, responding with what changed, connected, or was revealed. Three-pane UI, global (not per-database), graceful degradation without API key.
+- **Hub home page** — replaced top nav bar with a 3-column hub landing page (left menu, center content, right contextual panel). Default page is now `:hub`. Includes three-layer architecture presentation (Could Do / Should Do / Doing Now) and standalone architecture page.
+- **Graph primitives seeded** — four architectural primitives (Boundary, Transduction, Resolution, Trace) seeded as capability nodes with 21 potential nodes and linking edges. Idempotent `POST /api/graph/seed-primitives` endpoint.
+- **Capability ontology rename** (PR #31) — graph node type `intent` renamed to `potential` throughout. Three-layer model: capability → potential → expression. `application` node type removed.
 - **File picker for import** — planned alternative to the full machine scan when importing Access databases
 
 ## [0.4.0] - 2026-02-17

@@ -221,8 +221,7 @@ ClojureScript with Reagent (a React wrapper). Single-page app.
 | `access_database_viewer.cljs` | Import UI | Scans Access DB, shows objects, drives import workflow. |
 | `sidebar.cljs` | Navigation | Object tree grouped by type. Database switcher. |
 | `tabs.cljs` | Tab bar | Manages open tabs, reactivation, close. |
-| `hub.cljs` | Hub home | Hub landing page: left menu, center content (3-layer architecture), right panel, chat. Default page. |
-| `main.cljs` | Layout | Top-level routing: `:hub` → hub page, `:accessclone` → full AccessClone app, stub pages for notes/meetings/messaging/email. |
+| `main.cljs` | Layout | Top-level app shell, options bar, chat panel. |
 | `editor_utils.cljs` | Shared | Grid snapping, field resolution, value formatting, `display-text` (returns hiccup with &-hotkey underlines), `render-hotkey-text`, `strip-access-hotkey`, `extract-hotkey`. |
 | `expressions.cljs` | Shared | Frontend expression evaluation. |
 | `logs_viewer.cljs` | Diagnostics | Event log viewer. |

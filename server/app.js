@@ -30,7 +30,6 @@ const transcriptsRoutes = require('./routes/transcripts');
 const formStateRoutes = require('./routes/form-state');
 const appRoutes = require('./routes/app');
 const pipelineRoutes = require('./routes/pipeline');
-const notesRoutes = require('./routes/notes');
 
 function createApp({
   pool,
@@ -69,8 +68,7 @@ function createApp({
         req.path.startsWith('/import-issues') ||
         req.path.startsWith('/form-state') ||
         req.path.startsWith('/app') ||
-        req.path.startsWith('/pipeline') ||
-        req.path.startsWith('/notes')) {
+        req.path.startsWith('/pipeline')) {
       return next();
     }
 
@@ -122,8 +120,6 @@ function createApp({
   app.use('/api/form-state', formStateRoutes(pool));
   app.use('/api/app', appRoutes(pool));
   app.use('/api/pipeline', pipelineRoutes(pool, secrets));
-  app.use('/api/notes', notesRoutes(pool, secrets, settingsDir));
-
   return { app, databasesRouter };
 }
 

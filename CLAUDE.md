@@ -112,31 +112,6 @@ AutoExec macros are now handled automatically by the import pipeline:
 - `export_table.ps1` uses a custom `ConvertTo-SafeJson` serializer instead of `ConvertTo-Json` — PowerShell's built-in cmdlet has known bugs with embedded double quotes in large strings (e.g. HTML in memo fields). The custom serializer handles escaping of `"`, `\`, `\r`, `\n`, `\t` correctly.
 - `list_modules.ps1`, `export_module.ps1`, `export_modules_batch.ps1` handle Form_/Report_ class modules (VBE type 100) with a design-view fallback: if `CodeModule.CountOfLines` is inaccessible (common with `AutomationSecurity=3`), the script opens the form/report in design view via `DoCmd.OpenForm`/`DoCmd.OpenReport` to force the code module to load, then closes it after reading. The listing script only skips type 100 modules with *confirmed* zero lines (not inaccessible ones).
 
-### Hub Page (ui/src/app/views/hub.cljs)
-The default landing page (`:current-page :hub`). A 3-column layout:
-- **Left menu** (`hub-left-menu`): Home, Notes, Meetings, Messages, Email, AccessClone. Clicking selects (changes center/right). "Open" buttons navigate to full pages via `:current-page`.
-- **Center content** (`hub-center-content`): Home shows the three-layer architecture (Could Do / Should Do / Doing Now) with Deleuzian reading. Other sections show preview text.
-- **Right panel** (`hub-right-panel`): Contextual sidebar varying by selection.
-- **Chat panel** (`hub-chat-panel`): Shares the same chat state keys as the main chat panel.
-- State: `:current-page :hub` (default), `:hub-selected :home` (which section is highlighted)
-- Routing in `main.cljs`: `:hub` → `hub-page`, `:accessclone` → `accessclone-app` (with back-to-hub link), stub pages for `:notes`/`:meetings`/`:messaging`/`:email`
-- Standalone architecture page: `ui/resources/public/architecture.html` linked from hub home
-
-### Notes Corpus (ui/src/app/views/notes.cljs)
-An append-only corpus where the human writes entries and an LLM reads each new entry against everything that came before, responding with what changed, connected, or was revealed. Not a chatbot — a second reader's marginalia.
-- **Unified corpus schema**: `shared.corpus_entries` is a single table for all entry types. The `medium` column (default `'note'`) distinguishes notes, messages, emails, and meetings. The `entry_type` constraint allows `'human'`, `'llm'`, or `'system'`. Additional columns: `author`, `recipients`, `thread_id` (FK self-ref), `session_id`, `subject`, `metadata` (JSONB) — all nullable, all defaulting to NULL for notes.
-- **Three-pane layout**: sidebar (entry list), center (write/view entry), right (LLM responses with conditions)
-- **Database**: `shared.corpus_entries` table — global (not per-database). LLM entries have `parent_id` pointing to the human entry they respond to. Columns: `temperature` (REAL, on LLM rows), `sampling_strategy` (VARCHAR(30), on human rows), `routing_reasoning` (TEXT, on human rows)
-- **API**: `GET /api/notes` (list), `GET /api/notes/:id` (entry + responses), `POST /api/notes` (create entry, route via secretary, generate LLM responses), `POST /api/notes/:id/regenerate` (re-generate response with user-chosen model/temperature/sampling). Mounted in `app.js`, excluded from schema routing middleware.
-- **Response conditions**: Each response card shows editable dropdowns for Model (from registry), Temperature (presets + actual), Sampling (similarity/distance/random/time_range/mixed) plus a Retry button. Conditions read from response (model, temp) and parent human entry (sampling, reasoning).
-- **Regenerate**: `POST /api/notes/:id/regenerate` takes `{ model_name, temperature, sampling }`, looks up model in registry, re-embeds entry, executes chosen sampling, calls LLM, appends new response as sibling. LLM errors return 502 with message (not generic 500).
-- **Frontend**: 8 pure transforms in `transforms/notes.cljs`, 4 flows in `flows/notes.cljs` (load, submit, select, regenerate), state keys `:notes-entries`, `:notes-selected-id`, `:notes-input`, `:notes-loading?`, `:notes-read-entry`, `:notes-read-responses`, `:notes-regenerating?`
-- **Hub integration**: Notes appears in hub left menu, right panel shows 5 most recent entries, "Open" navigates to full page
-- **Graceful degradation**: Works without API key — entries save, no LLM responses generated
-- **Cross-medium retrieval**: semantic retrieval queries all corpus_entries by vector similarity without filtering by medium — notes, messages, emails, and meetings are all reachable as context
-- See `skills/notes-corpus.md` for full architecture documentation
-- See `docs/corpus-medium-plans.md` for detailed plans on messages, email, and meetings mediums
-
 ### Graph Primitives (server/graph/populate.js — seedPrimitives)
 Four architectural primitives seeded as capability nodes in the graph:
 - **Boundary** — Enclosure (schema isolation, tab workspaces, form/report sections)
@@ -263,7 +238,6 @@ See `/skills/` directory for conversion and design guidance:
 - `writing-skills.md` - Meta-guide for writing skill files (cross-platform patterns, checklist)
 - `testing.md` - Full testing guide for LLMs — what tests exist, when to run them, how to add new ones
 - `capability-ontology.md` - Three-layer model (Could Do / Should Do / Doing Now), four primitives (Boundary, Transduction, Resolution, Trace), Deleuzian reading
-- `notes-corpus.md` - Notes feature architecture — append-only corpus with LLM reader, three-pane UI, all files and data flow
 
 ## Testing
 

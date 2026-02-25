@@ -14,12 +14,7 @@
             [app.views.form-editor :as form-editor]
             [app.views.access-database-viewer :as access-db-viewer]
             [app.views.logs-viewer :as logs-viewer]
-            [app.views.hub :as hub]
-            [app.views.notes :as notes]
-            [app.views.llm-registry :as llm-registry]
-            [app.views.meetings :as meetings]
-            [app.views.messaging :as messaging]
-            [app.views.email :as email]))
+))
 
 (defn- grid-size-selector [local-grid-size]
   [:div.options-section
@@ -392,13 +387,5 @@
     [chat-panel]]])
 
 (defn app []
-  (let [current-page (:current-page @state/app-state)]
-    [:div.app-shell
-     (case current-page
-       :hub         [hub/hub-page]
-       :notes       [notes/notes-page]
-       :llm-registry [llm-registry/llm-registry-page]
-       :meetings    [meetings/meetings-page]
-       :messaging   [messaging/messaging-page]
-       :email       [email/email-page]
-       [accessclone-app])]))
+  [:div.app-shell
+   [accessclone-app]])

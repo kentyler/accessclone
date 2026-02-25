@@ -19,7 +19,7 @@
             [app.transforms.logs :as logs]
             [app.transforms.sql-function :as sql-function]
             [app.transforms.app :as app]
-            [app.transforms.notes :as notes]))
+))
 
 ;; ============================================================
 ;; TRANSFORM REGISTRY
@@ -155,15 +155,7 @@
    :set-module-pipeline-statuses app/set-module-pipeline-statuses
    :set-pipeline-running         app/set-pipeline-running
 
-   ;; Notes/Corpus domain (8)
-   :set-notes-entries       notes/set-notes-entries
-   :add-notes-entry         notes/add-notes-entry
-   :set-notes-selected      notes/set-notes-selected
-   :set-notes-input         notes/set-notes-input
-   :set-notes-loading       notes/set-notes-loading
-   :set-notes-read-entry    notes/set-notes-read-entry
-   :append-notes-response   notes/append-notes-response
-   :set-notes-regenerating  notes/set-notes-regenerating})
+})
 
 ;; ============================================================
 ;; DISPATCH

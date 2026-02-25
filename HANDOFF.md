@@ -6,7 +6,10 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 
 ## Current State
 
-### Just Shipped (2026-02-24)
+### Just Shipped (2026-02-25)
+- **Stripped Notes/Hub/Corpus code**: Removed hub.cljs, notes.cljs, llm_registry.cljs, meetings.cljs, messaging.cljs, email.cljs, flows/notes.cljs, transforms/notes.cljs, server/routes/notes.js, server/lib/llm-router.js, server/lib/embeddings.js, skills/notes-corpus.md, docs/corpus-medium-plans.md. Removed corpus_entries/corpus_retrievals tables and pgvector from schema.js. Removed llm-registry from config.json. Cleaned CSS (~750 lines), CLAUDE.md, codebase-guide.md. AccessClone is now purely the Access→PostgreSQL conversion tool. Historical references in sessions below are for context only.
+
+### Previously Shipped (2026-02-24)
 - **Pre-import database assessment**: Deterministic analysis of Access databases before import. `POST /api/access-import/assess` checks scan data for structural issues (reserved words, missing PKs), design issues (wide tables, empty unreferenced tables, missing relationships), and complexity issues (large VBA modules, crosstab queries, naming inconsistency). Results appear as an interactive widget in the chat panel.
   - Server: `server/routes/access-import/assess.js` — assessment endpoint with PG reserved word list, naming pattern detection, relationship heuristics.
   - PowerShell: `scripts/access/list_relationships.ps1` — extracts Access relationships via DAO, wired into `GET /api/access-import/database`.

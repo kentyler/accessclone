@@ -23,8 +23,8 @@
            ;; App configuration (loaded from settings/config.json)
            :config {:form-designer {:grid-size 8}}
 
-           ;; Hub navigation
-           :current-page :hub  ; :hub, :notes, :meetings, :messaging, :email, :accessclone
+           ;; Page navigation
+           :current-page :accessclone  ; :accessclone (default), :hub, :notes, :meetings, :messaging, :email
            :hub-selected :home  ; :home, :notes, :meetings, :messaging, :email, :accessclone
 
            ;; Notes/corpus state

@@ -380,12 +380,8 @@
               [chat-messages-list messages loading? empty-hint messages-end]
               [chat-input-area input loading? placeholder]])]))})))
 
-(defn- back-to-hub []
-  [:a.back-to-hub {:on-click #(swap! state/app-state assoc :current-page :hub)} "\u2190 Back to Hub"])
-
 (defn- accessclone-app []
   [:div.app
-   [back-to-hub]
    [header]
    [error-banner]
    [loading-indicator]

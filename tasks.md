@@ -2,6 +2,7 @@
 
 ## Pending
 
+- [ ] **Implement "Fix if possible" import actions** — Wire checked assessment findings into the import flow: skip empty unreferenced tables, auto-create foreign keys, install tablefunc extension for crosstab queries, rename reserved-word tables.
 - [ ] **Add file picker option for import mode** — Add a file picker as an alternative to the full machine scan when importing Access databases. Users should be able to directly select a .accdb/.mdb file instead of having their entire machine scanned for database files.
 - [ ] **Test batch pipeline end-to-end** — Run extract all → resolve gaps → generate all code against a real database and verify results.
 - [ ] **Test .mdb → .accdb conversion end-to-end** — Test with a real .mdb file to verify the conversion pipeline works.
@@ -13,6 +14,8 @@
 
 ## Completed
 
+- [x] **Pre-import database assessment** — Deterministic assessment endpoint, relationship extraction, interactive widget in chat panel, LLM-enhanced analysis, AI agent skill file. (2026-02-24)
+- [x] **Unified corpus schema** — Medium column, multi-model LLM routing with secretary pattern, embeddings, regenerate with model/temperature/sampling controls. (2026-02-24)
 - [x] **Notes corpus** — Append-only corpus with LLM response (PR #32). Three-pane UI, global chronological entries, four unnamed LLM operations. (2026-02-20)
 - [x] **Hub home page** — 3-column hub landing page with three-layer architecture, standalone architecture page, graph primitives seeded. (2026-02-19)
 - [x] **Capability ontology rename** — Graph node type `intent` → `potential`, `application` removed (PR #31). (2026-02-18)

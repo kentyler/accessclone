@@ -6,7 +6,21 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 
 ## Current State
 
-### Just Shipped (2026-02-20)
+### Just Shipped (2026-02-24)
+- **Pre-import database assessment**: Deterministic analysis of Access databases before import. `POST /api/access-import/assess` checks scan data for structural issues (reserved words, missing PKs), design issues (wide tables, empty unreferenced tables, missing relationships), and complexity issues (large VBA modules, crosstab queries, naming inconsistency). Results appear as an interactive widget in the chat panel.
+  - Server: `server/routes/access-import/assess.js` — assessment endpoint with PG reserved word list, naming pattern detection, relationship heuristics.
+  - PowerShell: `scripts/access/list_relationships.ps1` — extracts Access relationships via DAO, wired into `GET /api/access-import/database`.
+  - Frontend: 3 transforms (`set-assessment`, `toggle-assessment-check`, `clear-assessment`), `run-assessment-flow` in `flows/ui.cljs`. Assessment triggers on target DB selection and after source DB scan loads; guards against re-running.
+  - Widget: collapsible sections (structural/design/complexity), radio buttons ("Import as-is" / "Fix if possible"), single Import button. Button label changes based on mode.
+  - LLM-enhanced: after deterministic assessment, findings + scan summary auto-sent to LLM for domain-aware analysis. Assessment context threaded into chat system prompt via `assessment_context` in `state.cljs` and `chat/index.js`.
+  - "Fix if possible" captures user intent via checkboxes but fixes don't execute yet (follow-up feature).
+- **AI agent import skill**: `skills/ai-import.md` documents two paths — full-pipeline (Claude Code, local machine) and post-extraction (Codex, cloud sandbox) — with complete API reference, PowerShell scripts table, and gotchas.
+- **Unified corpus schema**: `shared.corpus_entries` expanded with `medium` column (default 'note'), plus `author`, `recipients`, `thread_id`, `session_id`, `subject`, `metadata` (JSONB). Partial indexes for zero cost on existing notes. All new columns nullable with defaults.
+- **Multi-model LLM routing**: Secretary model (Claude Opus) routes entries to the most appropriate responder. LLM registry in `settings/config.json` defines 4 models (Claude Opus, Claude Sonnet, GPT-5.2, Gemini 3.1 Pro). `server/lib/llm-router.js` handles multi-provider dispatch. `server/lib/embeddings.js` for pgvector-backed semantic retrieval.
+- **Regenerate responses**: `POST /api/notes/:id/regenerate` with user-chosen model, temperature, and sampling strategy. Response conditions UI with editable dropdowns per card.
+- **Frontend**: LLM registry view (`llm_registry.cljs`), sidebar improvements, hub tweaks, 8 notes transforms, 4 notes flows.
+
+### Previously Shipped (2026-02-20)
 - **Notes corpus** (PR #32): Append-only corpus where a human writes entries and an LLM reads each new entry against everything that came before. Three-pane UI: sidebar (entry list), center (write/view), right (LLM response). Global (not per-database), chronological, no categories or tags.
   - Server: `server/routes/notes.js` — API endpoints, LLM prompt (four unnamed operations: boundary, transduction, resolution, trace), corpus context building. Model: Claude Sonnet, max 2048 tokens. Graceful degradation without API key.
   - Database: `shared.corpus_entries` table with `entry_type` ('human'/'llm'), `parent_id` linking responses to entries.
@@ -63,9 +77,10 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 - **Tested against two databases**: Northwind and a second Access database both import fully (tables, forms, reports, queries, modules, macros) without errors.
 
 ### In Progress / Uncommitted
-Working tree is clean as of 2026-02-20. All hub, primitives, and notes work has been committed and pushed.
+Working tree is clean as of 2026-02-24. All assessment, corpus, and routing work has been committed and pushed.
 
 ### Next Up
+- **Implement "Fix if possible" import actions** — wire checked assessment findings into the import flow (skip empty tables, auto-create FKs, install tablefunc, rename reserved words)
 - Connect remaining hub sections to real functionality (Meetings, Messaging, Email are still stubs — Notes is now live)
 - Link structural expression nodes to the seeded primitive potentials (e.g., link actual schema tables to "Schema Isolation" potential)
 - Explore reflexivity: can the system reason about which primitives apply to a new migration target?
@@ -109,8 +124,9 @@ Working tree is clean as of 2026-02-20. All hub, primitives, and notes work has 
 ### Test Coverage
 - `server/__tests__/query-converter.test.js` — 95 tests, comprehensive. Touch the converter? Run these.
 - `server/__tests__/vba-stub-generator.test.js` — stub generator tests.
+- `server/__tests__/llm-router.test.js` — LLM router tests (multi-provider dispatch, model registry).
 - No tests for route handlers. These are tested manually via the import pipeline.
-- Frontend has no automated tests. Verify with `cd ui && npx shadow-cljs compile app` (should show only 2 harmless `no.en.core` redef warnings).
+- Frontend has no automated tests. Verify with `cd ui && npx shadow-cljs compile app` (should show only 5 harmless warnings: 2 `no.en.core` redefs + 3 others).
 
 ---
 

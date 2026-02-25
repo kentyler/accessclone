@@ -8,6 +8,7 @@
             [app.flows.navigation :as nav]
             [app.flows.ui :as ui-flow]
             [app.flows.chat :as chat-flow]
+            [cljs-http.client :as http]
             [app.flows.module :as module-flow]
             [app.views.sidebar :as sidebar]
             [app.views.tabs :as tabs]
@@ -330,6 +331,28 @@
       [:div.message-content.typing "Thinking..."]])
    [:div {:ref #(reset! messages-end %)}]])
 
+(defn- chat-action-bar [loading? has-messages?]
+  [:div.chat-action-bar
+   [:button.chat-analyze
+    {:on-click #(state/run-analyze!)
+     :disabled loading?}
+    "Analyze"]
+   (when has-messages?
+     [:button.chat-clear
+      {:on-click (fn []
+                   (swap! state/app-state assoc :chat-messages [])
+                   (when-let [chat-tab (:chat-tab @state/app-state)]
+                     (let [obj-name (:name chat-tab)
+                           obj-type (name (:type chat-tab))]
+                       (when obj-name
+                         (http/put (str state/api-base "/api/transcripts/"
+                                        (js/encodeURIComponent obj-type) "/"
+                                        (js/encodeURIComponent obj-name))
+                                   {:json-params {:transcript []}
+                                    :headers (state/db-headers)})))))
+       :disabled loading?}
+      "Clear Analysis"])])
+
 (defn- chat-input-area [input loading? placeholder]
   [:div.chat-input-area
    [:textarea.chat-input
@@ -373,6 +396,7 @@
            (when open?
              [:<>
               [chat-messages-list messages loading? empty-hint messages-end]
+              [chat-action-bar loading? (seq messages)]
               [chat-input-area input loading? placeholder]])]))})))
 
 (defn- accessclone-app []

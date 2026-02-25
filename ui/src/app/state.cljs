@@ -374,24 +374,32 @@
   [tab]
   (let [obj-name (or (:name tab) (tab->object-name tab))
         obj-type (object-type->transcript-type (:type tab))]
+    ;; Always clear immediately so stale content never shows
+    (swap! app-state assoc :chat-tab (assoc tab :name obj-name)
+                            :chat-messages [])
     (when obj-name
-      (swap! app-state assoc :chat-tab (assoc tab :name obj-name))
-      (go
-        (let [response (<! (http/get (str api-base "/api/transcripts/"
-                                          (js/encodeURIComponent obj-type) "/"
-                                          (js/encodeURIComponent obj-name))
-                                     {:headers (db-headers)}))]
-          (if (and (:success response)
-                   (seq (get-in response [:body :transcript])))
-            (swap! app-state assoc :chat-messages
-                   (vec (map #(select-keys % [:role :content])
-                             (get-in response [:body :transcript]))))
-            (do
-              (swap! app-state assoc :chat-messages [])
-              ;; Auto-analyze all object types with no transcript
-              (when (#{:reports :forms :sql-functions :tables :queries :modules :macros} (:type tab))
-                (swap! app-state assoc :auto-analyze-pending true)
-                (maybe-auto-analyze!)))))))))
+      (let [request-tab {:type (:type tab) :id (:id tab)}]
+        (go
+          (let [response (<! (http/get (str api-base "/api/transcripts/"
+                                            (js/encodeURIComponent obj-type) "/"
+                                            (js/encodeURIComponent obj-name))
+                                       {:headers (db-headers)}))
+                current-tab (:chat-tab @app-state)]
+            ;; Only apply if the user hasn't switched tabs while we were fetching
+            (when (and (= (:type current-tab) (:type request-tab))
+                       (= (:id current-tab) (:id request-tab)))
+              (if (and (:success response)
+                       (seq (get-in response [:body :transcript])))
+                (swap! app-state assoc :chat-messages
+                       (vec (map #(select-keys % [:role :content])
+                                 (get-in response [:body :transcript]))))
+                (do
+                  (swap! app-state assoc :chat-messages [])
+                  ;; Auto-analyze all object types with no transcript
+                  (when (#{:reports :forms :sql-functions :tables :queries :modules :macros} (:type tab))
+                    (swap! app-state assoc :auto-analyze-pending true)
+                    (maybe-auto-analyze!)))))))))))
+
 
 ;; Tabs
 (defn open-object!
@@ -1219,8 +1227,10 @@
         (let [active-tab (:active-tab @app-state)
               ;; Form context: record source + full definition when viewing a form
               form-def (get-in @app-state [:form-editor :current])
+              form-name (:name (:chat-tab @app-state))
               form-context (when (= (:type active-tab) :forms)
                              (cond-> {}
+                               form-name (assoc :form_name form-name)
                                (:record-source form-def) (assoc :record_source (:record-source form-def))
                                form-def (assoc :definition (clj->js form-def))))
               ;; Report context when viewing a report
@@ -1356,9 +1366,10 @@
                      false)]
       (when has-def?
         (swap! app-state dissoc :auto-analyze-pending)
-        (let [prompt (case tab-type
-                       :reports "Briefly describe this report's structure and purpose. Note any potential issues such as missing field bindings, empty bands, layout problems, or other concerns."
-                       :forms   "Briefly describe this form's structure and purpose. Note any potential issues such as missing field bindings, empty sections, layout problems, or other concerns."
+        (let [obj-name (or (:name (:chat-tab @app-state)) (tab->object-name active-tab))
+              prompt (case tab-type
+                       :reports (str "This is the report \"" obj-name "\". Briefly describe its structure and purpose. Note any potential issues such as missing field bindings, empty bands, layout problems, or other concerns.")
+                       :forms   (str "This is the form \"" obj-name "\". Briefly describe its structure and purpose. Note any potential issues such as missing field bindings, empty sections, layout problems, or other concerns.")
                        :sql-functions (let [func (first (filter #(= (:id %) (:id active-tab))
                                                                (get-in @app-state [:objects :sql-functions])))]
                                         (str "Analyze this SQL function and briefly describe its purpose, parameters, and return type. "
@@ -1397,6 +1408,13 @@
           (when prompt
             (set-chat-input! prompt)
             (send-chat-message!)))))))
+
+(defn run-analyze!
+  "Trigger analysis for the current active tab. Clears existing messages first
+   so the analysis prompt doesn't duplicate."
+  []
+  (swap! app-state assoc :chat-messages [] :auto-analyze-pending true)
+  (maybe-auto-analyze!))
 
 (defn check-restore-ui-state!
   "Check if we should restore UI state (called after each object type loads)"

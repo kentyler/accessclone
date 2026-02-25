@@ -46,8 +46,8 @@ module.exports = function(pool, secrets) {
       let formContext = '';
       if (form_context) {
         if (form_context.definition) {
-          const summary = summarizeDefinition(form_context.definition, 'form');
-          formContext = `\n\nThe user is currently viewing a form in Design view. Here is the form structure:\n${summary}`;
+          const summary = summarizeDefinition(form_context.definition, 'form', form_context.form_name);
+          formContext = `\n\nThe user is currently viewing this form in Design view. Here is the form structure:\n${summary}`;
         }
         if (form_context.record_source) {
           formContext += `\n\nThe form's record source is "${form_context.record_source}". You have tools available:
@@ -62,8 +62,8 @@ Use search_records when users want to FIND specific items. Use analyze_data when
       // Build report context for the system prompt
       let reportContext = '';
       if (report_context?.definition) {
-        const summary = summarizeDefinition(report_context.definition, 'report');
-        reportContext = `\n\nThe user is currently viewing a report in Design view. Here is the report structure:\n${summary}`;
+        const summary = summarizeDefinition(report_context.definition, 'report', report_context.report_name);
+        reportContext = `\n\nThe user is currently viewing this report in Design view. Here is the report structure:\n${summary}`;
       }
 
       // Table context (when viewing a table)

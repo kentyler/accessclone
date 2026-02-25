@@ -5,10 +5,10 @@
 /**
  * Summarize a form or report definition into compact text for the LLM.
  */
-function summarizeDefinition(definition, objectType) {
+function summarizeDefinition(definition, objectType, objectName) {
   if (!definition) return '';
 
-  const name = definition.name || definition.caption || '(unnamed)';
+  const name = objectName || definition.name || definition.caption || '(unnamed)';
   const recordSource = definition['record-source'] || definition.recordSource || '';
   const lines = [];
 

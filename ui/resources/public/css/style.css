@@ -2278,6 +2278,48 @@ body {
   cursor: not-allowed;
 }
 
+.chat-action-bar {
+  padding: 0.25rem 1rem;
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+.chat-analyze {
+  padding: 0.3rem 0.75rem;
+  background: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.chat-analyze:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+.chat-analyze:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chat-clear {
+  padding: 0.3rem 0.75rem;
+  background: var(--gray-100);
+  color: var(--gray-600);
+  border: 1px solid var(--gray-300);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.chat-clear:hover:not(:disabled) {
+  background: var(--gray-200);
+}
+.chat-clear:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ============================================================
    TABLE VIEWER
    ============================================================ */

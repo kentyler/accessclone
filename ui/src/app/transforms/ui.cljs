@@ -1,6 +1,6 @@
 (ns app.transforms.ui
   "Pure UI transforms — (state, args) -> state.
-   16 transforms covering loading, error, database selection, sidebar, objects, config, context menu.")
+   19 transforms covering loading, error, database selection, sidebar, objects, config, context menu, assessment.")
 
 ;; Loading / Error
 (defn set-loading [state loading?]
@@ -62,3 +62,24 @@
 
 (defn hide-context-menu [state]
   (assoc-in state [:context-menu :visible?] false))
+
+;; Pre-import assessment
+(defn set-assessment [state findings & [scan-summary]]
+  (assoc state :assessment-findings findings
+               :assessment-checked #{}
+               :assessment-scan-summary scan-summary
+               :assessing? false))
+
+(defn toggle-assessment-check [state finding-id]
+  (update state :assessment-checked
+          (fn [checked]
+            (let [checked (or checked #{})]
+              (if (contains? checked finding-id)
+                (disj checked finding-id)
+                (conj checked finding-id))))))
+
+(defn clear-assessment [state]
+  (assoc state :assessment-findings nil
+               :assessment-checked #{}
+               :assessment-scan-summary nil
+               :assessing? false))

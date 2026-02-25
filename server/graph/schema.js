@@ -4,6 +4,9 @@
  */
 
 const SCHEMA_SQL = `
+-- pgvector extension for semantic embeddings
+CREATE EXTENSION IF NOT EXISTS vector;
+
 -- Unified dependency/intent graph nodes
 CREATE TABLE IF NOT EXISTS shared._nodes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -360,6 +363,62 @@ CREATE TABLE IF NOT EXISTS shared.corpus_entries (
 );
 CREATE INDEX IF NOT EXISTS idx_corpus_created ON shared.corpus_entries(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_corpus_parent ON shared.corpus_entries(parent_id) WHERE parent_id IS NOT NULL;
+
+-- Add model_name column for multi-LLM support (for existing installs)
+ALTER TABLE shared.corpus_entries ADD COLUMN IF NOT EXISTS model_name TEXT;
+
+-- Add embedding column for semantic retrieval (pgvector, 1536 dims — OpenAI native; Google padded/truncated to match)
+ALTER TABLE shared.corpus_entries ADD COLUMN IF NOT EXISTS embedding vector(1536);
+
+-- Add response-condition columns (for surfacing generation metadata in UI)
+ALTER TABLE shared.corpus_entries ADD COLUMN IF NOT EXISTS temperature REAL;
+ALTER TABLE shared.corpus_entries ADD COLUMN IF NOT EXISTS sampling_strategy VARCHAR(30);
+ALTER TABLE shared.corpus_entries ADD COLUMN IF NOT EXISTS routing_reasoning TEXT;
+
+-- Unified corpus schema: expand entry_type to include 'system'
+DO $$
+BEGIN
+  ALTER TABLE shared.corpus_entries DROP CONSTRAINT IF EXISTS corpus_entries_entry_type_check;
+EXCEPTION WHEN undefined_object THEN NULL;
+END $$;
+ALTER TABLE shared.corpus_entries ADD CONSTRAINT corpus_entries_entry_type_check
+  CHECK (entry_type IN ('human', 'llm', 'system'));
+
+-- Unified corpus columns: medium, author, recipients, thread_id, session_id, subject, metadata
+ALTER TABLE shared.corpus_entries ADD COLUMN IF NOT EXISTS medium VARCHAR(20) DEFAULT 'note';
+ALTER TABLE shared.corpus_entries ADD COLUMN IF NOT EXISTS author TEXT;
+ALTER TABLE shared.corpus_entries ADD COLUMN IF NOT EXISTS recipients TEXT;
+ALTER TABLE shared.corpus_entries ADD COLUMN IF NOT EXISTS thread_id INTEGER REFERENCES shared.corpus_entries(id);
+ALTER TABLE shared.corpus_entries ADD COLUMN IF NOT EXISTS session_id TEXT;
+ALTER TABLE shared.corpus_entries ADD COLUMN IF NOT EXISTS subject TEXT;
+ALTER TABLE shared.corpus_entries ADD COLUMN IF NOT EXISTS metadata JSONB;
+
+-- Partial indexes for unified corpus (skip NULL rows — zero cost for existing notes)
+CREATE INDEX IF NOT EXISTS idx_corpus_medium ON shared.corpus_entries(medium) WHERE medium != 'note';
+CREATE INDEX IF NOT EXISTS idx_corpus_thread ON shared.corpus_entries(thread_id) WHERE thread_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_corpus_session ON shared.corpus_entries(session_id) WHERE session_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_corpus_author ON shared.corpus_entries(author) WHERE author IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_corpus_medium_created ON shared.corpus_entries(medium, created_at DESC) WHERE medium IS NOT NULL;
+
+-- ============================================================
+-- Corpus Retrieval Log - tracks which entries were sent as context for each encounter
+-- One retrieval event per entry submission; junction table records each retrieved entry with rank.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.corpus_retrievals (
+    id SERIAL PRIMARY KEY,
+    entry_id INTEGER NOT NULL REFERENCES shared.corpus_entries(id),
+    strategy VARCHAR(30) NOT NULL DEFAULT 'similarity',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_corpus_retrievals_entry ON shared.corpus_retrievals(entry_id);
+
+CREATE TABLE IF NOT EXISTS shared.corpus_retrieval_entries (
+    retrieval_id INTEGER NOT NULL REFERENCES shared.corpus_retrievals(id),
+    corpus_entry_id INTEGER NOT NULL REFERENCES shared.corpus_entries(id),
+    rank SMALLINT NOT NULL,
+    PRIMARY KEY (retrieval_id, corpus_entry_id)
+);
+CREATE INDEX IF NOT EXISTS idx_corpus_retrieval_entries_corpus ON shared.corpus_retrieval_entries(corpus_entry_id);
 
 -- ============================================================
 -- Access Property Catalog - reference of all Access object properties

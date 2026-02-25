@@ -18,7 +18,7 @@ module.exports = function(pool, secrets) {
    * Send a message to the LLM and get a response
    */
   router.post('/', async (req, res) => {
-    const { message, history, database_id, form_context, report_context, module_context, macro_context, sql_function_context, table_context, query_context, app_context, issue_context } = req.body;
+    const { message, history, database_id, form_context, report_context, module_context, macro_context, sql_function_context, table_context, query_context, app_context, issue_context, assessment_context } = req.body;
 
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
@@ -196,6 +196,43 @@ You can see all objects in this application. Help the user understand cross-obje
         issueContextStr += '\n\nHelp the user understand and resolve these import issues. Suggest concrete fixes when possible.';
       }
 
+      // Assessment context (pre-import database analysis)
+      let assessmentContextStr = '';
+      if (assessment_context?.findings) {
+        const f = assessment_context.findings;
+        const scan = assessment_context.scan_summary || {};
+        assessmentContextStr = `\n\nThe user is in Import mode, preparing to import an Access database into PostgreSQL.`;
+        if (scan.table_count || scan.query_count) {
+          assessmentContextStr += `\nSource database summary: ${scan.table_count || 0} tables, ${scan.query_count || 0} queries, ${scan.form_count || 0} forms, ${scan.report_count || 0} reports, ${scan.module_count || 0} modules.`;
+          if (scan.relationship_count != null) {
+            assessmentContextStr += ` ${scan.relationship_count} defined relationships.`;
+          }
+        }
+        if (scan.table_names) {
+          assessmentContextStr += `\nTable names: ${scan.table_names.join(', ')}`;
+        }
+        assessmentContextStr += `\n\nDeterministic pre-import assessment found:`;
+        if (f.structural?.length) {
+          assessmentContextStr += `\n\nSTRUCTURAL (${f.structural.length}):`;
+          for (const s of f.structural) {
+            assessmentContextStr += `\n- ${s.object}: ${s.message}`;
+          }
+        }
+        if (f.design?.length) {
+          assessmentContextStr += `\n\nDESIGN (${f.design.length}):`;
+          for (const d of f.design) {
+            assessmentContextStr += `\n- ${d.object}: ${d.message}`;
+          }
+        }
+        if (f.complexity?.length) {
+          assessmentContextStr += `\n\nCOMPLEXITY (${f.complexity.length}):`;
+          for (const c of f.complexity) {
+            assessmentContextStr += `\n- ${c.object}: ${c.message}`;
+          }
+        }
+        assessmentContextStr += `\n\nProvide a concise analysis of this database. Identify the domain/purpose from the table and object names. For the findings above, add domain-aware context: which empty tables might be used by VBA code, which missing relationships are likely real, and what the wide table's columns probably represent. Prioritize which issues matter most for a clean import.`;
+      }
+
       // Check import completeness for module/macro contexts
       let completenessWarning = '';
       if ((module_context?.module_name || macro_context?.macro_name) && database_id) {
@@ -223,9 +260,9 @@ You can see all objects in this application. Help the user understand cross-obje
         },
         body: JSON.stringify({
           model: 'claude-sonnet-4-20250514',
-          max_tokens: (module_context?.module_name || macro_context?.macro_name || sql_function_context?.function_name || query_context?.query_name) ? 4096 : 1024,
+          max_tokens: (module_context?.module_name || macro_context?.macro_name || sql_function_context?.function_name || query_context?.query_name || assessment_context?.findings) ? 4096 : 1024,
           tools: availableTools,
-          system: `You are a helpful assistant for a database application called AccessClone. You help users understand their data, create forms, write queries, and work with their databases. ${dbContext}${tableContext}${queryContext}${formContext}${reportContext}${moduleContext}${macroContext}${sqlFunctionContext}${appContextStr}${issueContextStr}${graphContext}${completenessWarning}
+          system: `You are a helpful assistant for a database application called AccessClone. You help users understand their data, create forms, write queries, and work with their databases. ${dbContext}${tableContext}${queryContext}${formContext}${reportContext}${moduleContext}${macroContext}${sqlFunctionContext}${appContextStr}${issueContextStr}${assessmentContextStr}${graphContext}${completenessWarning}
 
 Keep responses concise and helpful. When discussing code or SQL, use markdown code blocks.`,
           messages: [

@@ -16,8 +16,8 @@
   (let [selected (:hub-selected @state/app-state)]
     [:nav.hub-left
      [:div.hub-logo "Hub"]
-     (for [[id label] [[:home "Home"] [:notes "Notes"] [:meetings "Meetings"]
-                       [:messaging "Messages"] [:email "Email"]
+     (for [[id label] [[:home "Home"] [:notes "Notes"] [:llm-registry "LLMs"]
+                       [:meetings "Meetings"] [:messaging "Messages"] [:email "Email"]
                        [:accessclone "AccessClone"]]]
        ^{:key id}
        [:div.hub-menu-item {:class (when (= id selected) "active")
@@ -94,6 +94,19 @@
      (case selected
        :home         [home-content]
        :notes        [preview-content "Notes" "A corpus that writes back. Write entries and an LLM reads each one against everything that came before."]
+       :llm-registry (let [registry (get-in @state/app-state [:config :llm-registry] [])
+                           secretary (first (filter :is_secretary registry))]
+                       [:div.hub-preview
+                        [:h2 "LLM Registry"]
+                        [:p (str (count registry) " model" (when (not= 1 (count registry)) "s") " registered"
+                             (when secretary (str ", secretary: " (:name secretary))))]
+                        (when (seq registry)
+                          [:ul.hub-right-list
+                           (for [m registry]
+                             ^{:key (:id m)}
+                             [:li (str (:name m) " (" (:provider m) ")"
+                                       (when (:is_secretary m) " \u2605")
+                                       (when-not (:enabled m) " [disabled]"))])])])
        :meetings     [preview-content "Meetings" "Schedule, agenda, and meeting notes. Open to manage your calendar."]
        :messaging    [preview-content "Messages" "Direct and group messaging. Open for the full messaging interface."]
        :email        [preview-content "Email" "Email inbox and composition. Open for the full email client."]
@@ -111,6 +124,15 @@
        :home [:div
               [:h4 "Quick Start"]
               [:p "Select a section from the menu to preview it, or click Open to go to its full page."]]
+       :llm-registry [:div
+                      [:h4 "Secretary"]
+                      (let [registry (get-in @state/app-state [:config :llm-registry] [])
+                            secretary (first (filter :is_secretary registry))]
+                        (if secretary
+                          [:div
+                           [:p [:strong (:name secretary)]]
+                           [:p.hub-right-placeholder (:description secretary)]]
+                          [:p.hub-right-placeholder "No secretary designated. Open to configure."]))]
        :notes [:div
                [:h4 "Recent Notes"]
                (let [entries (take 5 (:notes-entries @state/app-state))]

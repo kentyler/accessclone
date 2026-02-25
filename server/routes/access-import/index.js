@@ -13,6 +13,7 @@ module.exports = function(pool, secrets) {
   require('./import-query')(router, pool, secrets);
   require('./import-images')(router, pool);
   require('./completeness')(router, pool);
+  require('./assess')(router, pool);
   require('./property-catalog')(router, pool);
 
   return router;

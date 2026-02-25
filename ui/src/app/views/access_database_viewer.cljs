@@ -2,6 +2,9 @@
   "Viewer for Access database files - shows forms/reports available for import"
   (:require [reagent.core :as r]
             [app.state :as state]
+            [app.transforms.core :as t]
+            [app.flows.core :as f]
+            [app.flows.ui :as ui-flows]
             [app.flows.app :as app-flows]
             [cljs-http.client :as http]
             [cljs.core.async :refer [go <! chan put!]]
@@ -319,7 +322,7 @@
            :error nil
            :active-path nil      ;; Which db's objects are currently displayed
            :selected-paths []    ;; Ordered vector of paths included for import
-           :object-type :tables ;; :tables, :queries, :forms, :reports, :modules, :macros
+           :object-type nil     ;; nil until user picks a tab; :tables, :queries, :forms, etc.
            :forms []
            :reports []
            :tables []
@@ -422,6 +425,14 @@
                                    :object_type (when object-type (name object-type))
                                    :target_database_id target-database-id}})))))
 
+(defn- load-import-chat-for-id!
+  "Look up database name from ID and load the import transcript."
+  [db-id]
+  (when (and db-id (= (:app-mode @state/app-state) :import))
+    (let [db (first (filter #(= (:database_id %) db-id)
+                            (:available-databases @state/app-state)))]
+      (state/load-import-chat! (:name db)))))
+
 (defn restore-import-state!
   "Load saved import state from server and restore viewer position.
    Skips reload if data is already present in viewer-state."
@@ -431,7 +442,8 @@
     (do
       (state/load-access-databases!)
       (when-let [target (:target-database-id @viewer-state)]
-        (load-target-existing! target))
+        (load-target-existing! target)
+        (load-import-chat-for-id! target))
       (when-let [active (:active-path @viewer-state)]
         (load-import-history! active)))
     ;; Otherwise fetch saved state from server
@@ -444,7 +456,8 @@
               (swap! viewer-state assoc :object-type (keyword object_type)))
             (when target_database_id
               (swap! viewer-state assoc :target-database-id target_database_id)
-              (load-target-existing! target_database_id))
+              (load-target-existing! target_database_id)
+              (load-import-chat-for-id! target_database_id))
             (when (seq paths)
               (state/load-access-databases!)
               (swap! viewer-state assoc :selected-paths (vec paths))
@@ -519,10 +532,30 @@
           (put! done true))))
     done))
 
+(defn run-assessment!
+  "Collect scan data from the access-db-cache and run the pre-import assessment.
+   Merges data from all selected databases. Skips if assessment already exists."
+  []
+  (when-not (:assessment-findings @state/app-state)
+    (let [paths (:selected-paths @viewer-state)
+          cache (:access-db-cache @viewer-state)]
+      (when (and (seq paths)
+                 (:target-database-id @viewer-state)
+                 ;; Only run if at least one path has cached data
+                 (some #(get cache %) paths))
+        (let [merge-lists (fn [k] (vec (distinct (mapcat #(get (get cache %) k []) paths))))
+              scan-data {:tables        (merge-lists :tables)
+                         :queries       (merge-lists :queries)
+                         :relationships (merge-lists :relationships)
+                         :forms         (merge-lists :forms)
+                         :reports       (merge-lists :reports)
+                         :modules       (merge-lists :modules)
+                         :macros        (merge-lists :macros)}]
+          (f/run-fire-and-forget! (ui-flows/run-assessment-flow) {:scan-data scan-data}))))))
+
 (defn load-import-history!
   "Load import history for the target database (all object types, all sources).
-   Falls back to source_path filter if no target database is selected.
-   Also sets target-database-id based on prior successful imports."
+   Falls back to source_path filter if no target database is selected."
   [db-path]
   (go
     (let [target-db (:target-database-id @viewer-state)
@@ -532,21 +565,8 @@
           response (<! (http/get (str api-base "/api/access-import/history")
                                  {:query-params query-params}))]
       (when (:success response)
-        (let [history (get-in response [:body :history] [])
-              ;; Find all distinct target databases from successful imports
-              targets (->> history
-                           (filter #(= (:status %) "success"))
-                           (map :target_database_id)
-                           (remove #(= % "_none"))
-                           distinct)]
+        (let [history (get-in response [:body :history] [])]
           (swap! viewer-state assoc :import-log history)
-          ;; Auto-select if objects were previously imported to a database
-          (when-not target-db
-            (if (seq targets)
-              (let [target (first targets)]
-                (swap! viewer-state assoc :target-database-id target)
-                (load-target-existing! target))
-              (swap! viewer-state assoc :target-database-id nil)))
           (save-import-state!))))))
 
 (defn- apply-cached-contents!
@@ -575,7 +595,8 @@
                         :tables (or (:tables body) [])
                         :queries (or (:queries body) [])
                         :modules (or (:modules body) [])
-                        :macros (or (:macros body) [])}]
+                        :macros (or (:macros body) [])
+                        :relationships (or (:relationships body) [])}]
           (swap! viewer-state assoc-in [:access-db-cache db-path] contents)
           (swap! viewer-state assoc
                  :loading? false
@@ -585,7 +606,9 @@
                  :queries (:queries contents)
                  :modules (:modules contents)
                  :macros (:macros contents)
-                 :selected #{}))
+                 :selected #{})
+          ;; Trigger assessment if target is already selected
+          (run-assessment!))
         (swap! viewer-state assoc
                :loading? false
                :error (or (get-in response [:body :error]) "Failed to load database"))))))
@@ -618,6 +641,8 @@
   "Toggle a database in/out of :selected-paths. Called from sidebar click."
   [db-path]
   (let [{:keys [selected-paths active-path]} @viewer-state]
+    ;; Source databases changed — clear stale assessment
+    (t/dispatch! :clear-assessment)
     (if (some #{db-path} selected-paths)
       ;; Remove from selection
       (let [new-paths (vec (remove #{db-path} selected-paths))
@@ -632,8 +657,11 @@
                  :forms [] :reports [] :tables [] :queries []
                  :modules [] :macros [] :selected #{}))
         (save-import-state!))
-      ;; Add to selection
+      ;; Add to selection — clear target so user must choose before importing
       (do
+        (swap! viewer-state assoc
+               :target-database-id nil
+               :target-existing {})
         (swap! viewer-state update :selected-paths conj db-path)
         (load-access-database-contents! db-path)))))
 
@@ -1268,7 +1296,8 @@
             [:span.phase-btn-spinner])]))]))
 
 (defn dependency-warning
-  "Amber banner shown when the selected type has unmet prerequisites"
+  "Informational banner when the selected type has unimported prerequisites.
+   Not blocking — user can still import, but results may be incomplete."
   []
   (let [obj-type (:object-type @viewer-state)
         phase-def (some #(when (some #{obj-type} (:types %)) %) import-phases)]
@@ -1276,15 +1305,22 @@
       (let [missing (remove (fn [req-type]
                               (let [{:keys [total imported]} (type-progress req-type)]
                                 (or (zero? total) (= total imported))))
-                            (:requires phase-def))]
+                            (:requires phase-def))
+            type-label (str/join " & " (map #(str/capitalize (name %)) (:types phase-def)))
+            missing-labels (map (fn [t]
+                                  (let [{:keys [total imported]} (type-progress t)]
+                                    (str (str/capitalize (name t)) " (" imported "/" total ")")))
+                                missing)]
         (when (seq missing)
           [:div.dependency-warning
-           [:strong "Prerequisites not complete: "]
-           [:span (str/join ", "
-                            (map (fn [t]
-                                   (let [{:keys [total imported]} (type-progress t)]
-                                     (str (str/capitalize (name t)) " (" imported "/" total ")")))
-                                 missing))]])))))
+           [:div.dep-warn-header
+            [:strong "Recommended import order"]]
+           [:div.dep-warn-body
+            (str type-label " work best when "
+                 (str/join ", " missing-labels)
+                 " are imported first. You can still import now — or use ")
+            [:strong "Auto-Import"]
+            " to handle the order automatically."]])))))
 
 (defn next-step-suggestion
   "Green banner shown when the current phase is fully imported"
@@ -1359,10 +1395,11 @@
 
 (defn object-list []
   (let [{:keys [object-type selected loading?]} @viewer-state
-        items (get @viewer-state object-type [])
+        items (when object-type (get @viewer-state object-type []))
         already-imported (imported-names)]
     [:div.access-object-list
      (cond
+       (nil? object-type) [:div.empty-list "Select an object type above to browse items."]
        loading? [:div.loading "Loading..."]
        (empty? items) [:div.empty-list (str "No " (name object-type) " found")]
        :else [:ul.import-list
@@ -1424,20 +1461,26 @@
          [:label "Import into:"]
          [:select
           {:value (or target-id "")
-           :on-change #(let [v (.. % -target -value)]
-                         (cond
-                           (= v "__create_new__")
-                           (do (reset! creating? true)
-                               (reset! new-name (or (suggest-name-from-path) ""))
-                               (reset! create-error nil))
-                           (= v "")
-                           (do (swap! viewer-state assoc :target-database-id nil)
-                               (save-import-state!))
-                           :else
-                           (do (swap! viewer-state assoc :target-database-id v)
-                               (load-target-existing! v)
-                               (save-source-discovery! v)
-                               (save-import-state!))))}
+           :on-change (fn [e]
+                        (let [v (.. e -target -value)]
+                          (cond
+                            (= v "__create_new__")
+                            (do (reset! creating? true)
+                                (reset! new-name (or (suggest-name-from-path) ""))
+                                (reset! create-error nil))
+                            (= v "")
+                            (do (swap! viewer-state assoc :target-database-id nil)
+                                (state/load-import-chat! nil)
+                                (save-import-state!))
+                            :else
+                            (let [db (first (filter (fn [d] (= (:database_id d) v)) available-dbs))]
+                              (t/dispatch! :clear-assessment)
+                              (swap! viewer-state assoc :target-database-id v)
+                              (state/load-import-chat! (:name db))
+                              (load-target-existing! v)
+                              (save-source-discovery! v)
+                              (save-import-state!)
+                              (run-assessment!)))))}
           [:option {:value ""} "Select a database..."]
           (for [db available-dbs]
             ^{:key (:database_id db)}
@@ -1459,10 +1502,13 @@
               :on-click #(state/create-database!
                            (str/trim @new-name) nil
                            (fn [new-db]
+                             (t/dispatch! :clear-assessment)
                              (swap! viewer-state assoc :target-database-id (:database_id new-db))
+                             (state/load-import-chat! (:name new-db))
                              (load-target-existing! (:database_id new-db))
                              (save-source-discovery! (:database_id new-db))
                              (save-import-state!)
+                             (run-assessment!)
                              (reset! creating? false))
                            (fn [err-msg]
                              (reset! create-error err-msg)))}
@@ -1536,25 +1582,26 @@
         ;; Count total un-imported objects across all types
         total-remaining (reduce + (map #(count (not-yet-imported %))
                                        [:tables :queries :forms :reports :modules :macros]))]
-    [:div.access-toolbar
-     [:div.selection-actions
-      [:button.btn-link {:on-click select-all!} "Select All"]
-      [:button.btn-link {:on-click select-none!} "Select None"]
-      [:span.selection-count (str (count selected) " selected")]
-      [:button.btn-link {:on-click #(load-access-database-contents! access-db-path true)
-                         :disabled loading?}
-       (if cached? "Refresh" "Load")]]
-     [:div.import-actions
-      (when (and (not importing?) target-database-id
-                 (if (= object-type :images)
-                   (let [{:keys [total imported]} (:image-status @viewer-state)]
-                     (and total (pos? total) (not= total imported)))
-                   (seq selected)))
-        [:button.btn-primary
-         {:on-click #(import-selected! access-db-path target-database-id)}
-         (if (= object-type :images)
-           "Import All Images"
-           (str "Import " (count selected) " " (name object-type)))])]]))
+    (when object-type
+      [:div.access-toolbar
+       [:div.selection-actions
+        [:button.btn-link {:on-click select-all!} "Select All"]
+        [:button.btn-link {:on-click select-none!} "Select None"]
+        [:span.selection-count (str (count selected) " selected")]
+        [:button.btn-link {:on-click #(load-access-database-contents! access-db-path true)
+                           :disabled loading?}
+         (if cached? "Refresh" "Load")]]
+       [:div.import-actions
+        (when (and (not importing?) target-database-id
+                   (if (= object-type :images)
+                     (let [{:keys [total imported]} (:image-status @viewer-state)]
+                       (and total (pos? total) (not= total imported)))
+                     (seq selected)))
+          [:button.btn-primary
+           {:on-click #(import-selected! access-db-path target-database-id)}
+           (if (= object-type :images)
+             "Import All Images"
+             (str "Import " (count selected) " " (name object-type)))])]])))
 
 (defn- db-name-from-path
   "Extract filename from a full path"
@@ -1603,13 +1650,13 @@
             busy? (or importing? (and auto-phase (not= auto-phase :complete)))]
         [:<>
          (when (and target-database-id (pos? total-all) (not busy?) (not error))
-           [:button.btn-primary.import-all-btn
-            {:on-click #(auto-import-all! target-database-id)}
-            (str "Auto-Import (" total-all ")")])
-         (when (and target-database-id (pos? total-remaining) (not busy?) (not error))
-           [:button.btn-secondary.import-all-btn
-            {:on-click #(import-all! target-database-id)}
-            (str "Manual Import (" total-remaining ")")])])
+           [:<>
+            [:button.btn-primary.import-all-btn
+             {:on-click #(auto-import-all! target-database-id)}
+             (str "Auto-Import (" total-all ")")]
+            [:button.btn-secondary.import-all-btn
+             {:on-click #(import-all! target-database-id {:force? true})}
+             (str "Manual Import (" total-all ")")]])])
       [target-database-selector]]]]
    (when-not (or error loading?)
      [:div.viewer-phase-bar
@@ -1620,7 +1667,6 @@
        error [:div.error-message error]
        loading? [:div.loading-spinner "Loading..."]
        :else [:<>
-              [dependency-warning]
               [import-all-progress]
               [auto-import-phase-status]
               [toolbar active-path]

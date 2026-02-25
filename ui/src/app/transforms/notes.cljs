@@ -17,7 +17,15 @@
 (defn set-notes-loading [state loading?]
   (assoc state :notes-loading? loading?))
 
-(defn set-notes-read-entry [state entry response]
+(defn set-notes-read-entry [state entry responses]
   (assoc state
          :notes-read-entry entry
-         :notes-read-response response))
+         :notes-read-responses responses))
+
+(defn append-notes-response [state response]
+  (-> state
+      (update :notes-read-responses (fnil conj []) response)
+      (update :notes-entries #(into [response] %))))
+
+(defn set-notes-regenerating [state loading?]
+  (assoc state :notes-regenerating? loading?))

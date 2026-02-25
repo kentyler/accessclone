@@ -33,7 +33,7 @@
            :notes-input ""
            :notes-loading? false
            :notes-read-entry nil
-           :notes-read-response nil
+           :notes-read-responses []
 
            ;; UI state
            :loading? false
@@ -298,10 +298,29 @@
 
 ;; App mode (Import / Run / Logs)
 (defn set-app-mode! [mode]
+  ;; Save current transcript before switching
+  (save-chat-transcript!)
   (swap! app-state assoc :app-mode mode)
   (when (= mode :logs)
     (load-log-entries!))
+  (when (= mode :import)
+    ;; Load import-level transcript (will be loaded by target-database-selector via load-import-chat!)
+    ;; For now, just clear stale chat from previous context
+    (swap! app-state assoc :chat-messages [] :chat-tab nil))
+  (when (= mode :run)
+    ;; Restore the active tab's transcript
+    (when-let [tab (:active-tab @app-state)]
+      (load-chat-transcript! tab)))
   (save-ui-state!))
+
+(defn load-import-chat!
+  "Load the chat transcript for the import target database.
+   Called when entering import mode or when the target database changes."
+  [db-name]
+  (save-chat-transcript!)
+  (if db-name
+    (load-chat-transcript! {:type :import :name db-name})
+    (swap! app-state assoc :chat-messages [] :chat-tab nil)))
 
 ;; Objects
 (defn set-objects! [object-type objects]
@@ -334,6 +353,7 @@
     :reports "reports"
     :modules "modules"
     :app "app"
+    :import "import"
     (name obj-type)))
 
 (defn- tab->object-name
@@ -1277,6 +1297,13 @@
                                :issues (:logs-issues @app-state)
                                :object_name (:source_object_name logs-entry)
                                :object_type (:source_object_type logs-entry)})
+              ;; Assessment context when in Import mode with findings
+              assessment-findings (:assessment-findings @app-state)
+              assessment-scan (:assessment-scan-summary @app-state)
+              assessment-context (when (and (= (:app-mode @app-state) :import)
+                                            assessment-findings)
+                                   {:findings assessment-findings
+                                    :scan_summary assessment-scan})
               ;; Send full conversation history for context
               history (vec (:chat-messages @app-state))
               response (<! (http/post (str api-base "/api/chat")
@@ -1291,7 +1318,8 @@
                                                      :table_context table-context
                                                      :query_context query-context
                                                      :app_context app-context
-                                                     :issue_context issue-context}
+                                                     :issue_context issue-context
+                                                     :assessment_context assessment-context}
                                        :headers (db-headers)}))]
           (set-chat-loading! false)
           (if (:success response)

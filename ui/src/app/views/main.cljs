@@ -16,6 +16,7 @@
             [app.views.logs-viewer :as logs-viewer]
             [app.views.hub :as hub]
             [app.views.notes :as notes]
+            [app.views.llm-registry :as llm-registry]
             [app.views.meetings :as meetings]
             [app.views.messaging :as messaging]
             [app.views.email :as email]))
@@ -166,13 +167,26 @@
         active-tab (:active-tab @state/app-state)
         tab-type (:type active-tab)
         tab-name (:name active-tab)]
-    (if (= mode :logs)
+    (cond
+      (= mode :logs)
       (let [entry (:logs-selected-entry @state/app-state)]
         {:empty-hint (if entry
                        (str "I can help you understand and resolve issues for \""
                             (:source_object_name entry) "\".")
                        "Select an import entry to review its issues.")
          :placeholder "Ask about import issues..."})
+
+      (= mode :import)
+      (let [chat-tab (:chat-tab @state/app-state)
+            db-name (:name chat-tab)]
+        {:empty-hint (if db-name
+                       (str "I can help with importing into \"" db-name "\". Ask about import progress, object types, or conversion issues.")
+                       "Select a target database to start a conversation about this import.")
+         :placeholder (if db-name
+                        (str "Ask about the " db-name " import...")
+                        "Select a target database...")})
+
+      :else
       (case tab-type
         :forms {:empty-hint (str "I can help you find records, analyze data, or modify the form design for \"" tab-name "\".")
                 :placeholder "Ask about records or form design..."}
@@ -229,6 +243,82 @@
            (let [remaining (count (filter #(nil? (:selected %)) gap-questions))]
              (str remaining " of " (count gap-questions) " remaining")))]]])))
 
+(defn- assessment-finding-row [finding checked?]
+  (let [fixable? (:fixable finding)]
+    [:div.assessment-finding
+     {:class (case (:type finding)
+               ("reserved-word" "action-query" "missing-pk") "structural"
+               ("wide-table" "empty-table" "missing-relationship" "naming-inconsistency") "design"
+               "complexity")}
+     (when fixable?
+       [:input {:type "checkbox"
+                :checked checked?
+                :on-change #(t/dispatch! :toggle-assessment-check (:id finding))}])
+     [:span.assessment-object (:object finding)]
+     [:span.assessment-message " \u2014 " (:message finding)]
+     (when (:suggestion finding)
+       [:span.assessment-suggestion " (" (:suggestion finding) ")"])]))
+
+(defn- assessment-section [title findings checked-set & [collapsible?]]
+  (let [expanded? (r/atom true)]
+    (fn [title findings checked-set]
+      (when (seq findings)
+        [:div.assessment-section
+         [:div.assessment-section-header
+          {:on-click #(swap! expanded? not)
+           :style {:cursor "pointer"}}
+          [:span (if @expanded? "\u25BE " "\u25B8 ")]
+          [:strong title]
+          [:span.assessment-count (str " (" (count findings) ")")]]
+         (when @expanded?
+           [:div.assessment-section-body
+            (for [finding findings]
+              ^{:key (:id finding)}
+              [assessment-finding-row finding (contains? checked-set (:id finding))])])]))))
+
+(defn- assessment-widget []
+  (let [import-mode (r/atom :as-is)]
+    (fn []
+      (let [findings (:assessment-findings @state/app-state)
+            checked (or (:assessment-checked @state/app-state) #{})
+            assessing? (:assessing? @state/app-state)
+            app-mode (:app-mode @state/app-state)]
+        (when (and (= app-mode :import)
+                   (or assessing? findings))
+          (if assessing?
+            [:div.assessment-widget
+             [:div.assessment-header "Analyzing database..."]
+             [:div.assessment-loading "Checking for structural issues..."]]
+            (let [{:keys [structural design complexity summary]} findings
+                  fix-count (count checked)
+                  has-fixable? (pos? (:fixable_count summary))]
+              [:div.assessment-widget
+               [:div.assessment-header "Pre-Import Assessment"]
+               (when (:recommendation summary)
+                 [:div.assessment-summary (:recommendation summary)])
+               [assessment-section "Structural" structural checked]
+               [assessment-section "Design" design checked]
+               [assessment-section "Complexity" complexity checked]
+               [:div.assessment-actions
+                (when has-fixable?
+                  [:div.assessment-mode-choice
+                   [:label.assessment-radio
+                    [:input {:type "radio" :name "import-mode"
+                             :checked (= @import-mode :as-is)
+                             :on-change #(reset! import-mode :as-is)}]
+                    " Import as-is"]
+                   [:label.assessment-radio
+                    [:input {:type "radio" :name "import-mode"
+                             :checked (= @import-mode :fix)
+                             :on-change #(reset! import-mode :fix)}]
+                    " Fix if possible"]])
+                [:div.assessment-buttons
+                 [:button.btn-primary.btn-sm
+                  {:on-click #(t/dispatch! :clear-assessment)}
+                  (if (and has-fixable? (= @import-mode :fix))
+                    (str "Import with Fixes (" fix-count ")")
+                    "Import")]]]])))))))
+
 (defn- chat-messages-list [messages loading? empty-hint messages-end]
   [:div.chat-messages
    (if (empty? messages)
@@ -238,6 +328,8 @@
        [chat-message msg]))
    ;; Interactive gap decisions widget (after chat messages)
    [gap-decisions-widget]
+   ;; Pre-import assessment widget (import mode only)
+   [assessment-widget]
    (when loading?
      [:div.chat-message.assistant
       [:div.message-content.typing "Thinking..."]])
@@ -309,6 +401,7 @@
      (case current-page
        :hub         [hub/hub-page]
        :notes       [notes/notes-page]
+       :llm-registry [llm-registry/llm-registry-page]
        :meetings    [meetings/meetings-page]
        :messaging   [messaging/messaging-page]
        :email       [email/email-page]

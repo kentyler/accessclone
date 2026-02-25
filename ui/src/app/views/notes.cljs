@@ -48,10 +48,10 @@
      [:div.notes-sidebar-list
       (if (empty? entries)
         [:div.notes-sidebar-empty "No entries yet. Write something."]
-        (for [entry entries]
+        (for [entry (filter #(= "human" (:entry_type %)) entries)]
           ^{:key (:id entry)}
           [:div.notes-sidebar-item
-           {:class (str (name (:entry_type entry))
+           {:class (str "human"
                         (when (= (:id entry) selected-id) " selected"))
             :on-click #(f/run-fire-and-forget! notes-flow/select-entry-flow {:id (:id entry)})}
            [:div.notes-sidebar-preview (first-line (:content entry))]
@@ -81,7 +81,7 @@
        [:button.notes-new-btn
         {:on-click (fn []
                      (t/dispatch! :set-notes-selected nil)
-                     (t/dispatch! :set-notes-read-entry nil nil)
+                     (t/dispatch! :set-notes-read-entry nil [])
                      (t/dispatch! :set-notes-input ""))
          :title "New entry"}
         "+"]]]
@@ -108,19 +108,106 @@
            "Submit (Ctrl+Enter)"]))]]))
 
 ;; ============================================================
-;; READ PANE — response only
+;; RESPONSE CONDITIONS — model, temperature, sampling dropdowns + retry
+;; ============================================================
+
+(def temperature-presets [0 0.25 0.5 0.75 1.0])
+
+(def sampling-options ["similarity" "distance" "random" "time_range" "mixed"])
+
+(defn- condition-select
+  "Editable select dropdown. Calls on-change with new string value."
+  [label value options on-change]
+  [:div.notes-condition-row
+   [:span.notes-condition-label label]
+   [:select.notes-condition-select
+    {:value (str value)
+     :on-change #(on-change (.. % -target -value))}
+    (for [opt options]
+      ^{:key opt}
+      [:option {:value (str opt)} (str opt)])
+    ;; Include actual value if not in presets
+    (when (and value (not (some #(= (str %) (str value)) options)))
+      [:option {:value (str value)} (str value)])]])
+
+(defn- response-conditions
+  "Conditions bar under a response card with editable dropdowns and Retry button.
+   Uses local ratoms to track user overrides."
+  [response human-entry registry-models]
+  (let [model-override (r/atom nil)
+        temp-override (r/atom nil)
+        sampling-override (r/atom nil)]
+    (fn [response human-entry registry-models]
+      (let [orig-model (:model_name response)
+            orig-temp (:temperature response)
+            orig-sampling (:sampling_strategy human-entry)
+            reasoning (:routing_reasoning human-entry)
+            ;; Current values (override or original)
+            cur-model (or @model-override orig-model)
+            cur-temp (or @temp-override (str orig-temp))
+            cur-sampling (or @sampling-override orig-sampling)
+            has-conditions? (or orig-temp orig-model orig-sampling)
+            regenerating? (:notes-regenerating? @state/app-state)]
+        (when has-conditions?
+          [:div.notes-response-conditions
+           ;; Model
+           (when orig-model
+             (let [model-names (mapv :name registry-models)
+                   opts (if (some #(= % orig-model) model-names)
+                          model-names
+                          (conj model-names orig-model))]
+               [condition-select "Model" cur-model opts
+                #(reset! model-override %)]))
+           ;; Temperature
+           (when orig-temp
+             (let [temp-strs (mapv str temperature-presets)
+                   orig-str (str orig-temp)]
+               [condition-select "Temp" cur-temp
+                (if (some #(= % orig-str) temp-strs) temp-strs (conj temp-strs orig-str))
+                #(reset! temp-override %)]))
+           ;; Sampling
+           (when orig-sampling
+             [condition-select "Sampling" cur-sampling sampling-options
+              #(reset! sampling-override %)])
+           ;; Retry button
+           [:button.notes-retry-btn
+            {:disabled regenerating?
+             :on-click (fn []
+                         (let [entry-id (:id human-entry)]
+                           (when entry-id
+                             (f/run-fire-and-forget!
+                               notes-flow/regenerate-entry-flow
+                               {:entry-id entry-id
+                                :model-name cur-model
+                                :temperature (js/parseFloat cur-temp)
+                                :sampling cur-sampling}))))}
+            (if regenerating? "Retrying..." "Retry")]
+           ;; Reasoning
+           (when (and reasoning (not (str/blank? reasoning)))
+             [:div.notes-routing-reasoning reasoning])])))))
+
+;; ============================================================
+;; READ PANE — responses (supports multiple)
 ;; ============================================================
 
 (defn- notes-read-pane []
-  (let [response (:notes-read-response @state/app-state)]
+  (let [responses (:notes-read-responses @state/app-state)
+        human-entry (:notes-read-entry @state/app-state)
+        registry-models (get-in @state/app-state [:config :llm-registry] [])]
     [:div.notes-read-pane
-     [:div.notes-entry-header "Response"]
-     (if response
+     [:div.notes-entry-header "Responses"]
+     (if (seq responses)
        [:div.notes-read-content
-        [:div.notes-read-entry.llm
-         [:div.notes-read-meta
-          [:span.notes-read-time (relative-time (:created_at response))]]
-         [:div.notes-read-text (:content response)]]]
+        (for [response responses]
+          ^{:key (:id response)}
+          [:div.notes-response-card
+           [:div.notes-read-entry.llm
+            [:div.notes-read-meta
+             (when (:model_name response)
+               [:span.model-label (:model_name response)])
+             [:span.notes-read-time (relative-time (:created_at response))]]
+            [:div.notes-read-text (:content response)]]
+           [response-conditions response human-entry registry-models]])]
        [:div.notes-read-placeholder
         "Write an entry to see the corpus respond."])]))
 

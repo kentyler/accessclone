@@ -106,6 +106,127 @@
     (< bytes (* 1024 1024)) (str (.toFixed (/ bytes 1024) 1) " KB")
     :else (str (.toFixed (/ bytes (* 1024 1024)) 1) " MB")))
 
+;; -- File picker modal state & helpers --
+
+(def picker-state
+  (r/atom {:open? false
+           :dir nil
+           :home nil
+           :loading? false
+           :dirs []
+           :files []
+           :error nil
+           :selected #{}}))
+
+(defn- browse-dir! [dir]
+  (swap! picker-state assoc :loading? true :error nil)
+  (-> (js/fetch (str "/api/access-import/browse"
+                     (when dir (str "?dir=" (js/encodeURIComponent dir)))))
+      (.then #(.json %))
+      (.then (fn [data]
+               (let [d (js->clj data :keywordize-keys true)]
+                 (if (:error d)
+                   (swap! picker-state assoc :loading? false :error (:error d))
+                   (let [current (:current d)
+                         updates (cond-> {:loading? false
+                                          :dir current
+                                          :parent (:parent d)
+                                          :dirs (or (:directories d) [])
+                                          :files (or (:files d) [])}
+                                   ;; Capture home on first browse (no dir arg)
+                                   (nil? dir) (assoc :home current))]
+                     (swap! picker-state merge updates))))))
+      (.catch (fn [err]
+                (swap! picker-state assoc :loading? false
+                       :error (str "Failed to browse: " (.-message err)))))))
+
+(defn- open-picker! []
+  (swap! picker-state assoc :open? true :dir nil :home nil :dirs [] :files [] :error nil :selected #{})
+  (browse-dir! nil))
+
+(defn- close-picker! []
+  (swap! picker-state assoc :open? false))
+
+(defn file-picker-modal
+  "Modal file browser for selecting .accdb/.mdb files (multi-select)"
+  []
+  (let [path-input (r/atom "")]
+    (fn []
+      (let [{:keys [open? dir loading? dirs files error parent selected]} @picker-state]
+        (when open?
+          [:div.file-picker-overlay {:on-click #(when (= (.-target %) (.-currentTarget %))
+                                                  (close-picker!))}
+           [:div.file-picker-dialog
+            [:div.file-picker-header "Browse for Access Databases"]
+            [:div.file-picker-path-bar
+             [:button.file-picker-up
+              {:on-click #(when parent (browse-dir! parent))
+               :disabled (or (nil? parent) (= dir parent))}
+              "\u2191 Up"]
+             [:input.file-picker-path-input
+              {:type "text"
+               :value (let [v @path-input] (if (seq v) v (or dir "")))
+               :on-change #(reset! path-input (.. % -target -value))
+               :on-focus #(reset! path-input (or dir ""))
+               :on-key-down (fn [e]
+                              (when (= (.-key e) "Enter")
+                                (let [v (clojure.string/trim @path-input)]
+                                  (when (seq v)
+                                    (browse-dir! v)
+                                    (reset! path-input "")))))
+               :on-blur #(reset! path-input "")}]]
+            (let [home (:home @picker-state)]
+              [:div.file-picker-shortcuts
+               [:button.file-picker-shortcut
+                {:on-click #(browse-dir! nil)}
+                "Home"]
+               (when home
+                 [:<>
+                  [:button.file-picker-shortcut
+                   {:on-click #(browse-dir! (str home "\\Desktop"))}
+                   "Desktop"]
+                  [:button.file-picker-shortcut
+                   {:on-click #(browse-dir! (str home "\\Documents"))}
+                   "Documents"]])])
+            (when error
+              [:div.file-picker-error error])
+            (when loading?
+              [:div.file-picker-loading "Loading..."])
+            [:div.file-picker-entries
+             (for [d dirs]
+               ^{:key (str "d-" d)}
+               [:div.file-picker-entry.file-picker-dir
+                {:on-click #(browse-dir! (str dir "\\" d))}
+                [:span.file-picker-icon "\uD83D\uDCC1"]
+                [:span.file-picker-name d]])
+             (for [f files]
+               (let [fpath (:path f)
+                     checked? (contains? selected fpath)]
+                 ^{:key (str "f-" (:name f))}
+                 [:div.file-picker-entry.file-picker-file
+                  {:class (when checked? "selected")
+                   :on-click #(swap! picker-state update :selected
+                                     (fn [s] (if (contains? s fpath) (disj s fpath) (conj s fpath))))}
+                  [:span.file-picker-check {:class (when checked? "checked")}
+                   (when checked? "\u2713")]
+                  [:span.file-picker-icon
+                   (if (clojure.string/ends-with? (clojure.string/lower-case (:name f)) ".mdb")
+                     "\uD83D\uDDC3" "\uD83D\uDDD2")]
+                  [:span.file-picker-name (:name f)]
+                  [:span.file-picker-size (format-file-size (:size f))]]))]
+            (when (seq selected)
+              [:div.file-picker-selected-summary
+               (str (count selected) " database" (when (> (count selected) 1) "s") " selected")])
+            [:div.file-picker-actions
+             [:button.file-picker-cancel {:on-click close-picker!} "Cancel"]
+             [:button.file-picker-confirm
+              {:disabled (empty? selected)
+               :on-click (fn []
+                           (doseq [p selected]
+                             (access-db-viewer/toggle-database-selection! p))
+                           (close-picker!))}
+              (str "Select" (when (seq selected) (str " (" (count selected) ")")))]]]])))))
+
 (defn access-database-list
   "Browse input + list of Access database files found by scanning.
    Multi-select: clicking toggles a database in/out of selected-paths."
@@ -121,25 +242,31 @@
             {:keys [selected-paths active-path]} @access-db-viewer/viewer-state
             selected-set (set selected-paths)]
         [:div
-         [:div.browse-row
-          [:input.browse-input
-           {:type "text"
-            :placeholder "Paste folder or file path"
-            :value @browse-path
-            :on-change #(reset! browse-path (.. % -target -value))
-            :on-key-down #(when (= (.-key %) "Enter") (submit-browse!))}]
-          [:button.scan-btn
-           {:on-click submit-browse!}
-           "Browse"]]
-         [:div.scan-all-link
-          [:a {:href "#"
-               :on-click (fn [e]
-                           (.preventDefault e)
-                           (f/run-fire-and-forget! (ui-flow/load-access-databases-flow) {}))}
-           "Or scan all locations"]]
+         [:div.find-db-section
+          [:div.find-db-option
+           [:div.find-db-row
+            [:input.browse-input
+             {:type "text"
+              :placeholder "Folder or file path"
+              :value @browse-path
+              :on-change #(reset! browse-path (.. % -target -value))
+              :on-key-down #(when (= (.-key %) "Enter") (submit-browse!))}]
+            [:button.scan-btn {:on-click submit-browse!} "Go"]]
+           [:div.find-db-hint "Paste a path to scan for databases"]]
+          [:div.find-db-option
+           [:button.find-db-btn {:on-click open-picker!} "Browse Files..."]
+           [:div.find-db-hint "Navigate folders to pick databases"]]
+          [:div.find-db-option
+           [:button.find-db-btn.find-db-btn-secondary
+            {:on-click (fn [e]
+                         (.preventDefault e)
+                         (f/run-fire-and-forget! (ui-flow/load-access-databases-flow) {}))}
+            "Scan All Locations"]
+           [:div.find-db-hint "Search Desktop and Documents"]]]
+         [file-picker-modal]
          [:ul.object-list
           (if (empty? databases)
-            [:li.empty-list "Paste a path above to find databases."]
+            [:li.empty-list "Use the options above to find databases."]
             (for [db databases]
               (let [path (:path db)
                     selected? (contains? selected-set path)

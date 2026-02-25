@@ -16,27 +16,34 @@
             ctx))}])
 
 (def submit-entry-flow
-  "Clear input, set loading, POST content, add both entries, show in read pane"
+  "Clear input, set loading, POST content, add all response entries, show in read pane"
   [{:step :do
     :fn (fn [ctx]
           (let [content (:notes-input @app-state)]
             (when (and content (not (clojure.string/blank? content)))
-              (t/dispatch! :set-notes-input "")
               (t/dispatch! :set-notes-loading true)
               (go
                 (let [response (<! (http/post! (str api-base "/api/notes")
                                                :json-params {:content content}))]
                   (t/dispatch! :set-notes-loading false)
+                  (t/dispatch! :set-notes-input "")
                   (when (:ok? response)
                     (let [entry (get-in response [:data :entry])
-                          llm-response (get-in response [:data :response])]
-                      ;; Add to sidebar (most recent first)
-                      (when llm-response
-                        (t/dispatch! :add-notes-entry llm-response))
+                          responses (get-in response [:data :responses] [])
+                          routing (get-in response [:data :routing])
+                          ;; Merge routing metadata onto the human entry
+                          entry (cond-> entry
+                                  (:sampling routing)
+                                  (assoc :sampling_strategy (:sampling routing))
+                                  (:reasoning routing)
+                                  (assoc :routing_reasoning (:reasoning routing)))]
+                      ;; Add to sidebar (most recent first) — responses then entry
+                      (doseq [r (reverse responses)]
+                        (t/dispatch! :add-notes-entry r))
                       (t/dispatch! :add-notes-entry entry)
                       ;; Show in read pane
                       (t/dispatch! :set-notes-selected (:id entry))
-                      (t/dispatch! :set-notes-read-entry entry llm-response)))))))
+                      (t/dispatch! :set-notes-read-entry entry responses)))))))
           ctx)}])
 
 (def select-entry-flow
@@ -51,5 +58,25 @@
                   (when (:ok? response)
                     (t/dispatch! :set-notes-read-entry
                                  (get-in response [:data :entry])
-                                 (get-in response [:data :response])))))))
+                                 (get-in response [:data :responses] [])))))))
+          ctx)}])
+
+(def regenerate-entry-flow
+  "POST /api/notes/:id/regenerate with user-chosen model/temp/sampling → append new response"
+  [{:step :do
+    :fn (fn [ctx]
+          (let [{:keys [entry-id model-name temperature sampling]} ctx]
+            (when entry-id
+              (t/dispatch! :set-notes-regenerating true)
+              (go
+                (let [response (<! (http/post! (str api-base "/api/notes/" entry-id "/regenerate")
+                                               :json-params {:model_name model-name
+                                                              :temperature temperature
+                                                              :sampling sampling}))]
+                  (t/dispatch! :set-notes-regenerating false)
+                  (if (:ok? response)
+                    (let [new-response (get-in response [:data :response])]
+                      (t/dispatch! :append-notes-response new-response))
+                    (let [err-msg (or (get-in response [:data :error]) "Regenerate failed")]
+                      (t/dispatch! :set-error err-msg)))))))
           ctx)}])

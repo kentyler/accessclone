@@ -12,6 +12,60 @@ const { DEFAULT_SCAN_LOCATIONS, runPowerShell, scanDirectory } = require('./help
 module.exports = function(router, pool) {
 
   /**
+   * GET /api/access-import/browse
+   * Browse a directory — returns subdirectories and .accdb/.mdb files.
+   * ?dir=<path>  (defaults to %USERPROFILE% or C:\Users)
+   */
+  router.get('/browse', async (req, res) => {
+    try {
+      const dir = req.query.dir
+        || process.env.USERPROFILE
+        || process.env.HOME
+        || 'C:\\Users';
+
+      const resolved = path.resolve(dir);
+      const parent = path.dirname(resolved);
+
+      const entries = await fs.readdir(resolved, { withFileTypes: true });
+      const directories = [];
+      const files = [];
+
+      for (const entry of entries) {
+        const name = entry.name;
+        // Skip hidden/system directories
+        if (name.startsWith('.') || name.startsWith('$')) continue;
+
+        if (entry.isDirectory()) {
+          directories.push(name);
+        } else if (entry.isFile()) {
+          const lower = name.toLowerCase();
+          if (lower.endsWith('.accdb') || lower.endsWith('.mdb')) {
+            const fullPath = path.join(resolved, name);
+            try {
+              const stats = await fs.stat(fullPath);
+              files.push({
+                name,
+                path: fullPath,
+                size: stats.size,
+                modified: stats.mtime
+              });
+            } catch { /* skip inaccessible files */ }
+          }
+        }
+      }
+
+      directories.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+      files.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+
+      res.json({ current: resolved, parent, directories, files });
+    } catch (err) {
+      console.error('Error browsing directory:', err.message);
+      logError(pool, 'GET /api/access-import/browse', 'Failed to browse directory', err, { details: { dir: req.query.dir } });
+      res.status(400).json({ error: `Cannot browse directory: ${err.message}` });
+    }
+  });
+
+  /**
    * GET /api/access-import/scan
    * Scan for Access databases in default or specified locations
    */
@@ -201,6 +255,17 @@ module.exports = function(router, pool) {
         console.error('Error listing macros:', err.message);
       }
 
+      // Get relationships
+      let relationships = [];
+      try {
+        const relScript = path.join(scriptsDir, 'list_relationships.ps1');
+        const relOutput = await runPowerShell(relScript, ['-DatabasePath', dbPath]);
+        relationships = relOutput ? JSON.parse(relOutput) : [];
+        if (!Array.isArray(relationships)) relationships = [relationships]; // Handle single item
+      } catch (err) {
+        console.error('Error listing relationships:', err.message);
+      }
+
       // Restore AutoExec after listing
       if (autoExecDisabled) {
         try {
@@ -220,7 +285,8 @@ module.exports = function(router, pool) {
         tables: tables,
         queries: queries,
         modules: modules,
-        macros: macros
+        macros: macros,
+        relationships: relationships
       };
 
       // Let the frontend know this was converted from .mdb

@@ -122,7 +122,7 @@ function createApp({
   app.use('/api/form-state', formStateRoutes(pool));
   app.use('/api/app', appRoutes(pool));
   app.use('/api/pipeline', pipelineRoutes(pool, secrets));
-  app.use('/api/notes', notesRoutes(pool, secrets));
+  app.use('/api/notes', notesRoutes(pool, secrets, settingsDir));
 
   return { app, databasesRouter };
 }

@@ -1,0 +1,59 @@
+{
+  "form-designer": {
+    "grid-size": 8
+  },
+  "llm-registry": [
+    {
+      "id": "claude-opus-4-6",
+      "name": "Claude Opus 4.6",
+      "provider": "anthropic",
+      "model_id": "claude-opus-4-6",
+      "description": "Careful, thorough, strong at synthesis and philosophical depth. Good when the entry needs sustained reasoning or when corpus material is complex. Willing to sit with ambiguity.",
+      "is_secretary": true,
+      "enabled": true,
+      "config": {
+        "max_tokens": 2048,
+        "temperature": 0.5
+      }
+    },
+    {
+      "id": "claude-sonnet-4-6",
+      "name": "Claude Sonnet 4.6",
+      "provider": "anthropic",
+      "model_id": "claude-sonnet-4-6",
+      "description": "Fast, precise, good at execution. Appropriate for straightforward entries or when the user is in working mode. Concise without being shallow.",
+      "is_secretary": false,
+      "enabled": true,
+      "config": {
+        "max_tokens": 2048,
+        "temperature": 0.5
+      }
+    },
+    {
+      "id": "gpt-5-2",
+      "name": "GPT-5.2",
+      "provider": "openai",
+      "model_id": "gpt-5.2",
+      "description": "Different training distribution from Claude. Useful for getting a perspective that won't echo Claude's tendencies. Good for lateral connections and unexpected framings.",
+      "is_secretary": false,
+      "enabled": true,
+      "config": {
+        "max_tokens": 2048,
+        "temperature": 1
+      }
+    },
+    {
+      "id": "gemini-3-1-pro-preview",
+      "name": "Gemini 3.1 Pro Preview",
+      "provider": "google",
+      "model_id": "gemini-3.1-pro-preview",
+      "description": "Google's model. Different reasoning patterns and training data. Strong at structured analysis. Good third voice when you want multiple perspectives that won't converge on the same framing.",
+      "is_secretary": false,
+      "enabled": true,
+      "config": {
+        "max_tokens": 2048,
+        "temperature": 1
+      }
+    }
+  ]
+}

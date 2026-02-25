@@ -5,7 +5,8 @@
   (:require [app.state :as state :refer [app-state api-base db-headers session-id]]
             [app.effects.http :as http]
             [app.transforms.core :as t]
-            [cljs.core.async :refer [go <!]]))
+            [cljs.core.async :refer [go <!]]
+            [clojure.string :as str]))
 
 ;; ============================================================
 ;; OBJECT LOADERS (7 types — each follows the same pattern)
@@ -302,3 +303,52 @@
     :fn (fn [ctx]
           (state/select-log-entry! (:entry ctx))
           ctx)}])
+
+;; ============================================================
+;; PRE-IMPORT ASSESSMENT
+;; ============================================================
+
+(defn- build-scan-summary
+  "Build a compact summary of scan data for the LLM context."
+  [scan-data]
+  {:table_count (count (:tables scan-data))
+   :query_count (count (:queries scan-data))
+   :form_count (count (:forms scan-data))
+   :report_count (count (:reports scan-data))
+   :module_count (count (:modules scan-data))
+   :relationship_count (count (:relationships scan-data))
+   :table_names (mapv :name (:tables scan-data))})
+
+(defn run-assessment-flow
+  "POST scan data to /api/access-import/assess, dispatch :set-assessment.
+   After deterministic assessment, auto-sends LLM analysis if chat is empty.
+
+   Context requires: {:scan-data map} — the merged scan data from access-db-cache."
+  []
+  [{:step :do
+    :fn (fn [ctx]
+          (swap! app-state assoc :assessing? true)
+          ctx)}
+   {:step :do
+    :fn (fn [ctx]
+          (go
+            (let [scan-data (:scan-data ctx)
+                  result (<! (http/post! (str api-base "/api/access-import/assess")
+                                         :json-params scan-data))]
+              (if (:ok? result)
+                (let [findings (:data result)
+                      scan-summary (build-scan-summary scan-data)
+                      has-findings? (or (seq (:structural findings))
+                                        (seq (:design findings))
+                                        (seq (:complexity findings)))]
+                  (t/dispatch! :set-assessment findings scan-summary)
+                  ;; Auto-send LLM analysis if findings exist and chat is empty
+                  (when (and has-findings?
+                             (empty? (:chat-messages @app-state)))
+                    (state/set-chat-input!
+                      "Analyze this Access database based on the pre-import assessment findings. What is this database for? Which findings are most important to address before importing?")
+                    (state/send-chat-message!)))
+                (do (swap! app-state assoc :assessing? false)
+                    (state/log-event! "warning" "Assessment failed" "run-assessment-flow"
+                                      {:error (get-in result [:data :error])})))
+              ctx)))}])

@@ -4,10 +4,10 @@
  */
 
 const express = require('express');
-const router = express.Router();
 const { logError } = require('../lib/events');
 
 module.exports = function(pool) {
+  const router = express.Router();
 
   /**
    * GET /api/issues/summary

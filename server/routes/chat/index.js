@@ -1086,3 +1086,7 @@ No explanation, no markdown fences — just the JSON array.`,
 
   return router;
 };
+
+// Export helpers for testing
+module.exports.extractIssuesJson = extractIssuesJson;
+module.exports.persistIssues = persistIssues;

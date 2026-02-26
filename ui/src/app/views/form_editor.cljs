@@ -156,11 +156,19 @@
         [popup-view current-def modal?]
         [:div.editor-body.view-mode
          [:div.editor-center [form-view/form-view]]]))
-    [:div.editor-body
-     [:div.editor-center [form-design/form-canvas]]
-     [:div.editor-right
-      [form-properties/properties-panel]
-      [form-design/field-list]]]))
+    (let [props-open? (:properties-panel-open? @state/app-state)]
+      [:div.editor-body
+       [:div.editor-center [form-design/form-canvas]]
+       [:div.editor-right {:class (when-not props-open? "collapsed")}
+        [:div.properties-header
+         [:span.properties-header-title "Properties"]
+         [:button.properties-toggle
+          {:on-click #(t/dispatch! :toggle-properties-panel)}
+          (if props-open? "\u00BB" "\u00AB")]]
+        (when props-open?
+          [:<>
+           [form-properties/properties-panel]
+           [form-design/field-list]])]])))
 
 (defn form-editor
   "Main form editor component"

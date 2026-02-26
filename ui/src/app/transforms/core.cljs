@@ -27,7 +27,7 @@
 ;; ============================================================
 
 (def registry
-  {;; UI domain (19)
+  {;; UI domain (20)
    :set-loading             ui/set-loading
    :set-error               ui/set-error
    :clear-error             ui/clear-error
@@ -47,6 +47,7 @@
    :set-assessment          ui/set-assessment
    :toggle-assessment-check ui/toggle-assessment-check
    :clear-assessment        ui/clear-assessment
+   :toggle-properties-panel ui/toggle-properties-panel
 
    ;; Chat domain (5)
    :toggle-chat-panel       chat/toggle-chat-panel

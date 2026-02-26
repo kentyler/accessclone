@@ -1,6 +1,6 @@
 (ns app.transforms.ui
   "Pure UI transforms — (state, args) -> state.
-   19 transforms covering loading, error, database selection, sidebar, objects, config, context menu, assessment.")
+   20 transforms covering loading, error, database selection, sidebar, objects, config, context menu, assessment, properties panel.")
 
 ;; Loading / Error
 (defn set-loading [state loading?]
@@ -62,6 +62,10 @@
 
 (defn hide-context-menu [state]
   (assoc-in state [:context-menu :visible?] false))
+
+;; Properties panel
+(defn toggle-properties-panel [state]
+  (update state :properties-panel-open? not))
 
 ;; Pre-import assessment
 (defn set-assessment [state findings & [scan-summary]]

@@ -31,6 +31,7 @@ $ctlTypes = @{
     122 = "toggle-button"
     123 = "tab-control"
     124 = "page"
+    126 = "attachment"
 }
 
 function Safe-GetProperty {

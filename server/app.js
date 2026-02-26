@@ -26,10 +26,12 @@ const lintRoutes = require('./routes/lint');
 const graphRoutes = require('./routes/graph');
 const accessImportRoutes = require('./routes/access-import');
 const importIssuesRoutes = require('./routes/import-issues');
+const issuesRoutes = require('./routes/issues');
 const transcriptsRoutes = require('./routes/transcripts');
 const formStateRoutes = require('./routes/form-state');
 const appRoutes = require('./routes/app');
 const pipelineRoutes = require('./routes/pipeline');
+const attachmentsRoutes = require('./routes/attachments');
 
 function createApp({
   pool,
@@ -66,9 +68,11 @@ function createApp({
     if (req.path === '/databases' || req.path.startsWith('/databases') ||
         req.path.startsWith('/access-import') ||
         req.path.startsWith('/import-issues') ||
+        req.path.startsWith('/issues') ||
         req.path.startsWith('/form-state') ||
         req.path.startsWith('/app') ||
-        req.path.startsWith('/pipeline')) {
+        req.path.startsWith('/pipeline') ||
+        req.path.startsWith('/attachments')) {
       return next();
     }
 
@@ -116,10 +120,12 @@ function createApp({
   app.use('/api/graph', graphRoutes(pool));
   app.use('/api/access-import', accessImportRoutes(pool, secrets));
   app.use('/api/import-issues', importIssuesRoutes(pool));
+  app.use('/api/issues', issuesRoutes(pool));
   app.use('/api/transcripts', transcriptsRoutes(pool));
   app.use('/api/form-state', formStateRoutes(pool));
   app.use('/api/app', appRoutes(pool));
   app.use('/api/pipeline', pipelineRoutes(pool, secrets));
+  app.use('/api/attachments', attachmentsRoutes(pool));
   return { app, databasesRouter };
 }
 

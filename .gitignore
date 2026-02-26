@@ -28,5 +28,8 @@ electron/dist/
 .DS_Store
 Thumbs.db
 
+# Uploaded/extracted files
+server/uploads/
+
 # Logs
 *.log

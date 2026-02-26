@@ -162,6 +162,41 @@
     [:img.view-image {:src src :alt (or (:text ctrl) "Image")}]
     [:div.view-image-placeholder "\uD83D\uDDBC No Image"]))
 
+(defn render-attachment [ctrl field _value _on-change opts]
+  (let [cache (r/atom {:pk nil :files nil :loading? false})]
+    (fn [ctrl field _value _on-change opts]
+      (let [current-record (:current-record opts)
+            fe (:form-editor @state/app-state)
+            record-source (:record-source (:current fe))
+            db-id (:database_id (:current-database @state/app-state))
+            rs-fields (state-form/get-record-source-fields record-source)
+            pk-field (state/detect-pk-field (or rs-fields []))
+            pk-val (state/pk-value-for-record current-record pk-field)
+            col-name (or field (:control-source ctrl) (:name ctrl))]
+        ;; Fetch attachment metadata when PK changes
+        (when (and db-id record-source pk-val col-name
+                   (not= pk-val (:pk @cache)))
+          (reset! cache {:pk pk-val :files nil :loading? true})
+          (-> (js/fetch (str "/api/attachments/" (js/encodeURIComponent db-id)
+                             "/" (js/encodeURIComponent record-source)
+                             "/" (js/encodeURIComponent (str pk-val))
+                             "/" (js/encodeURIComponent col-name)))
+              (.then #(.json %))
+              (.then (fn [data]
+                       (let [files (js->clj data :keywordize-keys true)]
+                         (swap! cache assoc :files files :loading? false))))
+              (.catch (fn [_] (swap! cache assoc :files [] :loading? false)))))
+        (let [{:keys [files loading?]} @cache
+              first-file (first files)]
+          (cond
+            loading? [:div.view-attachment-placeholder "Loading..."]
+            (and first-file (str/starts-with? (or (:mimeType first-file) "") "image/"))
+            [:img.view-attachment-image {:src (:url first-file)
+                                         :alt (or (:fileName first-file) "Attachment")}]
+            first-file [:a.view-attachment-file {:href (:url first-file) :target "_blank"}
+                        (:fileName first-file)]
+            :else [:div.view-attachment-placeholder "No attachment"]))))))
+
 (defn render-listbox [ctrl field value on-change opts]
   (when-let [rs (:row-source ctrl)] (f/run-fire-and-forget! (form-flow/fetch-row-source-flow) {:row-source rs}))
   (fn [ctrl field value on-change {:keys [allow-edits? tab-idx]}]
@@ -422,7 +457,7 @@
    :rectangle render-rectangle, :image render-image, :object-frame render-image, :list-box render-listbox
    :option-group render-option-group, :option-button render-option-button
    :toggle-button render-toggle-button, :tab-control render-tab-control
-   :subform render-subform})
+   :subform render-subform, :attachment render-attachment})
 
 (defn form-view-control
   "Render a single control in view mode"

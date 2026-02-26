@@ -298,6 +298,29 @@ CREATE TABLE IF NOT EXISTS shared.chat_transcripts (
 );
 
 -- ============================================================
+-- Issues - structured findings from LLM auto-analysis
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.issues (
+    id SERIAL PRIMARY KEY,
+    database_id VARCHAR(100) NOT NULL,
+    object_type VARCHAR(50) NOT NULL,
+    object_name VARCHAR(255) NOT NULL,
+    category VARCHAR(50),
+    severity VARCHAR(20) NOT NULL DEFAULT 'warning',
+    message TEXT NOT NULL,
+    suggestion TEXT,
+    resolution VARCHAR(20) DEFAULT 'open',
+    resolution_notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    resolved_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_issues_db ON shared.issues(database_id);
+CREATE INDEX IF NOT EXISTS idx_issues_open
+  ON shared.issues(database_id, resolution) WHERE resolution = 'open';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_issues_dedup
+  ON shared.issues(database_id, object_type, object_name, category, message);
+
+-- ============================================================
 -- Form Control State - live form control values for query subqueries
 -- Keyed by (session, table, column) so queries don't need form identity
 -- ============================================================
@@ -338,6 +361,28 @@ CREATE TABLE IF NOT EXISTS shared.control_column_map (
     PRIMARY KEY (database_id, form_name, control_name)
 );
 CREATE INDEX IF NOT EXISTS idx_ccm_table ON shared.control_column_map(database_id, table_name, column_name);
+
+-- ============================================================
+-- Attachments — files extracted from Access attachment columns (DAO type 101)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.attachments (
+    id SERIAL PRIMARY KEY,
+    database_id VARCHAR(100) NOT NULL,
+    table_name VARCHAR(255) NOT NULL,
+    pk_column VARCHAR(255) NOT NULL,
+    pk_value TEXT NOT NULL,
+    column_name VARCHAR(255) NOT NULL,
+    file_name TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    mime_type VARCHAR(100),
+    file_size INTEGER,
+    sort_order INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_attachments_lookup
+  ON shared.attachments(database_id, table_name, pk_value, column_name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_attachments_unique
+  ON shared.attachments(database_id, table_name, pk_value, column_name, file_name);
 
 -- ============================================================
 -- Session State View - pre-filtered on current session for cross-join usage in converted queries

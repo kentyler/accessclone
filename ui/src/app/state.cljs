@@ -101,7 +101,10 @@
            :chat-input ""
            :chat-loading? false
            :chat-panel-open? true
-           :chat-tab nil}))  ; {:type :forms :id 1 :name "MyForm"} - tab owning current transcript
+           :chat-tab nil    ; {:type :forms :id 1 :name "MyForm"} - tab owning current transcript
+
+           ;; Properties panel state (design view)
+           :properties-panel-open? true}))
 
 ;; Loading/Error
 (defn set-loading! [loading?]
@@ -1302,22 +1305,30 @@
                                             assessment-findings)
                                    {:findings assessment-findings
                                     :scan_summary assessment-scan})
+              ;; Extract issues flag (set by auto-analyze)
+              extract-issues (:extract-issues @app-state)
+              auto-analyze-obj (:auto-analyze-object @app-state)
+              _ (when extract-issues
+                  (swap! app-state dissoc :extract-issues :auto-analyze-object))
               ;; Send full conversation history for context
               history (vec (:chat-messages @app-state))
               response (<! (http/post (str api-base "/api/chat")
-                                      {:json-params {:message input
-                                                     :history history
-                                                     :database_id (:database_id (:current-database @app-state))
-                                                     :form_context form-context
-                                                     :report_context report-context
-                                                     :module_context module-context
-                                                     :macro_context macro-context
-                                                     :sql_function_context sql-fn-context
-                                                     :table_context table-context
-                                                     :query_context query-context
-                                                     :app_context app-context
-                                                     :issue_context issue-context
-                                                     :assessment_context assessment-context}
+                                      {:json-params (cond-> {:message input
+                                                             :history history
+                                                             :database_id (:database_id (:current-database @app-state))
+                                                             :form_context form-context
+                                                             :report_context report-context
+                                                             :module_context module-context
+                                                             :macro_context macro-context
+                                                             :sql_function_context sql-fn-context
+                                                             :table_context table-context
+                                                             :query_context query-context
+                                                             :app_context app-context
+                                                             :issue_context issue-context
+                                                             :assessment_context assessment-context}
+                                                      extract-issues
+                                                      (assoc :extract_issues true
+                                                             :auto_analyze_object (clj->js auto-analyze-obj)))
                                        :headers (db-headers)}))]
           (set-chat-loading! false)
           (if (:success response)
@@ -1367,14 +1378,23 @@
       (when has-def?
         (swap! app-state dissoc :auto-analyze-pending)
         (let [obj-name (or (:name (:chat-tab @app-state)) (tab->object-name active-tab))
+              issues-suffix (str "\n\nAfter your analysis, output a JSON code block with structured issues:\n"
+                                 "```issues\n"
+                                 "[{\"category\":\"...\",\"severity\":\"warning|error|info\",\"message\":\"...\",\"suggestion\":\"...\"}]\n"
+                                 "```\n"
+                                 "Categories: empty-section, missing-field-binding, overlapping-controls, naming-mismatch, "
+                                 "layout-density, unknown-control-type, missing-validation, complex-calculated-field, "
+                                 "missing-height, missing-navigation, unnamed-form, empty-cell-controls, "
+                                 "missing-primary-key, unusual-data-type, missing-join, performance-concern, "
+                                 "translation-complexity, other")
               prompt (case tab-type
-                       :reports (str "This is the report \"" obj-name "\". Briefly describe its structure and purpose. Note any potential issues such as missing field bindings, empty bands, layout problems, or other concerns.")
-                       :forms   (str "This is the form \"" obj-name "\". Briefly describe its structure and purpose. Note any potential issues such as missing field bindings, empty sections, layout problems, or other concerns.")
+                       :reports (str "This is the report \"" obj-name "\". Briefly describe its structure and purpose. Note any potential issues such as missing field bindings, empty bands, layout problems, or other concerns." issues-suffix)
+                       :forms   (str "This is the form \"" obj-name "\". Briefly describe its structure and purpose. Note any potential issues such as missing field bindings, empty sections, layout problems, or other concerns." issues-suffix)
                        :sql-functions (let [func (first (filter #(= (:id %) (:id active-tab))
                                                                (get-in @app-state [:objects :sql-functions])))]
                                         (str "Analyze this SQL function and briefly describe its purpose, parameters, and return type. "
                                              "Note any potential issues.\n\n"
-                                             (:source func)))
+                                             (:source func) issues-suffix))
                        :tables (let [tbl (get-in @app-state [:table-viewer :table-info])
                                      fields (:fields tbl)
                                      field-summary (clojure.string/join ", "
@@ -1385,7 +1405,7 @@
                                       "Note any potential issues such as missing primary keys, unusual data types, or naming concerns.\n\n"
                                       "Table: " (:name tbl) "\n"
                                       (when (:description tbl) (str "Description: " (:description tbl) "\n"))
-                                      "Columns: " field-summary))
+                                      "Columns: " field-summary issues-suffix))
                        :queries (let [qi (get-in @app-state [:query-viewer :query-info])
                                       fields (:fields qi)
                                       field-summary (clojure.string/join ", " (map :name fields))]
@@ -1393,19 +1413,23 @@
                                        "Note any potential issues such as missing joins, performance concerns, or unusual patterns.\n\n"
                                        "Query: " (:name qi) "\n"
                                        "SQL: " (:sql qi) "\n"
-                                       (when (seq fields) (str "Fields: " field-summary))))
+                                       (when (seq fields) (str "Fields: " field-summary)) issues-suffix))
                        :modules (let [mi (get-in @app-state [:module-viewer :module-info])]
                                   (str "Briefly describe this VBA module's purpose and functionality. "
                                        "Note any potential issues or complexities for translation to ClojureScript.\n\n"
                                        "Module: " (:name mi) "\n"
-                                       (when (:vba-source mi) (str "VBA Source:\n" (:vba-source mi)))))
+                                       (when (:vba-source mi) (str "VBA Source:\n" (:vba-source mi))) issues-suffix))
                        :macros (let [mi (get-in @app-state [:macro-viewer :macro-info])]
                                  (str "Briefly describe this Access macro's actions and purpose. "
                                       "Note any potential issues or complexities for conversion to web application event handlers.\n\n"
                                       "Macro: " (:name mi) "\n"
-                                      (when (:macro-xml mi) (str "XML Definition:\n" (:macro-xml mi)))))
+                                      (when (:macro-xml mi) (str "XML Definition:\n" (:macro-xml mi))) issues-suffix))
                        nil)]
           (when prompt
+            ;; Set extract-issues flag + object metadata for the server to persist issues
+            (swap! app-state assoc
+                   :extract-issues true
+                   :auto-analyze-object {:type (name tab-type) :name obj-name})
             (set-chat-input! prompt)
             (send-chat-message!)))))))
 

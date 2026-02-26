@@ -12,6 +12,7 @@ module.exports = function(pool, secrets) {
   require('./import-table')(router, pool);
   require('./import-query')(router, pool, secrets);
   require('./import-images')(router, pool);
+  require('./import-attachments')(router, pool);
   require('./completeness')(router, pool);
   require('./assess')(router, pool);
   require('./property-catalog')(router, pool);

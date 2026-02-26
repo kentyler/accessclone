@@ -12,13 +12,54 @@ const { executeTool } = require('./tool-handlers');
 const { deriveCapabilities } = require('../../lib/capability-deriver');
 const { upsertNode, upsertEdge, findNode } = require('../../graph/query');
 
+/**
+ * Extract structured issues JSON from LLM response text.
+ * Returns { cleaned, issues } where cleaned has the JSON block removed.
+ */
+function extractIssuesJson(text) {
+  const match = text.match(/```issues\s*\n?([\s\S]*?)```/);
+  if (!match) return { cleaned: text, issues: [] };
+  try {
+    const issues = JSON.parse(match[1].trim());
+    const cleaned = text.replace(/```issues\s*\n?[\s\S]*?```/, '').trim();
+    return { cleaned, issues: Array.isArray(issues) ? issues : [] };
+  } catch {
+    return { cleaned: text, issues: [] };
+  }
+}
+
+/**
+ * UPSERT issues into shared.issues table.
+ */
+async function persistIssues(pool, databaseId, objectType, objectName, issues) {
+  const validSeverities = ['error', 'warning', 'info'];
+  let count = 0;
+  for (const issue of issues) {
+    if (!issue.message) continue;
+    const severity = validSeverities.includes(issue.severity) ? issue.severity : 'warning';
+    try {
+      await pool.query(`
+        INSERT INTO shared.issues (database_id, object_type, object_name, category, severity, message, suggestion)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (database_id, object_type, object_name, category, message)
+        DO UPDATE SET severity = EXCLUDED.severity, suggestion = EXCLUDED.suggestion
+      `, [databaseId, objectType, objectName, issue.category || 'other', severity, issue.message, issue.suggestion || null]);
+      count++;
+    } catch (err) {
+      // Log but don't fail the chat response
+      console.error('Error persisting issue:', err.message);
+    }
+  }
+  return count;
+}
+
 module.exports = function(pool, secrets) {
   /**
    * POST /api/chat
    * Send a message to the LLM and get a response
    */
   router.post('/', async (req, res) => {
-    const { message, history, database_id, form_context, report_context, module_context, macro_context, sql_function_context, table_context, query_context, app_context, issue_context, assessment_context } = req.body;
+    const { message, history, database_id, form_context, report_context, module_context, macro_context, sql_function_context, table_context, query_context, app_context, issue_context, assessment_context, extract_issues, auto_analyze_object } = req.body;
 
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
@@ -349,7 +390,15 @@ Keep responses concise and helpful. When discussing code or SQL, use markdown co
 
         // If no tool was matched, return without followup
         if (toolResult === null) {
-          const assistantMessage = data.content.find(c => c.type === 'text')?.text || 'No response';
+          let assistantMessage = data.content.find(c => c.type === 'text')?.text || 'No response';
+          if (extract_issues && auto_analyze_object) {
+            const { cleaned, issues } = extractIssuesJson(assistantMessage);
+            const dbId = database_id || req.headers['x-database-id'];
+            if (issues.length > 0 && dbId) {
+              await persistIssues(pool, dbId, auto_analyze_object.type, auto_analyze_object.name, issues);
+            }
+            return res.json({ message: cleaned, issues });
+          }
           return res.json({ message: assistantMessage });
         }
 
@@ -396,7 +445,15 @@ Keep responses concise and helpful. When discussing code or SQL, use markdown co
         });
       }
 
-      const assistantMessage = data.content.find(c => c.type === 'text')?.text || 'No response';
+      let assistantMessage = data.content.find(c => c.type === 'text')?.text || 'No response';
+      if (extract_issues && auto_analyze_object) {
+        const { cleaned, issues } = extractIssuesJson(assistantMessage);
+        const dbId = database_id || req.headers['x-database-id'];
+        if (issues.length > 0 && dbId) {
+          await persistIssues(pool, dbId, auto_analyze_object.type, auto_analyze_object.name, issues);
+        }
+        return res.json({ message: cleaned, issues });
+      }
       res.json({ message: assistantMessage });
     } catch (err) {
       console.error('Error in chat:', err);

@@ -603,6 +603,55 @@ body {
   border-left: 1px solid var(--gray-200);
   overflow-y: auto;
   flex-shrink: 0;
+  transition: width 0.2s ease;
+}
+
+.editor-right.collapsed {
+  width: 36px;
+  overflow: hidden;
+}
+
+.editor-right .properties-toggle {
+  background: none;
+  border: 1px solid var(--gray-300);
+  width: 22px;
+  height: 22px;
+  border-radius: 3px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  color: var(--gray-500);
+  flex-shrink: 0;
+}
+
+.editor-right .properties-toggle:hover {
+  background: var(--gray-100);
+}
+
+.editor-right .properties-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--gray-200);
+  background: var(--gray-50);
+}
+
+.editor-right .properties-header-title {
+  font-weight: 600;
+  font-size: 0.75rem;
+  color: var(--gray-700);
+}
+
+.editor-right.collapsed .properties-header-title {
+  display: none;
+}
+
+.editor-right.collapsed .properties-header {
+  justify-content: center;
+  padding: 0.25rem;
 }
 
 /* Control Palette */
@@ -1318,6 +1367,37 @@ body {
   font-size: 0.8125rem;
 }
 
+.view-attachment-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.view-attachment-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--gray-100);
+  border: 1px dashed var(--gray-300);
+  color: var(--gray-500);
+  font-size: 0.8125rem;
+}
+
+.view-attachment-file {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 0.8125rem;
+  color: var(--blue-600, #2563eb);
+  text-decoration: underline;
+  word-break: break-all;
+  padding: 0.25rem;
+}
+
 .view-listbox {
   width: 100%;
   height: 100%;
@@ -1877,6 +1957,18 @@ body {
   overflow: hidden;
 }
 
+.form-control.attachment {
+  background: var(--gray-100);
+  border: 2px dashed var(--gray-400);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--gray-500);
+  font-size: 0.75rem;
+  padding: 0;
+  overflow: hidden;
+}
+
 .form-control.list-box {
   background: white;
   border: 1px solid var(--gray-500);
@@ -2121,7 +2213,7 @@ body {
    ============================================ */
 
 .chat-panel {
-  width: 640px;
+  width: 544px;
   background: white;
   border-left: 1px solid var(--gray-200);
   display: flex;

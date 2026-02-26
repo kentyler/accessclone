@@ -122,9 +122,17 @@
 
            ;; Design mode
            :else
-           [:div.editor-body
-            [:div.editor-center
-             [report-design/report-canvas]]
-            [:div.editor-right
-             [report-properties/properties-panel]
-             [report-design/field-list]]])]))))
+           (let [props-open? (:properties-panel-open? @state/app-state)]
+             [:div.editor-body
+              [:div.editor-center
+               [report-design/report-canvas]]
+              [:div.editor-right {:class (when-not props-open? "collapsed")}
+               [:div.properties-header
+                [:span.properties-header-title "Properties"]
+                [:button.properties-toggle
+                 {:on-click #(t/dispatch! :toggle-properties-panel)}
+                 (if props-open? "\u00BB" "\u00AB")]]
+               (when props-open?
+                 [:<>
+                  [report-properties/properties-panel]
+                  [report-design/field-list]])]]))]))))

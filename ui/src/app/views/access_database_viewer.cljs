@@ -12,7 +12,7 @@
 
 (def api-base state/api-base)
 
-(declare get-item-name load-access-database-contents! load-target-existing! load-import-history! load-image-status! import-images!)
+(declare get-item-name load-access-database-contents! load-target-existing! load-import-history! load-image-status! import-images! import-attachments!)
 
 ;; ============================================================
 ;; Access JSON → AccessClone Form Definition Converter
@@ -966,8 +966,9 @@
     (swap! viewer-state assoc :importing? true)
     (go
       (if (= obj-type :images)
-        ;; Images: single COM session extracts all image controls
-        (<! (import-images! access-db-path target-database-id))
+        ;; Images: single COM session extracts all image controls + attachment files
+        (do (<! (import-images! access-db-path target-database-id))
+            (<! (import-attachments! access-db-path target-database-id)))
         (if (and (> (count selected) 1) (contains? batch-eligible-types obj-type))
           ;; Batch import for forms/reports/modules/macros
           (let [batch-fn (batch-import-fn-for-type obj-type)
@@ -1094,6 +1095,24 @@
         (let [err (or (get-in response [:body :error]) "Image import failed")]
           (state/log-event! "warning" (str "Image import: " err) "import-images"))))))
 
+(defn import-attachments!
+  "Call the server to extract attachment files from Access attachment columns.
+   Iterates all tables in the source database and imports any attachment data found.
+   Returns a channel that closes when done."
+  [access-db-path target-database-id]
+  (go
+    (let [tables (:tables @viewer-state)
+          table-names (map :name tables)]
+      (doseq [table-name table-names]
+        (let [response (<! (http/post (str api-base "/api/access-import/import-attachments")
+                                      {:json-params {:databasePath access-db-path
+                                                     :tableName table-name
+                                                     :targetDatabaseId target-database-id}}))]
+          (when (and (:success response) (get-in response [:body :success]))
+            (let [cnt (get-in response [:body :count] 0)]
+              (when (pos? cnt)
+                (println (str "[ATTACHMENTS] Imported " cnt " attachments from " table-name))))))))))
+
 (defn import-all!
   "Import all objects across all phases from all selected databases.
    Uses batch import for forms/reports/modules/macros (single COM session per type per db).
@@ -1162,6 +1181,10 @@
             ;; After modules phase, create PG stub functions from VBA declarations
             (when (= phase :modules)
               (<! (create-function-stubs! target-database-id)))
+            ;; After tables phase, extract attachment files
+            (when (= phase :tables)
+              (doseq [p (:selected-paths @viewer-state)]
+                (<! (import-attachments! p target-database-id))))
             ;; After UI phase (forms & reports), extract and embed images
             (when (= phase :ui)
               (doseq [p (:selected-paths @viewer-state)]

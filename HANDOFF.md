@@ -6,7 +6,10 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 
 ## Current State
 
-### Just Shipped (2026-02-25)
+### Just Shipped (2026-03-02)
+- **Updatable query support**: Forms whose record source is a multi-table view (like `qryOrder` joining `orders` + `orderstatus`) can now be edited. Full pipeline: `shared.view_metadata` stores base table, PK, and writable columns at import time. `resolveWriteTarget()` redirects writes to the base table. Non-writable lookup fields are greyed out and disabled in forms. After UPDATE, the in-memory record is preserved (not replaced by server response, which would lose lookup columns). After INSERT, server response is merged to pick up auto-generated PK. See `skills/updatable-queries.md`.
+
+### Previously Shipped (2026-02-25)
 - **Stripped Notes/Hub/Corpus code**: Removed hub.cljs, notes.cljs, llm_registry.cljs, meetings.cljs, messaging.cljs, email.cljs, flows/notes.cljs, transforms/notes.cljs, server/routes/notes.js, server/lib/llm-router.js, server/lib/embeddings.js, skills/notes-corpus.md, docs/corpus-medium-plans.md. Removed corpus_entries/corpus_retrievals tables and pgvector from schema.js. Removed llm-registry from config.json. Cleaned CSS (~750 lines), CLAUDE.md, codebase-guide.md. AccessClone is now purely the Access→PostgreSQL conversion tool. Historical references in sessions below are for context only.
 
 ### Previously Shipped (2026-02-24)

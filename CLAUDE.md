@@ -270,6 +270,7 @@ All `.md` files in the project (excluding node_modules). Read the relevant files
 |------|-------|
 | `form-design.md` | Form definition structure, control types, layout, binding, hotkeys |
 | `form-state-sync.md` | Cross-form state sync (control_column_map, session_state cross-join, runtime) |
+| `updatable-queries.md` | View write-target resolution (Access updatable queries vs PG read-only views) |
 | `database-patterns.md` | PostgreSQL function patterns (session-state, validator/executor/orchestrator) |
 | `transform-architecture.md` | Pure transform architecture — 3 layers, 5 build phases, VBA intent mapping |
 | `capability-ontology.md` | Three-layer model (Could Do / Should Do / Doing Now), four primitives, Deleuzian reading |

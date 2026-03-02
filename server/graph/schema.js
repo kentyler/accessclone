@@ -415,6 +415,35 @@ CREATE INDEX IF NOT EXISTS idx_prop_catalog_version
     ON shared.access_property_catalog(access_version);
 CREATE INDEX IF NOT EXISTS idx_prop_catalog_type
     ON shared.access_property_catalog(object_type, object_subtype);
+
+-- ============================================================
+-- View Metadata - base table and PK for imported views (queries)
+-- Populated at import time so forms with view record-sources can
+-- route writes to the correct base table and detect the PK field.
+-- See skills/updatable-queries.md for full design.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.view_metadata (
+    database_id VARCHAR(100) NOT NULL,
+    view_name TEXT NOT NULL,
+    base_table TEXT NOT NULL,
+    pk_column TEXT,
+    writable_columns TEXT[] DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (database_id, view_name)
+);
+
+-- Migration: add writable_columns if table already exists without it
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'shared' AND table_name = 'view_metadata'
+  ) AND NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'shared' AND table_name = 'view_metadata' AND column_name = 'writable_columns'
+  ) THEN
+    ALTER TABLE shared.view_metadata ADD COLUMN writable_columns TEXT[] DEFAULT '{}';
+  END IF;
+END $$;
 `;
 
 /**
@@ -1030,11 +1059,77 @@ async function initializeSchema(pool) {
     // Seed property catalog (idempotent)
     await seedPropertyCatalog(pool);
 
+    // Backfill view_metadata for databases imported before this table existed
+    await backfillViewMetadata(pool);
+
     console.log('Shared schema initialized (graph, forms, reports, property catalog)');
     return true;
   } catch (err) {
     console.error('Error initializing shared schema:', err.message);
     throw err;
+  }
+}
+
+/**
+ * Backfill view_metadata for databases that have views but no metadata.
+ * Runs once on startup; only processes schemas with missing entries.
+ */
+async function backfillViewMetadata(pool) {
+  try {
+    const dbs = await pool.query('SELECT database_id, schema_name FROM shared.databases');
+    for (const db of dbs.rows) {
+      // Count existing metadata vs actual views
+      const existingCount = await pool.query(
+        'SELECT COUNT(*) FROM shared.view_metadata WHERE database_id = $1',
+        [db.database_id]
+      );
+      const viewCount = await pool.query(
+        `SELECT COUNT(*) FROM information_schema.views WHERE table_schema = $1`,
+        [db.schema_name]
+      );
+      // Skip if already populated (or no views)
+      if (parseInt(existingCount.rows[0].count) > 0 || parseInt(viewCount.rows[0].count) === 0) continue;
+
+      console.log(`[BACKFILL] Populating view_metadata for ${db.database_id}...`);
+      const result = await pool.query(`
+        WITH view_base AS (
+          SELECT view_name, table_name,
+                 ROW_NUMBER() OVER (PARTITION BY view_name ORDER BY COUNT(*) DESC) AS rn
+          FROM information_schema.view_column_usage
+          WHERE view_schema = $1 AND table_schema = $1
+            AND table_name != view_name
+          GROUP BY view_name, table_name
+        )
+        SELECT vb.view_name, vb.table_name AS base_table, kcu.column_name AS pk_column
+        FROM view_base vb
+        LEFT JOIN information_schema.table_constraints tc
+          ON tc.table_name = vb.table_name AND tc.table_schema = $1
+          AND tc.constraint_type = 'PRIMARY KEY'
+        LEFT JOIN information_schema.key_column_usage kcu
+          ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = $1
+        WHERE vb.rn = 1
+      `, [db.schema_name]);
+
+      for (const row of result.rows) {
+        // Get writable columns (those from the base table)
+        const writableCols = await pool.query(`
+          SELECT DISTINCT column_name
+          FROM information_schema.view_column_usage
+          WHERE view_schema = $1 AND view_name = $2
+            AND table_schema = $1 AND table_name = $3
+        `, [db.schema_name, row.view_name, row.base_table]);
+        const writableColumns = writableCols.rows.map(r => r.column_name);
+
+        await pool.query(`
+          INSERT INTO shared.view_metadata (database_id, view_name, base_table, pk_column, writable_columns)
+          VALUES ($1, $2, $3, $4, $5)
+          ON CONFLICT (database_id, view_name) DO NOTHING
+        `, [db.database_id, row.view_name, row.base_table, row.pk_column, writableColumns]);
+      }
+      console.log(`[BACKFILL] ${result.rows.length} views populated for ${db.database_id}`);
+    }
+  } catch (err) {
+    console.warn('view_metadata backfill skipped:', err.message);
   }
 }
 

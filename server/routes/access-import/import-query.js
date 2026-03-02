@@ -201,10 +201,58 @@ module.exports = function(router, pool, secrets) {
         client.release();
       }
 
-      // 6. Clear schema cache
+      // 6. Populate view_metadata (base table, PK, writable columns) for updatable query support
+      if (result.pgObjectType === 'view') {
+        try {
+          // Find the base table (most columns) and its PK
+          const baseResult = await pool.query(`
+            WITH view_base AS (
+              SELECT table_name,
+                     ROW_NUMBER() OVER (ORDER BY COUNT(*) DESC) AS rn
+              FROM information_schema.view_column_usage
+              WHERE view_schema = $1 AND view_name = $2
+                AND table_schema = $1 AND table_name != $2
+              GROUP BY table_name
+            )
+            SELECT vb.table_name AS base_table, kcu.column_name AS pk_column
+            FROM view_base vb
+            LEFT JOIN information_schema.table_constraints tc
+              ON tc.table_name = vb.table_name AND tc.table_schema = $1
+              AND tc.constraint_type = 'PRIMARY KEY'
+            LEFT JOIN information_schema.key_column_usage kcu
+              ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = $1
+            WHERE vb.rn = 1
+            LIMIT 1
+          `, [schemaName, pgName]);
+
+          if (baseResult.rows.length > 0) {
+            const { base_table, pk_column } = baseResult.rows[0];
+
+            // Find which view columns come from the base table (these are writable)
+            const writableCols = await pool.query(`
+              SELECT DISTINCT column_name
+              FROM information_schema.view_column_usage
+              WHERE view_schema = $1 AND view_name = $2
+                AND table_schema = $1 AND table_name = $3
+            `, [schemaName, pgName, base_table]);
+            const writableColumns = writableCols.rows.map(r => r.column_name);
+
+            await pool.query(`
+              INSERT INTO shared.view_metadata (database_id, view_name, base_table, pk_column, writable_columns)
+              VALUES ($1, $2, $3, $4, $5)
+              ON CONFLICT (database_id, view_name)
+              DO UPDATE SET base_table = $3, pk_column = $4, writable_columns = $5
+            `, [targetDatabaseId, pgName, base_table, pk_column, writableColumns]);
+          }
+        } catch (vmErr) {
+          console.warn(`[QUERY ${queryName}] Could not populate view_metadata:`, vmErr.message);
+        }
+      }
+
+      // 7. Clear schema cache
       clearSchemaCache(targetDatabaseId);
 
-      // 7. Log success
+      // 8. Log success
       const queryLogId = await logImport('success', null, {
         pgObjectType: result.pgObjectType,
         originalType: queryData.queryType,
@@ -213,7 +261,7 @@ module.exports = function(router, pool, secrets) {
         extractedFunctions: result.extractedFunctions.length > 0 ? result.extractedFunctions.map(f => f.name) : undefined
       });
 
-      // 8. Create issues for conversion warnings
+      // 9. Create issues for conversion warnings
       if (queryLogId && result.warnings.length > 0) {
         try {
           for (const warning of result.warnings) {

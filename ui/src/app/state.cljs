@@ -1014,6 +1014,7 @@
   [field]
   {:name (:name field) :type (:type field)
    :pk (:isPrimaryKey field) :nullable (:nullable field)
+   :writable (if (contains? field :isWritable) (:isWritable field) true)
    :fk (when (:isForeignKey field) (:foreignTable field))
    :default (:default field) :max-length (:maxLength field)
    :precision (:precision field) :scale (:scale field)
@@ -1055,11 +1056,7 @@
                                   {:id (inc idx)
                                    :name (:name query)
                                    :sql (:sql query)
-                                   :fields (mapv (fn [field]
-                                                   {:name (:name field)
-                                                    :type (:type field)
-                                                    :nullable (:nullable field)})
-                                                 (:fields query))})
+                                   :fields (mapv transform-api-field (:fields query))})
                                 queries)]
           (swap! app-state assoc-in [:objects :queries] (vec queries-with-ids))
           (object-load-complete!))

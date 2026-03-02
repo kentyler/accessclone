@@ -67,6 +67,84 @@ function quoteIdent(name) {
   return '"' + name.replace(/"/g, '""') + '"';
 }
 
+// Cache: "schemaName:viewName" → base table name (or null if not a view)
+const viewCache = new Map();
+
+/**
+ * For views, resolve the underlying base table that should receive writes.
+ * Access allows updating through queries that join lookup tables;
+ * PostgreSQL does not. This finds the "main" table — the one contributing
+ * the most columns to the view — and redirects writes there.
+ *
+ * Returns { writeTable, isView } where writeTable is the name to use for
+ * INSERT/UPDATE/DELETE. For base tables, writeTable === sourceName.
+ */
+/**
+ * For views, resolve the underlying base table that should receive writes.
+ * Access allows updating through queries that join lookup tables;
+ * PostgreSQL does not. This finds the "main" table and redirects writes there.
+ *
+ * Uses shared.view_metadata (populated at import time) for fast lookup,
+ * falling back to information_schema introspection for views imported
+ * before view_metadata existed.
+ *
+ * Returns { writeTable, isView } where writeTable is the name to use for
+ * INSERT/UPDATE/DELETE. For base tables, writeTable === sourceName.
+ */
+async function resolveWriteTarget(pool, sourceName, schemaName, databaseId) {
+  const cacheKey = `${schemaName}:${sourceName}`;
+  const cached = cacheGet(viewCache, cacheKey);
+  if (cached !== undefined) return cached;
+
+  // Fast path: check view_metadata table (populated at import time)
+  if (databaseId) {
+    try {
+      const vmResult = await pool.query(
+        `SELECT base_table FROM shared.view_metadata WHERE database_id = $1 AND view_name = $2`,
+        [databaseId, sourceName]
+      );
+      if (vmResult.rows.length > 0) {
+        const result = { writeTable: vmResult.rows[0].base_table, isView: true };
+        cacheSet(viewCache, cacheKey, result);
+        return result;
+      }
+    } catch (e) {
+      // Table might not exist yet on older schemas — fall through
+    }
+  }
+
+  // Is it a view?
+  const typeResult = await pool.query(`
+    SELECT table_type FROM information_schema.tables
+    WHERE table_schema = $1 AND table_name = $2
+  `, [schemaName, sourceName]);
+
+  if (!typeResult.rows.length || typeResult.rows[0].table_type !== 'VIEW') {
+    const result = { writeTable: sourceName, isView: false };
+    cacheSet(viewCache, cacheKey, result);
+    return result;
+  }
+
+  // Fallback: introspect view_column_usage for the base table with most columns
+  const colUsage = await pool.query(`
+    SELECT table_name, COUNT(*) AS col_count
+    FROM information_schema.view_column_usage
+    WHERE view_schema = $1 AND view_name = $2
+      AND table_schema = $1 AND table_name != $2
+    GROUP BY table_name
+    ORDER BY col_count DESC
+    LIMIT 1
+  `, [schemaName, sourceName]);
+
+  const writeTable = colUsage.rows.length > 0
+    ? colUsage.rows[0].table_name
+    : sourceName; // fallback: let PG error if no base table found
+
+  const result = { writeTable, isView: true };
+  cacheSet(viewCache, cacheKey, result);
+  return result;
+}
+
 function clearSchemaCache(databaseId) {
   if (databaseId) {
     for (const key of pkCache.keys()) {
@@ -78,6 +156,7 @@ function clearSchemaCache(databaseId) {
   } else {
     pkCache.clear();
     colCache.clear();
+    viewCache.clear();
   }
 }
 
@@ -275,8 +354,11 @@ module.exports = function(pool) {
         return res.status(400).json({ error: 'Invalid table name' });
       }
 
-      // Validate columns against actual table schema
-      const validColumns = await getTableColumns(pool, table, req.databaseId);
+      // If record source is a view, resolve to the underlying base table
+      const { writeTable } = await resolveWriteTarget(pool, table, req.schemaName || 'public', req.databaseId);
+
+      // Validate columns against the write target (base table, not the view)
+      const validColumns = await getTableColumns(pool, writeTable, req.databaseId);
       const allKeys = Object.keys(data);
       const invalid = allKeys.filter(k => !validColumns.has(k));
       if (invalid.length > 0) {
@@ -290,13 +372,28 @@ module.exports = function(pool) {
       const placeholders = columns.map((_, i) => `$${i + 1}`);
 
       const query = `
-        INSERT INTO ${quoteIdent(table)} (${columns.map(c => quoteIdent(c)).join(', ')})
+        INSERT INTO ${quoteIdent(writeTable)} (${columns.map(c => quoteIdent(c)).join(', ')})
         VALUES (${placeholders.join(', ')})
         RETURNING *
       `;
 
       const result = await pool.query(query, values);
-      res.status(201).json({ data: result.rows[0] });
+      let row = result.rows[0];
+
+      // If we wrote to a base table but the form reads from a view,
+      // re-read from the view so lookup columns are included
+      if (writeTable !== table && row) {
+        const insertedPk = await getPrimaryKey(pool, writeTable, req.databaseId);
+        if (insertedPk && row[insertedPk] != null) {
+          const viewRow = await pool.query(
+            `SELECT * FROM ${quoteIdent(table)} WHERE ${quoteIdent(insertedPk)} = $1`,
+            [row[insertedPk]]
+          );
+          if (viewRow.rows.length > 0) row = viewRow.rows[0];
+        }
+      }
+
+      res.status(201).json({ data: row });
     } catch (err) {
       console.error('Error inserting record:', err);
       logError(pool, 'POST /api/data/:table', 'Failed to insert record', err, { databaseId: req.databaseId });
@@ -317,14 +414,17 @@ module.exports = function(pool) {
         return res.status(400).json({ error: 'Invalid table name' });
       }
 
-      // Find primary key column (cached)
-      const pkColumn = await getPrimaryKey(pool, table, req.databaseId);
+      // If record source is a view, resolve to the underlying base table
+      const { writeTable } = await resolveWriteTarget(pool, table, req.schemaName || 'public', req.databaseId);
+
+      // Find primary key column on the base table
+      const pkColumn = await getPrimaryKey(pool, writeTable, req.databaseId);
       if (!pkColumn) {
         return res.status(400).json({ error: 'Table has no primary key' });
       }
 
-      // Validate columns against actual table schema
-      const validColumns = await getTableColumns(pool, table, req.databaseId);
+      // Validate columns against the write target (base table, not the view)
+      const validColumns = await getTableColumns(pool, writeTable, req.databaseId);
       const allKeys = Object.keys(data);
       const invalid = allKeys.filter(k => !validColumns.has(k));
       if (invalid.length > 0) {
@@ -338,7 +438,7 @@ module.exports = function(pool) {
 
       const setClause = columns.map((col, i) => `${quoteIdent(col)} = $${i + 1}`).join(', ');
       const query = `
-        UPDATE ${quoteIdent(table)}
+        UPDATE ${quoteIdent(writeTable)}
         SET ${setClause}
         WHERE ${quoteIdent(pkColumn)} = $${columns.length + 1}
         RETURNING *
@@ -350,7 +450,19 @@ module.exports = function(pool) {
         return res.status(404).json({ error: 'Record not found' });
       }
 
-      res.json({ data: result.rows[0] });
+      let row = result.rows[0];
+
+      // If we wrote to a base table but the form reads from a view,
+      // re-read from the view so lookup columns are included
+      if (writeTable !== table && row) {
+        const viewRow = await pool.query(
+          `SELECT * FROM ${quoteIdent(table)} WHERE ${quoteIdent(pkColumn)} = $1`,
+          [id]
+        );
+        if (viewRow.rows.length > 0) row = viewRow.rows[0];
+      }
+
+      res.json({ data: row });
     } catch (err) {
       console.error('Error updating record:', err);
       logError(pool, 'PUT /api/data/:table/:id', 'Failed to update record', err, { databaseId: req.databaseId });
@@ -370,14 +482,17 @@ module.exports = function(pool) {
         return res.status(400).json({ error: 'Invalid table name' });
       }
 
-      // Find primary key column (cached)
-      const pkColumn = await getPrimaryKey(pool, table, req.databaseId);
+      // If record source is a view, resolve to the underlying base table
+      const { writeTable } = await resolveWriteTarget(pool, table, req.schemaName || 'public', req.databaseId);
+
+      // Find primary key column on the base table
+      const pkColumn = await getPrimaryKey(pool, writeTable, req.databaseId);
       if (!pkColumn) {
         return res.status(400).json({ error: 'Table has no primary key' });
       }
 
       const result = await pool.query(
-        `DELETE FROM "${table}" WHERE "${pkColumn}" = $1 RETURNING *`,
+        `DELETE FROM "${writeTable}" WHERE "${pkColumn}" = $1 RETURNING *`,
         [id]
       );
 

@@ -167,9 +167,12 @@
                                                  :headers (db-headers)
                                                  :json-params insert-data))]
                               (if (:ok? response)
-                                (let [new-record (:data response)]
-                                  (swap! app-state assoc-in [:form-editor :records (dec (:pos ctx))] new-record)
-                                  (swap! app-state assoc-in [:form-editor :current-record] new-record)
+                                ;; Merge server response into existing record to pick up
+                                ;; auto-generated PK without losing lookup columns from views
+                                (let [server-record (get-in response [:data :data])
+                                      merged (merge (:current-record ctx) server-record)]
+                                  (swap! app-state assoc-in [:form-editor :records (dec (:pos ctx))] merged)
+                                  (swap! app-state assoc-in [:form-editor :current-record] merged)
                                   (swap! app-state assoc-in [:form-editor :record-dirty?] false))
                                 (state/log-error! "Failed to insert record" "save-record"))
                               ctx)))}]
@@ -183,9 +186,11 @@
                                                  :headers (db-headers)
                                                  :json-params update-data))]
                               (if (:ok? response)
-                                (let [updated-record (:data response)]
-                                  (swap! app-state assoc-in [:form-editor :records (dec (:pos ctx))] updated-record)
-                                  (swap! app-state assoc-in [:form-editor :current-record] updated-record)
+                                ;; Sync the in-memory current-record (with user's edits) into
+                                ;; the records vector so navigation preserves the new values.
+                                ;; Don't use server response — views return only base-table columns.
+                                (let [current-record (get-in @app-state [:form-editor :current-record])]
+                                  (swap! app-state assoc-in [:form-editor :records (dec (:pos ctx))] current-record)
                                   (swap! app-state assoc-in [:form-editor :record-dirty?] false))
                                 (state/log-error! "Failed to update record" "save-record"))
                               ctx)))}]}]}])

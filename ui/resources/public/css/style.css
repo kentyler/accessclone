@@ -1287,6 +1287,14 @@ body {
   pointer-events: none;
 }
 
+.view-control.readonly-lookup input,
+.view-control.readonly-lookup select,
+.view-control.readonly-lookup textarea {
+  background-color: #f0f0f0 !important;
+  color: #888 !important;
+  cursor: default;
+}
+
 .view-label {
   font-size: 0.875rem;
   color: var(--gray-700);

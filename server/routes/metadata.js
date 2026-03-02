@@ -204,6 +204,74 @@ module.exports = function(pool) {
         ORDER BY v.table_name
       `, [schemaName]);
 
+      // Look up view metadata (PK + writable columns) so forms know which
+      // fields are editable. Uses shared.view_metadata (populated at import time)
+      // with fallback to information_schema introspection for pre-existing imports.
+      // viewMetaMap: view_name -> { pkColumn, writableColumns: Set }
+      const viewMetaMap = {};
+      const databaseId = req.databaseId;
+
+      // Fast path: view_metadata table
+      try {
+        const vmResult = await pool.query(
+          `SELECT view_name, pk_column, writable_columns FROM shared.view_metadata WHERE database_id = $1`,
+          [databaseId]
+        );
+        for (const row of vmResult.rows) {
+          viewMetaMap[row.view_name] = {
+            pkColumn: row.pk_column,
+            writableColumns: new Set(row.writable_columns || [])
+          };
+        }
+      } catch (e) {
+        // Table might not exist yet — fall through to introspection
+      }
+
+      // Fallback for views not in view_metadata: resolve PKs via introspection
+      const viewNames = viewsResult.rows.map(r => r.table_name);
+      const missing = viewNames.filter(v => !viewMetaMap[v]);
+      if (missing.length > 0) {
+        const baseTablePKs = await pool.query(`
+          WITH view_base AS (
+            SELECT view_name, table_name,
+                   ROW_NUMBER() OVER (PARTITION BY view_name ORDER BY COUNT(*) DESC) AS rn
+            FROM information_schema.view_column_usage
+            WHERE view_schema = $1 AND table_schema = $1
+              AND table_name != view_name
+            GROUP BY view_name, table_name
+          ),
+          base_pks AS (
+            SELECT vb.view_name, vb.table_name, kcu.column_name AS pk_column
+            FROM view_base vb
+            JOIN information_schema.table_constraints tc
+              ON tc.table_name = vb.table_name AND tc.table_schema = $1
+              AND tc.constraint_type = 'PRIMARY KEY'
+            JOIN information_schema.key_column_usage kcu
+              ON kcu.constraint_name = tc.constraint_name
+              AND kcu.table_schema = $1
+            WHERE vb.rn = 1
+          )
+          SELECT view_name, table_name, pk_column FROM base_pks
+        `, [schemaName]);
+
+        // Also get writable columns for fallback views
+        for (const row of baseTablePKs.rows) {
+          if (!viewMetaMap[row.view_name]) {
+            const writableCols = await pool.query(`
+              SELECT DISTINCT column_name
+              FROM information_schema.view_column_usage
+              WHERE view_schema = $1 AND view_name = $2
+                AND table_schema = $1 AND table_name = $3
+            `, [schemaName, row.view_name, row.table_name]);
+
+            viewMetaMap[row.view_name] = {
+              pkColumn: row.pk_column,
+              writableColumns: new Set(writableCols.rows.map(r => r.column_name))
+            };
+          }
+        }
+      }
+
       const queries = [];
       for (const row of viewsResult.rows) {
         // Get columns for each view
@@ -215,13 +283,21 @@ module.exports = function(pool) {
           ORDER BY ordinal_position
         `, [row.table_name, schemaName]);
 
+        const meta = viewMetaMap[row.table_name];
+        const pkColumn = meta?.pkColumn || null;
+        const writableSet = meta?.writableColumns;
+        // If we have no writable info, assume all columns are writable (single-table view or unknown)
+        const hasWritableInfo = writableSet && writableSet.size > 0;
+
         queries.push({
           name: row.table_name,
           sql: row.definition,
           fields: columnsResult.rows.map(col => ({
             name: col.column_name,
             type: col.data_type,
-            nullable: col.is_nullable === 'YES'
+            nullable: col.is_nullable === 'YES',
+            isPrimaryKey: col.column_name === pkColumn,
+            isWritable: hasWritableInfo ? writableSet.has(col.column_name) : true
           }))
         });
       }

@@ -526,7 +526,9 @@
               (boolean user-msg))))))))
 
 (defn- do-insert-record!
-  "Insert a new record via API and update state."
+  "Insert a new record via API and update state.
+   Merges server response into existing record to pick up auto-generated PK
+   without losing lookup columns from views."
   [record-source record-for-api pk-field-name pos]
   (go
     (let [insert-data (if (= pk-field-name "id")
@@ -534,23 +536,26 @@
           response (<! (http/post (str api-base "/api/data/" record-source)
                                   {:json-params insert-data :headers (db-headers)}))]
       (if (:success response)
-        (let [new-record (get-in response [:body :data])]
-          (swap! app-state assoc-in [:form-editor :records (dec pos)] new-record)
-          (swap! app-state assoc-in [:form-editor :current-record] new-record)
+        (let [current-record (get-in @app-state [:form-editor :current-record])
+              server-record (get-in response [:body :data])
+              merged (merge current-record server-record)]
+          (swap! app-state assoc-in [:form-editor :records (dec pos)] merged)
+          (swap! app-state assoc-in [:form-editor :current-record] merged)
           (swap! app-state assoc-in [:form-editor :record-dirty?] false))
         (log-error! "Failed to insert record" "save-record" {:response (:body response)})))))
 
 (defn- do-update-record!
-  "Update an existing record via API and update state."
+  "Update an existing record via API and update state.
+   Does NOT replace the in-memory record with the server response — views return
+   only base-table columns, so replacing would wipe lookup columns."
   [record-source record-for-api pk-field-name pk-value pos]
   (go
     (let [update-data (dissoc record-for-api pk-field-name)
           response (<! (http/put (str api-base "/api/data/" record-source "/" pk-value)
                                  {:json-params update-data :headers (db-headers)}))]
       (if (:success response)
-        (let [updated-record (get-in response [:body :data])]
-          (swap! app-state assoc-in [:form-editor :records (dec pos)] updated-record)
-          (swap! app-state assoc-in [:form-editor :current-record] updated-record)
+        (let [current-record (get-in @app-state [:form-editor :current-record])]
+          (swap! app-state assoc-in [:form-editor :records (dec pos)] current-record)
           (swap! app-state assoc-in [:form-editor :record-dirty?] false))
         (log-error! "Failed to update record" "save-record" {:response (:body response)})))))
 

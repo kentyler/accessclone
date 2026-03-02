@@ -498,19 +498,29 @@
         renderer (get control-renderers ctrl-type render-default)
         base-style (fu/control-style ctrl)
         cf-style (expr/apply-conditional-formatting ctrl current-record nil)
+        ;; Check if this field is writable (for view record-sources)
+        record-source (get-in @state/app-state [:form-editor :current :record-source])
+        rs-fields (when (and field record-source)
+                    (state-form/get-record-source-fields record-source))
+        field-meta (when rs-fields
+                     (first (filter #(= (:name %) (str/lower-case (or field ""))) rs-fields)))
+        field-writable? (if field-meta (:writable field-meta true) true)
+        is-lookup? (and field (not field-writable?))
         style (if cf-style (merge base-style cf-style) base-style)
         tab-idx (if (= 0 (:tab-stop ctrl)) -1 (:tab-index ctrl))
         tip (:control-tip-text ctrl)
         ctrl-enabled? (not= 0 (:enabled ctrl))
         ctrl-locked? (= 1 (:locked ctrl))
-        effective-edits? (and allow-edits? ctrl-enabled? (not ctrl-locked?))
+        effective-edits? (and allow-edits? ctrl-enabled? (not ctrl-locked?) field-writable?)
         hotkey (fu/extract-hotkey (or (:text ctrl) (:caption ctrl)))]
     [:div.view-control
      (cond-> {:style style :on-context-menu show-record-menu}
        tip (assoc :title tip)
        hotkey (assoc :data-hotkey hotkey)
        (= ctrl-type :label) (assoc :data-hotkey-label "true")
-       (not ctrl-enabled?) (assoc :class "disabled"))
+       (not ctrl-enabled?) (assoc :class "disabled")
+       is-lookup? (assoc :class "readonly-lookup")
+       is-lookup? (assoc :title (str (or tip "") (when tip " ") "(lookup field - read only)")))
      [renderer ctrl field value on-change
       {:auto-focus? auto-focus? :is-new? (:__new__ current-record)
        :allow-edits? effective-edits? :all-controls all-controls

@@ -927,14 +927,14 @@ body {
 }
 
 .section-bottom-resize {
-  height: 4px;
+  height: 6px;
   background: var(--gray-300);
   cursor: ns-resize;
   transition: background-color 0.1s;
 }
 
 .section-bottom-resize:hover {
-  background: var(--gray-400);
+  background: var(--primary-light, #93c5fd);
 }
 
 /* Lint Errors Panel */
@@ -1510,6 +1510,25 @@ body {
   font-weight: 500;
 }
 
+.view-subform-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.subform-open-btn {
+  font-size: 0.75rem;
+  padding: 0.125rem 0.5rem;
+  cursor: pointer;
+}
+
+.subform-placeholder {
+  padding: 0.5rem;
+  color: var(--gray-500);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
 .view-subform-link {
   padding: 0.25rem 0.5rem;
   color: var(--gray-500);
@@ -1749,6 +1768,25 @@ body {
 
 .property-input input[type="number"] {
   width: 70px;
+}
+
+.picture-input {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.picture-input input {
+  flex: 1;
+  min-width: 0;
+}
+
+.picture-thumbnail {
+  max-height: 32px;
+  max-width: 60px;
+  border: 1px solid #ccc;
+  border-radius: 2px;
+  flex-shrink: 0;
 }
 
 .event-input-row {

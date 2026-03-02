@@ -407,27 +407,54 @@
            [subform-table cols records selected editing edit-value allow-edits? commit-edit!]]))
       [:div.subform-datasheet [:span.subform-loading "Loading..."]]))
 
+(defn- normalize-source-form
+  "Strip 'Form.' prefix from source-form name (Access SourceObject convention)"
+  [s]
+  (when s (clojure.string/replace s #"^[Ff][Oo][Rr][Mm]\." "")))
+
+(defn- split-link-fields
+  "Ensure link fields are a vector of field names (split semicolons if string)"
+  [v]
+  (cond
+    (nil? v) nil
+    (string? v) (mapv clojure.string/trim (clojure.string/split v #";"))
+    (sequential? v) (vec (mapcat #(if (string? %)
+                                     (mapv clojure.string/trim (clojure.string/split % #";"))
+                                     [%]) v))
+    :else nil))
+
 (defn render-subform [ctrl _field _value _on-change _opts]
-  (let [source-form (or (:source-form ctrl) (:source_form ctrl))
+  (let [source-form (normalize-source-form (or (:source-form ctrl) (:source_form ctrl)))
         selected (r/atom nil)
         editing (r/atom nil)
         edit-value (r/atom "")]
     (when source-form (f/run-fire-and-forget! (form-flow/fetch-subform-definition-flow) {:source-form source-form}))
     (fn [ctrl _field _value _on-change _opts]
-      (let [source-form (or (:source-form ctrl) (:source_form ctrl))
-            link-child (or (:link-child-fields ctrl) (:link_child_fields ctrl))
-            link-master (or (:link-master-fields ctrl) (:link_master_fields ctrl))
+      (let [source-form (normalize-source-form (or (:source-form ctrl) (:source_form ctrl)))
+            link-child (split-link-fields (or (:link-child-fields ctrl) (:link_child_fields ctrl)))
+            link-master (split-link-fields (or (:link-master-fields ctrl) (:link_master_fields ctrl)))
             current-record (or (get-in @state/app-state [:form-editor :current-record]) {})
             definition (when source-form
                          (get-in @state/app-state [:form-editor :subform-cache source-form :definition]))
             {:keys [allow-edits? allow-additions? allow-deletions? child-rs]}
             (subform-definition-props definition)
-            _ (when (and source-form child-rs (seq link-child) (seq link-master))
+            _ (when (and source-form child-rs)
                 (f/run-fire-and-forget! (form-flow/fetch-subform-records-flow)
                   {:source-form source-form :child-rs child-rs :link-child link-child
                    :link-master link-master :current-record current-record}))
             records (when source-form
                       (get-in @state/app-state [:form-editor :subform-cache source-form :records]))
+            ;; Diagnostic: log why subform might be stuck
+            _ (when (and source-form (map? definition) (nil? records)
+                        (not (get-in @state/app-state [:form-editor :subform-cache source-form :_diag-logged])))
+                (println "[SUBFORM]" source-form
+                         "child-rs:" child-rs
+                         "link-child:" link-child
+                         "link-master:" link-master
+                         "master-vals:" (mapv #(or (get current-record (keyword %))
+                                                   (get current-record %)) (or link-master [])))
+                (swap! state/app-state assoc-in
+                       [:form-editor :subform-cache source-form :_diag-logged] true))
             commit-edit! (fn []
                            (when-let [{:keys [row col]} @editing]
                              (let [old-val (str (or (get (nth records row) (keyword col))
@@ -666,8 +693,8 @@
   "Render the continuous form body with header, scrolling detail rows, and footer."
   [current current-record all-records record-pos on-field-change on-select-record opts]
   (let [{:keys [show-selectors? allow-edits? allow-additions? dividing-lines? form-width]} opts
-        show-header? (not= 0 (get-in current [:header :visible] 1))
-        show-footer? (not= 0 (get-in current [:footer :visible] 1))]
+        show-header? (and (:header current) (not= 0 (get-in current [:header :visible] 1)))
+        show-footer? (and (:footer current) (not= 0 (get-in current [:footer :visible] 1)))]
     [:div.view-sections-container.continuous
      {:class (when-not dividing-lines? "no-dividing-lines")
       :style (when form-width {:max-width form-width})}
@@ -689,8 +716,8 @@
   "Render the single-form body with header, detail, and footer."
   [current current-record on-field-change opts]
   (let [{:keys [show-selectors? allow-edits? form-width]} opts
-        show-header? (not= 0 (get-in current [:header :visible] 1))
-        show-footer? (not= 0 (get-in current [:footer :visible] 1))]
+        show-header? (and (:header current) (not= 0 (get-in current [:header :visible] 1)))
+        show-footer? (and (:footer current) (not= 0 (get-in current [:footer :visible] 1)))]
     [:div.view-sections-container
      {:style (when form-width {:max-width form-width})}
      (when show-header?

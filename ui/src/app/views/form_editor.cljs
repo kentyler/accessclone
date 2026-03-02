@@ -1,6 +1,7 @@
 (ns app.views.form-editor
   "Form editor/designer - replaces Access design view"
   (:require [clojure.string]
+            [cljs.core.async :refer [go <!]]
             [app.state :as state]
             [app.transforms.core :as t]
             [app.state-form :as state-form]
@@ -18,7 +19,8 @@
             [app.views.macro-viewer :as macro-viewer]
             [app.views.sql-function-viewer :as sql-fn-viewer]
             [app.views.report-editor :as report-editor]
-            [app.views.app-viewer :as app-viewer]))
+            [app.views.app-viewer :as app-viewer]
+            [app.views.access-database-viewer :as access-viewer]))
 
 (defn ask-ai-to-fix-errors!
   "Send lint errors to AI for suggestions"
@@ -79,6 +81,25 @@
             :on-click #(t/dispatch! :toggle-form-header-footer)}
            "Header/Footer"]))]
      [:div.toolbar-right
+      [:button.secondary-btn
+       {:title "Re-import this form from the Access database"
+        :on-click (fn []
+                    (let [form-id (get-in @state/app-state [:form-editor :form-id])
+                          form-obj (first (filter #(= (:id %) form-id)
+                                                  (get-in @state/app-state [:objects :forms])))
+                          form-name (:name form-obj)]
+                      (when form-name
+                        (go
+                          (t/dispatch! :set-loading true)
+                          (let [result (<! (access-viewer/reimport-object! :forms form-name))]
+                            (t/dispatch! :set-loading false)
+                            (if (true? result)
+                              (do (println (str "[REIMPORT] Re-imported form: " form-name))
+                                  ;; Reload the form definition in the editor
+                                  (state-form/load-form-for-editing! (assoc form-obj :definition nil)))
+                              (state/log-error! (str "Re-import failed: " (:error result "Unknown error"))
+                                                "reimport-form" {:form form-name})))))))}
+       "Re-Import"]
       [:button.secondary-btn
        {:disabled (not dirty?)
         :on-click #(let [original (get-in @state/app-state [:form-editor :original])]

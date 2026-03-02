@@ -147,29 +147,28 @@
 
 (defn start-resize! [section e]
   (.preventDefault e)
-  ;; The divider resizes the section ABOVE it
-  (when-let [target-section (form-utils/get-section-above section)]
-    (reset! resize-state {:section target-section
-                          :start-y (.-clientY e)})))
+  (reset! resize-state {:section section :start-y (.-clientY e)}))
 
-(defn handle-resize! [form-def e]
+(defn start-resize-above! [section e]
+  "Start resizing the section above this divider."
+  (.preventDefault e)
+  (let [target (case section :detail :header :footer :detail nil)]
+    (when target
+      (reset! resize-state {:section target :start-y (.-clientY e)}))))
+
+(defn handle-resize! [e]
   (when-let [{:keys [section start-y]} @resize-state]
-    (let [current-y (.-clientY e)
+    (let [form-def (get-in @state/app-state [:form-editor :current])
+          current-y (.-clientY e)
           delta (- current-y start-y)
           current-height (form-utils/get-section-height form-def section)
-          new-height (max 20 (+ current-height delta))]
+          new-height (max 0 (+ current-height delta))]
       (reset! resize-state {:section section :start-y current-y})
       (t/dispatch! :set-form-definition
        (assoc-in form-def [section :height] new-height)))))
 
 (defn stop-resize! []
   (reset! resize-state nil))
-
-(defn start-resize-direct! [section e]
-  "Start resizing the section itself (for footer bottom border)"
-  (.preventDefault e)
-  (reset! resize-state {:section section
-                        :start-y (.-clientY e)}))
 
 (defn- parse-drop-data
   "Extract drop coordinates and data from a drag event."
@@ -244,10 +243,12 @@
     [:div.form-section {:class (name section)}
      [:div.section-divider
       {:class (when can-resize? "resizable")
-       :title (if can-resize? (str "Drag to resize " (name (form-utils/get-section-above section))) section-label)
+       :title (if can-resize?
+                (str "Drag to resize " (case section :detail "Form Header" :footer "Detail" ""))
+                section-label)
        :on-click (fn [e] (.stopPropagation e)
                    (t/dispatch! :select-control {:section section}))
-       :on-mouse-down (when can-resize? #(start-resize! section %))}
+       :on-mouse-down (when can-resize? #(start-resize-above! section %))}
       [:span.section-label section-label]]
      [:div.section-body
       {:class (when section-selected? "selected")
@@ -268,8 +269,8 @@
         [section-controls section controls selected grid-size])]
      (when (= section :footer)
        [:div.section-bottom-resize
-        {:on-mouse-down #(do (.preventDefault %)
-                             (reset! resize-state {:section :footer :start-y (.-clientY %)}))}])]))
+        {:title "Drag to resize Form Footer"
+         :on-mouse-down #(start-resize! :footer %)}])]))
 
 (defn- ctx-menu-item
   "A context menu item that stops propagation and hides menu."
@@ -301,8 +302,8 @@
   "Calculate the minimum width needed to show all controls across visible sections."
   [form-def]
   (let [sections (cond-> [:detail]
-                   (not= 0 (get-in form-def [:header :visible] 1)) (conj :header)
-                   (not= 0 (get-in form-def [:footer :visible] 1)) (conj :footer))
+                   (and (:header form-def) (not= 0 (get-in form-def [:header :visible] 1))) (conj :header)
+                   (and (:footer form-def) (not= 0 (get-in form-def [:footer :visible] 1))) (conj :footer))
         all-controls (mapcat #(form-utils/get-section-controls form-def %) sections)
         max-right (reduce (fn [mx ctrl]
                             (let [right (+ (or (:x ctrl) 0) (or (:width ctrl) 0))]
@@ -323,7 +324,7 @@
      {:tab-index 0
       :class (when @resize-state "resizing")
       :on-click (fn [_] (t/dispatch! :hide-context-menu))
-      :on-mouse-move (fn [e] (when @resize-state (handle-resize! current e)))
+      :on-mouse-move (fn [e] (when @resize-state (handle-resize! e)))
       :on-mouse-up (fn [_] (stop-resize!))
       :on-mouse-leave (fn [_] (stop-resize!))
       :on-key-down (fn [e]
@@ -347,10 +348,12 @@
      [:div.canvas-body.sections-container
       [:div.sections-inner
        {:style (when content-width {:min-width content-width})}
-       (when-not (= 0 (get-in current [:header :visible] 1))
+       (when (and (:header current)
+                  (not= 0 (get-in current [:header :visible] 1)))
          [form-section :header current selected grid-size])
        [form-section :detail current selected grid-size]
-       (when-not (= 0 (get-in current [:footer :visible] 1))
+       (when (and (:footer current)
+                  (not= 0 (get-in current [:footer :visible] 1)))
          [form-section :footer current selected grid-size])]]
      (when-not (= 0 (:navigation-buttons current))
        [:div.record-nav-bar

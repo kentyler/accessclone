@@ -144,6 +144,15 @@
           {:key :keep-together :label "Keep Together" :type :select
            :options ["No" "Whole Group" "With First Detail"]}]})
 
+;; Image-specific properties (merged into control-property-defs for image controls)
+(def image-property-defs
+  {:format [{:key :picture :label "Picture" :type :picture}
+            {:key :size-mode :label "Size Mode" :type :select
+             :options ["clip" "stretch" "zoom"]}]})
+
+(def image-control-types
+  #{:image :unbound-object-frame :object-frame :bound-object-frame})
+
 (def control-property-defs
   {:format [{:key :name :label "Name" :type :text}
             {:key :caption :label "Caption" :type :text}
@@ -236,11 +245,14 @@
          ^{:key (:name field)} [:option {:value (:name field)} (:name field)])])
 
     :picture
-    [:input {:type "text" :read-only true
-             :value (cond
-                      (and value (str/starts-with? value "data:")) "(embedded image)"
-                      (and value (not (str/blank? value))) value
-                      :else "(none)")}]
+    [:div.picture-input
+     (when (and value (str/starts-with? (str value) "data:"))
+       [:img.picture-thumbnail {:src value}])
+     [:input {:type "text" :read-only true
+              :value (cond
+                       (and value (str/starts-with? (str value) "data:")) "(embedded image)"
+                       (and value (not (str/blank? (str value)))) value
+                       :else "(none)")}]]
 
     :event
     [:div.event-input-row
@@ -301,7 +313,9 @@
      :selection-type (cond is-control? (if-let [t (:type selected-control)] (name t) "unknown")
                            is-section? (ru/section-display-name section-key)
                            :else "Report")
-     :property-defs (cond is-control? control-property-defs
+     :property-defs (cond is-control? (if (image-control-types (:type selected-control))
+                                         (merge-with into control-property-defs image-property-defs)
+                                         control-property-defs)
                           is-section? section-property-defs
                           :else report-property-defs)
      :get-value (cond is-control? #(if (event-flag-keys %)

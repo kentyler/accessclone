@@ -111,24 +111,27 @@
    When showing: restores from :_saved-height or defaults to 80, visible to 1."
   []
   (let [current (get-in @app-state [:form-editor :current])
-        header-visible? (not= 0 (get-in current [:header :visible] 1))
-        toggle-section (fn [def section]
-                         (if header-visible?
-                           ;; Hiding: save height, set to 0
-                           (-> def
-                               (assoc-in [section :_saved-height]
-                                         (get-in def [section :height] 80))
-                               (assoc-in [section :height] 0)
-                               (assoc-in [section :visible] 0))
-                           ;; Showing: restore height
-                           (-> def
-                               (assoc-in [section :height]
-                                         (get-in def [section :_saved-height] 80))
-                               (assoc-in [section :visible] 1))))]
+        has-sections? (or (:header current) (:footer current))
+        hide-section (fn [def section]
+                       (if (get def section)
+                         (-> def
+                             (assoc-in [section :_saved-height]
+                                       (get-in def [section :height] 80))
+                             (assoc-in [section :height] 0)
+                             (assoc-in [section :visible] 0))
+                         def))
+        show-section (fn [def section]
+                       (if (get def section)
+                         (-> def
+                             (assoc-in [section :height]
+                                       (get-in def [section :_saved-height] 80))
+                             (assoc-in [section :visible] 1))
+                         (assoc def section {:height 80 :controls [] :visible 1})))]
     (when current
-      (set-form-definition! (-> current
-                                (toggle-section :header)
-                                (toggle-section :footer))))))
+      (set-form-definition!
+       (if has-sections?
+         (-> current (hide-section :header) (hide-section :footer))
+         (-> current (show-section :header) (show-section :footer)))))))
 
 ;; ============================================================
 ;; FORM EDITOR - DEFINITION & SAVE
@@ -847,27 +850,33 @@
 
 (defn fetch-subform-records!
   "Fetch and cache child records for a subform, filtered by parent link fields.
+   When link fields are present, filters by master values. Without link fields, loads all records.
    Only re-fetches when the filter key (master field values) changes."
   [source-form-name record-source link-child-fields link-master-fields current-record]
-  (when (and source-form-name record-source (seq link-child-fields) (seq link-master-fields))
-    (let [;; Build filter from paired child/master fields
-          filter-map (reduce (fn [m [child-field master-field]]
-                               (let [master-val (or (get current-record (keyword master-field))
-                                                    (get current-record master-field))]
-                                 (if master-val
-                                   (assoc m child-field master-val)
-                                   m)))
-                             {}
-                             (map vector link-child-fields link-master-fields))
+  (when (and source-form-name record-source)
+    (let [;; Build filter from paired child/master fields (empty map if no link fields)
+          filter-map (if (and (seq link-child-fields) (seq link-master-fields))
+                       (reduce (fn [m [child-field master-field]]
+                                 (let [master-val (or (get current-record (keyword master-field))
+                                                      (get current-record master-field))]
+                                   (if master-val
+                                     (assoc m child-field master-val)
+                                     m)))
+                               {}
+                               (map vector link-child-fields link-master-fields))
+                       {})
           filter-key (pr-str filter-map)
           cached-filter-key (get-in @app-state [:form-editor :subform-cache source-form-name :filter-key])]
-      (when (and (seq filter-map) (not= filter-key cached-filter-key))
+      ;; Fetch when: no link fields (unfiltered), or link fields with at least one master value matched
+      (when (and (or (empty? filter-map) (seq filter-map))
+                 (not= filter-key cached-filter-key))
         (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :filter-key] filter-key)
         (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :records] :loading)
         (go
-          (let [response (<! (http/get (str api-base "/api/data/" record-source)
-                                        {:query-params {:limit 1000
-                                                        :filter (.stringify js/JSON (clj->js filter-map))}
+          (let [query-params (cond-> {:limit 1000}
+                               (seq filter-map) (assoc :filter (.stringify js/JSON (clj->js filter-map))))
+                response (<! (http/get (str api-base "/api/data/" record-source)
+                                        {:query-params query-params
                                          :headers (db-headers)}))]
             (if (:success response)
               (let [data (get-in response [:body :data] [])]
@@ -997,9 +1006,10 @@
                     (assoc d prop (coerce-to-number (get d prop)))
                     d))
                 % number-form-props))
-      (update :header normalize-section)
-      (update :detail normalize-section)
-      (update :footer normalize-section)
+      (#(cond-> %
+          (:header %) (update :header normalize-section)
+          true        (update :detail normalize-section)
+          (:footer %) (update :footer normalize-section)))
       (#(if-let [rs (get % :record-source)]
           (assoc % :record-source (str/lower-case rs))
           %))))

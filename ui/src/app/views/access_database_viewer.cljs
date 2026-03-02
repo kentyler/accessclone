@@ -104,9 +104,9 @@
     (:columnCount ctrl)  (assoc :column-count (:columnCount ctrl))
     (:columnWidths ctrl) (assoc :column-widths (:columnWidths ctrl))
     (:limitToList ctrl)  (assoc :limit-to-list true)
-    (:sourceForm ctrl)      (assoc :source-form (:sourceForm ctrl))
-    (:linkChildFields ctrl) (assoc :link-child-fields [(:linkChildFields ctrl)])
-    (:linkMasterFields ctrl)(assoc :link-master-fields [(:linkMasterFields ctrl)])
+    (:sourceForm ctrl)      (assoc :source-form (str/replace (:sourceForm ctrl) #"^[Ff][Oo][Rr][Mm]\." ""))
+    (:linkChildFields ctrl) (assoc :link-child-fields (mapv str/trim (str/split (:linkChildFields ctrl) #";")))
+    (:linkMasterFields ctrl)(assoc :link-master-fields (mapv str/trim (str/split (:linkMasterFields ctrl) #";")))
     (:pages ctrl)     (assoc :pages (:pages ctrl))
     (:pageIndex ctrl) (assoc :page-index (:pageIndex ctrl))
     (:picture ctrl)  (assoc :picture (:picture ctrl))
@@ -170,9 +170,9 @@
     (:canGrow ctrl)       (assoc :can-grow true)
     (:canShrink ctrl)     (assoc :can-shrink true)
     (:hideDuplicates ctrl)(assoc :hide-duplicates true)
-    (:sourceReport ctrl)     (assoc :source-report (:sourceReport ctrl))
-    (:linkChildFields ctrl)  (assoc :link-child-fields [(:linkChildFields ctrl)])
-    (:linkMasterFields ctrl) (assoc :link-master-fields [(:linkMasterFields ctrl)])
+    (:sourceReport ctrl)     (assoc :source-report (str/replace (:sourceReport ctrl) #"^[Rr][Ee][Pp][Oo][Rr][Tt]\." ""))
+    (:linkChildFields ctrl)  (assoc :link-child-fields (mapv str/trim (str/split (:linkChildFields ctrl) #";")))
+    (:linkMasterFields ctrl) (assoc :link-master-fields (mapv str/trim (str/split (:linkMasterFields ctrl) #";")))
     (:picture ctrl)      (assoc :picture (:picture ctrl))
     (:sizeMode ctrl)     (assoc :size-mode (keyword (:sizeMode ctrl)))
     (:rowSource ctrl)    (assoc :row-source (:rowSource ctrl))
@@ -269,13 +269,19 @@
                                    (get sections (keyword (str section-name "PictureSizeMode"))) "clip"))))
 
 (defn- build-form-sections
-  "Build header/detail/footer sections from Access form data."
+  "Build header/detail/footer sections from Access form data.
+   Only includes header/footer if the original Access form had them
+   (non-zero height or controls assigned to that section)."
   [form-data]
   (let [by-section (group-by #(or (:section %) 0) (or (:controls form-data) []))
-        sections (or (:sections form-data) {})]
-    {:header (build-form-section sections "header" :headerHeight by-section 1)
-     :detail (build-form-section sections "detail" :detailHeight by-section 0)
-     :footer (build-form-section sections "footer" :footerHeight by-section 2)}))
+        sections (or (:sections form-data) {})
+        has-header? (or (pos? (get sections :headerHeight 0))
+                        (seq (get by-section 1)))
+        has-footer? (or (pos? (get sections :footerHeight 0))
+                        (seq (get by-section 2)))]
+    (cond-> {:detail (build-form-section sections "detail" :detailHeight by-section 0)}
+      has-header? (assoc :header (build-form-section sections "header" :headerHeight by-section 1))
+      has-footer? (assoc :footer (build-form-section sections "footer" :footerHeight by-section 2)))))
 
 (defn- bool->int [v] (if (false? v) 0 1))
 
@@ -1113,6 +1119,36 @@
               (when (pos? cnt)
                 (println (str "[ATTACHMENTS] Imported " cnt " attachments from " table-name))))))))))
 
+(defn reimport-object!
+  "Re-import a single form or report from the Access source database.
+   Reads the Access DB path from viewer-state (falls back to server-saved import state).
+   Uses the current database as target. Returns a channel yielding true or {:error msg}."
+  [object-type object-name]
+  (go
+    (let [;; Try viewer-state first, then fall back to saved import state on the server
+          access-db-path (or (first (:selected-paths @viewer-state))
+                             (let [resp (<! (http/get (str api-base "/api/session/import-state")))]
+                               (first (or (seq (:selected_paths (:body resp)))
+                                          (when-let [p (:loaded_path (:body resp))] [p])))))
+          target-db-id (:current-database @state/app-state)]
+      (if (and access-db-path target-db-id)
+        (let [result (case object-type
+                       :forms (<! (import-form! access-db-path object-name target-db-id))
+                       :reports (<! (import-report! access-db-path object-name target-db-id))
+                       {:error (str "Unsupported type: " (name object-type))})]
+          (when (true? result)
+            ;; Targeted image import for just this object
+            (let [img-params (cond-> {:databasePath access-db-path
+                                      :targetDatabaseId target-db-id}
+                               (= object-type :forms) (assoc :formNames [object-name])
+                               (= object-type :reports) (assoc :reportNames [object-name]))
+                  img-resp (<! (http/post (str api-base "/api/access-import/import-images")
+                                          {:json-params img-params}))]
+              (when (and (:success img-resp) (pos? (get-in img-resp [:body :imageCount] 0)))
+                (println (str "[REIMPORT] Imported images for " object-name)))))
+          result)
+        {:error "No Access database configured. Visit the Import tab first."}))))
+
 (defn import-all!
   "Import all objects across all phases from all selected databases.
    Uses batch import for forms/reports/modules/macros (single COM session per type per db).
@@ -1669,8 +1705,16 @@
             auto-phase (:auto-import-phase @viewer-state)
             all-types [:tables :queries :forms :reports :modules :macros]
             total-remaining (reduce + (map #(count (not-yet-imported %)) all-types))
-            total-all (reduce + (map #(count (all-source-objects %)) all-types))
+            total-all-cache (reduce + (map #(count (all-source-objects %)) all-types))
+            ;; Fallback: if cache returns 0 but display slots have data, use display counts.
+            ;; This handles async timing where display slots are populated before the cache.
+            total-all-display (reduce + (map #(count (get @viewer-state % [])) all-types))
+            total-all (max total-all-cache total-all-display)
             busy? (or importing? (and auto-phase (not= auto-phase :complete)))]
+        (when (and (zero? total-all-cache) (pos? total-all-display))
+          (println "[IMPORT-BUTTONS] Cache empty but display has" total-all-display
+                   "items. Paths:" (:selected-paths @viewer-state)
+                   "Cache keys:" (keys (:access-db-cache @viewer-state))))
         [:<>
          (when (and target-database-id (pos? total-all) (not busy?) (not error))
            [:<>

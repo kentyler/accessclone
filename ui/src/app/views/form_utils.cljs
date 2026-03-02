@@ -29,10 +29,3 @@
         :detail 200
         :footer 40)))
 
-(defn get-section-above
-  "Get the section above the given divider"
-  [section]
-  (case section
-    :detail :header
-    :footer :detail
-    nil))

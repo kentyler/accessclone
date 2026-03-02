@@ -12,6 +12,9 @@ module.exports = function(router, pool) {
 
   router.post('/import-images', async (req, res) => {
     const { databasePath, targetDatabaseId } = req.body;
+    // Optional: pass specific names to scope image extraction to just those objects
+    const requestedFormNames = req.body.formNames;
+    const requestedReportNames = req.body.reportNames;
 
     try {
       if (!databasePath || !targetDatabaseId) {
@@ -22,20 +25,28 @@ module.exports = function(router, pool) {
       const scriptsDir = path.join(__dirname, '..', '..', '..', 'scripts', 'access');
       const exportScript = path.join(scriptsDir, 'export_images.ps1');
 
-      // Collect form and report names from the target database
-      const [formsResult, reportsResult] = await Promise.all([
-        pool.query(
-          `SELECT DISTINCT name FROM shared.forms WHERE database_id = $1 AND is_current = true`,
-          [targetDatabaseId]
-        ),
-        pool.query(
-          `SELECT DISTINCT name FROM shared.reports WHERE database_id = $1 AND is_current = true`,
-          [targetDatabaseId]
-        )
-      ]);
+      let formNames, reportNames;
 
-      const formNames = formsResult.rows.map(r => r.name);
-      const reportNames = reportsResult.rows.map(r => r.name);
+      if (requestedFormNames || requestedReportNames) {
+        // Use caller-specified names (for targeted re-import)
+        formNames = requestedFormNames || [];
+        reportNames = requestedReportNames || [];
+      } else {
+        // Collect all form and report names from the target database
+        const [formsResult, reportsResult] = await Promise.all([
+          pool.query(
+            `SELECT DISTINCT name FROM shared.forms WHERE database_id = $1 AND is_current = true`,
+            [targetDatabaseId]
+          ),
+          pool.query(
+            `SELECT DISTINCT name FROM shared.reports WHERE database_id = $1 AND is_current = true`,
+            [targetDatabaseId]
+          )
+        ]);
+
+        formNames = formsResult.rows.map(r => r.name);
+        reportNames = reportsResult.rows.map(r => r.name);
+      }
 
       if (formNames.length === 0 && reportNames.length === 0) {
         return res.json({ success: true, imageCount: 0, updated: [] });

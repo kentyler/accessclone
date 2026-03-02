@@ -129,22 +129,28 @@
 
 (defn toggle-form-header-footer [state]
   (let [current (get-in state [:form-editor :current])
-        header-visible? (not= 0 (get-in current [:header :visible] 1))
-        toggle-section (fn [def section]
-                         (if header-visible?
-                           (-> def
-                               (assoc-in [section :_saved-height]
-                                         (get-in def [section :height] 80))
-                               (assoc-in [section :height] 0)
-                               (assoc-in [section :visible] 0))
+        ;; Header/footer are "visible" if the section exists and isn't hidden
+        has-sections? (or (:header current) (:footer current))
+        hide-section (fn [def section]
+                       (if (get def section)
+                         (-> def
+                             (assoc-in [section :_saved-height]
+                                       (get-in def [section :height] 80))
+                             (assoc-in [section :height] 0)
+                             (assoc-in [section :visible] 0))
+                         def))
+        show-section (fn [def section]
+                       (let [existing (get def section)]
+                         (if existing
                            (-> def
                                (assoc-in [section :height]
                                          (get-in def [section :_saved-height] 80))
-                               (assoc-in [section :visible] 1))))]
+                               (assoc-in [section :visible] 1))
+                           (assoc def section {:height 80 :controls [] :visible 1}))))]
     (if current
-      (let [new-def (-> current
-                        (toggle-section :header)
-                        (toggle-section :footer))]
+      (let [new-def (if has-sections?
+                      (-> current (hide-section :header) (hide-section :footer))
+                      (-> current (show-section :header) (show-section :footer)))]
         (-> state
             (assoc-in [:form-editor :current] new-def)
             (assoc-in [:form-editor :dirty?]

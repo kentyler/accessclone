@@ -1,6 +1,7 @@
 (ns app.views.report-editor
   "Report editor/designer - replaces Access report design view"
   (:require [clojure.string]
+            [cljs.core.async :refer [go <!]]
             [app.state :as state]
             [app.transforms.core :as t]
             [app.state-report :as state-report]
@@ -10,7 +11,8 @@
             [app.views.report-properties :as report-properties]
             [app.views.report-design :as report-design]
             [app.views.report-view :as report-view]
-            [app.views.control-palette :as palette]))
+            [app.views.control-palette :as palette]
+            [app.views.access-database-viewer :as access-viewer]))
 
 (defn ask-ai-to-fix-report-errors!
   "Send report lint errors to AI for suggestions"
@@ -75,6 +77,24 @@
            :on-click #(t/dispatch! :remove-group-level)}
           "- Group"]])]
      [:div.toolbar-right
+      [:button.secondary-btn
+       {:title "Re-import this report from the Access database"
+        :on-click (fn []
+                    (let [report-id (get-in @state/app-state [:report-editor :report-id])
+                          report-obj (first (filter #(= (:id %) report-id)
+                                                    (get-in @state/app-state [:objects :reports])))
+                          report-name (:name report-obj)]
+                      (when report-name
+                        (go
+                          (t/dispatch! :set-loading true)
+                          (let [result (<! (access-viewer/reimport-object! :reports report-name))]
+                            (t/dispatch! :set-loading false)
+                            (if (true? result)
+                              (do (println (str "[REIMPORT] Re-imported report: " report-name))
+                                  (state-report/load-report-for-editing! (assoc report-obj :definition nil)))
+                              (state/log-error! (str "Re-import failed: " (:error result "Unknown error"))
+                                                "reimport-report" {:report report-name})))))))}
+       "Re-Import"]
       [:button.secondary-btn
        {:disabled (not dirty?)
         :on-click #(let [original (get-in @state/app-state [:report-editor :original])]

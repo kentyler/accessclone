@@ -60,6 +60,27 @@
                 (str "Available: " available)
                 "No modules imported yet.")))))))
 
+;; Image-specific properties (merged into control-property-defs for image controls)
+(def image-property-defs
+  {:format [{:key :picture :label "Picture" :type :picture}
+            {:key :size-mode :label "Size Mode" :type :select
+             :options ["clip" "stretch" "zoom"]}]})
+
+(def image-control-types
+  #{:image :unbound-object-frame :object-frame :bound-object-frame})
+
+;; Combo-box-specific properties (merged into control-property-defs for combo/list controls)
+(def combo-box-property-defs
+  {:data [{:key :row-source :label "Row Source" :type :text}
+          {:key :row-source-type :label "Row Source Type" :type :text}
+          {:key :bound-column :label "Bound Column" :type :number}
+          {:key :column-count :label "Column Count" :type :number}
+          {:key :column-widths :label "Column Widths" :type :text}
+          {:key :limit-to-list :label "Limit To List" :type :yes-no :default false}]})
+
+(def combo-box-control-types
+  #{:combo-box :list-box})
+
 ;; Property definitions for each control type
 (def control-property-defs
   {:format [{:key :name :label "Name" :type :text}
@@ -189,11 +210,14 @@
          ^{:key (:name field)} [:option {:value (:name field)} (:name field)])])
 
     :picture
-    [:input {:type "text" :read-only true
-             :value (cond
-                      (and value (str/starts-with? value "data:")) "(embedded image)"
-                      (and value (not (str/blank? value))) value
-                      :else "(none)")}]
+    [:div.picture-input
+     (when (and value (str/starts-with? (str value) "data:"))
+       [:img.picture-thumbnail {:src value}])
+     [:input {:type "text" :read-only true
+              :value (cond
+                       (and value (str/starts-with? (str value) "data:")) "(embedded image)"
+                       (and value (not (str/blank? (str value)))) value
+                       :else "(none)")}]]
 
     :event
     [:div.event-input-row
@@ -248,7 +272,11 @@
                          is-section? (get section-display-names section-key (name section-key))
                          :else "Form")
         property-defs (cond
-                        is-control? control-property-defs
+                        is-control? (cond-> control-property-defs
+                                      (image-control-types (:type selected-control))
+                                      (merge-with into image-property-defs)
+                                      (combo-box-control-types (:type selected-control))
+                                      (merge-with into combo-box-property-defs))
                         is-section? section-property-defs
                         :else form-property-defs)
         section-data (when is-section? (get current section-key))

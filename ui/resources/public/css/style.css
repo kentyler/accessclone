@@ -1549,6 +1549,73 @@ body {
   padding: 0;
 }
 
+.subform-table .selector-col,
+.subform-table .subform-selector {
+  width: 16px;
+  min-width: 16px;
+  max-width: 16px;
+  padding: 0 2px;
+  text-align: center;
+  background: var(--gray-200);
+  border-right: 1px solid var(--gray-300);
+  cursor: pointer;
+  font-size: 0.6rem;
+  color: var(--gray-800);
+}
+
+.subform-table .selected-row .subform-selector {
+  background: var(--gray-300);
+}
+
+.subform-nav-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.5rem;
+  background: var(--gray-200);
+  border-top: 1px solid var(--gray-300);
+  font-size: 0.7rem;
+}
+
+.subform-nav-bar .nav-label {
+  color: var(--gray-600);
+  margin-right: 0.25rem;
+}
+
+.subform-nav-bar .record-counter {
+  padding: 0.125rem 0.375rem;
+  background: white;
+  border: 1px solid var(--gray-300);
+  min-width: 40px;
+  text-align: center;
+  font-size: 0.7rem;
+}
+
+.subform-nav-bar .nav-btn {
+  padding: 0.125rem 0.375rem;
+  border: 1px solid var(--gray-400);
+  background: var(--gray-100);
+  cursor: pointer;
+  font-size: 0.6rem;
+  line-height: 1;
+  min-width: 18px;
+}
+
+.subform-nav-bar .nav-btn:hover {
+  background: var(--gray-200);
+  border-color: var(--gray-500);
+}
+
+.subform-nav-bar .delete-btn {
+  color: var(--error, #dc2626);
+}
+
+.subform-nav-bar .delete-btn:hover {
+  background: var(--error, #dc2626);
+  color: white;
+  border-color: var(--error, #dc2626);
+}
+
 .subform-loading {
   display: block;
   padding: 0.5rem;

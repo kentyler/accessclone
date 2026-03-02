@@ -307,7 +307,7 @@
    link-child-fields link-master-fields current-record selected editing]
   [:div.view-subform-header
    {:style {:display "flex" :align-items "center"}}
-   [:span (if source-form (str "Subform: " source-form) "Subform (no source)")]
+   (when-not source-form [:span "Subform (no source)"])
    (when (and source-form (map? definition))
      [:div.subform-toolbar
       (when allow-additions?
@@ -357,18 +357,29 @@
 
 (defn- subform-table
   "Render the datasheet table for a subform."
-  [cols records selected editing edit-value allow-edits? commit-edit!]
+  [cols records selected editing edit-value allow-edits? commit-edit! show-selectors?]
   (when (seq cols)
-    [:table.subform-table
-     [:thead
-      [:tr (for [[i col] (map-indexed vector cols)]
-             ^{:key i} [:th (:caption col)])]]
-     [:tbody
-      (for [[idx rec] (map-indexed vector records)]
-        ^{:key idx}
-        [:tr (for [[ci col] (map-indexed vector cols)]
-               ^{:key ci}
-               [subform-cell rec idx (:field col) selected editing edit-value allow-edits? commit-edit!])])]]))
+    (let [header-row (into [:tr]
+                       (concat
+                         (when show-selectors? [[:th.selector-col ""]])
+                         (for [[i col] (map-indexed vector cols)]
+                           ^{:key i} [:th (:caption col)])))]
+      [:table.subform-table
+       [:thead header-row]
+       [:tbody
+        (for [[idx rec] (map-indexed vector records)]
+          (let [is-sel? (and @selected (= (:row @selected) idx))]
+            ^{:key idx}
+            (into [:tr {:class (when is-sel? "selected-row")}]
+              (concat
+                (when show-selectors?
+                  [[:td.subform-selector
+                    {:on-click #(reset! selected {:row idx :col (:field (first cols))})}
+                    (if is-sel? "\u25B6" "")]])
+                (for [[ci col] (map-indexed vector cols)]
+                  ^{:key ci}
+                  [subform-cell rec idx (:field col) selected editing edit-value allow-edits? commit-edit!])))))]])))
+
 
 (defn- subform-status-view
   "Render the loading/error/empty status for a subform."
@@ -387,15 +398,55 @@
 (defn- subform-definition-props
   "Extract permission flags and record source from a subform definition."
   [definition]
-  {:allow-edits?     (when (map? definition) (not= 0 (get definition :allow-edits 1)))
-   :allow-additions? (when (map? definition) (not= 0 (get definition :allow-additions 1)))
-   :allow-deletions? (when (map? definition) (not= 0 (get definition :allow-deletions 1)))
-   :child-rs         (when (map? definition)
-                       (or (:record-source definition) (:record_source definition)))})
+  {:allow-edits?       (when (map? definition) (not= 0 (get definition :allow-edits 1)))
+   :allow-additions?   (when (map? definition) (not= 0 (get definition :allow-additions 1)))
+   :allow-deletions?   (when (map? definition) (not= 0 (get definition :allow-deletions 1)))
+   :show-nav-buttons?  (when (map? definition) (not= 0 (get definition :navigation-buttons 1)))
+   :show-selectors?    (when (map? definition) (not= 0 (get definition :record-selectors 1)))
+   :child-rs           (when (map? definition)
+                         (or (:record-source definition) (:record_source definition)))})
+
+(defn- subform-nav-btn [title disabled? on-click label]
+  [:button.nav-btn {:title title :disabled disabled? :on-click on-click} label])
+
+(defn- subform-nav-bar
+  "Record navigation bar for the subform footer — mirrors Access's subform nav bar."
+  [records source-form allow-additions? allow-deletions? selected editing
+   link-child-fields link-master-fields current-record]
+  (let [total (if (vector? records) (count records) 0)
+        cur (if @selected (inc (:row @selected)) 0)
+        no-recs? (< total 1)
+        at-first? (<= cur 1)
+        at-last? (or (zero? cur) (>= cur total))
+        select-row! (fn [idx]
+                      (reset! selected {:row idx :col nil})
+                      (reset! editing nil))]
+    [:div.subform-nav-bar
+     [:span.nav-label "Record:"]
+     [subform-nav-btn "First" (or no-recs? at-first?) #(select-row! 0) "|◀"]
+     [subform-nav-btn "Previous" (or no-recs? at-first?) #(select-row! (dec (dec cur))) "◀"]
+     [:span.record-counter (if (pos? cur) (str cur " of " total) (str "0 of " total))]
+     [subform-nav-btn "Next" (or no-recs? at-last?) #(select-row! cur) "▶"]
+     [subform-nav-btn "Last" (or no-recs? at-last?) #(select-row! (dec total)) "▶|"]
+     (when allow-additions?
+       [:button.nav-btn {:title "New Record"
+                         :on-click #(f/run-fire-and-forget! (form-flow/new-subform-record-flow)
+                                      {:source-form source-form :link-child-fields link-child-fields
+                                       :link-master-fields link-master-fields :current-record current-record})}
+        "▶*"])
+     (when allow-deletions?
+       [:button.nav-btn.delete-btn
+        {:title "Delete Record" :disabled (zero? cur)
+         :on-click #(when (and (pos? cur) (js/confirm "Delete this record?"))
+                      (f/run-fire-and-forget! (form-flow/delete-subform-record-flow)
+                        {:source-form source-form :row (:row @selected)})
+                      (reset! selected nil)
+                      (reset! editing nil))}
+        "\u2715"])]))
 
 (defn- subform-records-view
   "Render records grid or status for a subform."
-  [definition records columns allow-additions? allow-edits? selected editing edit-value commit-edit!]
+  [definition records columns allow-additions? allow-edits? selected editing edit-value commit-edit! show-selectors?]
   (or (subform-status-view definition records allow-additions?)
       (when (and (vector? records) (or (seq records) allow-additions?))
         (let [cols (or columns
@@ -404,7 +455,7 @@
                                (keys (first records))))
                        [])]
           [:div.subform-datasheet
-           [subform-table cols records selected editing edit-value allow-edits? commit-edit!]]))
+           [subform-table cols records selected editing edit-value allow-edits? commit-edit! show-selectors?]]))
       [:div.subform-datasheet [:span.subform-loading "Loading..."]]))
 
 (defn- normalize-source-form
@@ -436,7 +487,7 @@
             current-record (or (get-in @state/app-state [:form-editor :current-record]) {})
             definition (when source-form
                          (get-in @state/app-state [:form-editor :subform-cache source-form :definition]))
-            {:keys [allow-edits? allow-additions? allow-deletions? child-rs]}
+            {:keys [allow-edits? allow-additions? allow-deletions? show-nav-buttons? show-selectors? child-rs]}
             (subform-definition-props definition)
             _ (when (and source-form child-rs)
                 (f/run-fire-and-forget! (form-flow/fetch-subform-records-flow)
@@ -465,11 +516,12 @@
                                   {:source-form source-form :row row :col col :new-val new-val})))
                              (reset! editing nil)))]
         [:div.view-subform
-         [subform-toolbar source-form definition allow-additions? allow-deletions?
-          link-child link-master current-record selected editing]
          (when source-form
            [subform-records-view definition records (subform-columns definition)
-            allow-additions? allow-edits? selected editing edit-value commit-edit!])]))))
+            allow-additions? allow-edits? selected editing edit-value commit-edit! show-selectors?])
+         (when (and source-form show-nav-buttons?)
+           [subform-nav-bar records source-form allow-additions? allow-deletions?
+            selected editing link-child link-master current-record])]))))
 
 (defn render-default [ctrl _field _value _on-change _opts]
   [:span (fu/display-text ctrl)])

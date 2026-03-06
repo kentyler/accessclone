@@ -1680,6 +1680,109 @@ body {
   outline: none;
 }
 
+.subform-combo {
+  width: 100%;
+  height: 100%;
+  padding: 0.125rem 0.25rem;
+  border: none;
+  font: inherit;
+  font-size: inherit;
+  background: transparent;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+.subform-combo:focus {
+  outline: none;
+  background: white;
+}
+
+/* Combo display mode (text + arrow, replaces native <select>) */
+.subform-combo-display {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  min-height: 1.25rem;
+}
+
+.combo-display-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.combo-display-arrow {
+  font-size: 0.5rem;
+  color: var(--gray-500);
+  margin-left: 0.25rem;
+  flex-shrink: 0;
+}
+
+/* Combo dropdown overlay */
+.combo-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 999;
+}
+
+.subform-combo-overlay {
+  position: fixed;
+  z-index: 1000;
+  background: white;
+  border: 1px solid var(--gray-300);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  max-height: 200px;
+  overflow-y: auto;
+  border-radius: 2px;
+}
+
+.combo-option {
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.combo-option:hover {
+  background: var(--blue-50, #eff6ff);
+}
+
+.combo-option.selected {
+  background: rgba(37, 99, 235, 0.12);
+  font-weight: 600;
+}
+
+.combo-loading {
+  padding: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--gray-500);
+  font-style: italic;
+}
+
+.subform-table .new-record-row td {
+  background: #fafafa;
+  border-bottom: 1px solid #ddd;
+  color: #999;
+  font-style: italic;
+}
+
+.subform-table .new-record-row td.selected,
+.subform-table .new-record-row td.editing {
+  background: #fff;
+  color: #333;
+  font-style: normal;
+}
+
+.subform-table .new-record-row .subform-selector {
+  color: #999;
+}
+
 .subform-toolbar {
   display: flex;
   align-items: center;

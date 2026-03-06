@@ -7,6 +7,7 @@
                                           detect-pk-field pk-value-for-record
                                           normalize-control]]
             [app.state-form :as state-form]
+            [app.projection :as projection]
             [app.effects.http :as http]
             [app.transforms.core :as t]
             [clojure.string :as str]
@@ -51,12 +52,7 @@
                         raw-def (or (:definition ctx) (:definition form))
                         definition (app.state-form/normalize-form-definition raw-def)]
                     (swap! app-state assoc :form-editor
-                           {:form-id (:id form)
-                            :dirty? false
-                            :original definition
-                            :current definition
-                            :selected-control nil
-                            :synced-controls (app.state-form/build-synced-controls definition)})
+                           (state-form/build-form-editor-state (:id form) definition))
                     (state/maybe-auto-analyze!)
                     ctx))}]}])
 
@@ -132,10 +128,10 @@
     :fn (fn [ctx]
           (let [state @app-state
                 record-source (get-in state [:form-editor :current :record-source])
-                current-record (get-in state [:form-editor :current-record])
+                current-record (get-in state [:form-editor :projection :record])
                 form-def (get-in state [:form-editor :current])
-                pos (get-in state [:form-editor :record-position :current] 1)
-                record-dirty? (get-in state [:form-editor :record-dirty?])
+                pos (get-in state [:form-editor :projection :position] 1)
+                record-dirty? (get-in state [:form-editor :projection :dirty?])
                 fields (app.state-form/get-record-source-fields record-source)
                 pk-from-fields (some #(when (:pk %) (:name %)) fields)
                 pk-field-name (or pk-from-fields "id")
@@ -171,9 +167,10 @@
                                 ;; auto-generated PK without losing lookup columns from views
                                 (let [server-record (get-in response [:data :data])
                                       merged (merge (:current-record ctx) server-record)]
-                                  (swap! app-state assoc-in [:form-editor :records (dec (:pos ctx))] merged)
-                                  (swap! app-state assoc-in [:form-editor :current-record] merged)
-                                  (swap! app-state assoc-in [:form-editor :record-dirty?] false))
+                                  (swap! app-state assoc-in [:form-editor :projection :records (dec (:pos ctx))] merged)
+                                  (swap! app-state update-in [:form-editor :projection]
+                                         projection/hydrate-bindings merged)
+                                  (swap! app-state assoc-in [:form-editor :projection :dirty?] false))
                                 (state/log-error! "Failed to insert record" "save-record"))
                               ctx)))}]
             ;; UPDATE
@@ -189,9 +186,9 @@
                                 ;; Sync the in-memory current-record (with user's edits) into
                                 ;; the records vector so navigation preserves the new values.
                                 ;; Don't use server response — views return only base-table columns.
-                                (let [current-record (get-in @app-state [:form-editor :current-record])]
-                                  (swap! app-state assoc-in [:form-editor :records (dec (:pos ctx))] current-record)
-                                  (swap! app-state assoc-in [:form-editor :record-dirty?] false))
+                                (let [current-record (get-in @app-state [:form-editor :projection :record])]
+                                  (swap! app-state assoc-in [:form-editor :projection :records (dec (:pos ctx))] current-record)
+                                  (swap! app-state assoc-in [:form-editor :projection :dirty?] false))
                                 (state/log-error! "Failed to update record" "save-record"))
                               ctx)))}]}]}])
 
@@ -203,13 +200,13 @@
   [{:step :do
     :fn (fn [ctx]
           (let [state @app-state
-                records (get-in state [:form-editor :records] [])
+                records (get-in state [:form-editor :projection :records] [])
                 total (count records)
                 pos (max 1 (min total (:position ctx)))]
             (when (and (> total 0) (<= pos total))
-              (t/dispatch! :set-record-position pos total)
-              (t/dispatch! :set-current-record (nth records (dec pos)))
-              (swap! app-state assoc-in [:form-editor :record-dirty?] false))
+              (swap! app-state update-in [:form-editor :projection]
+                     projection/sync-position pos)
+              (swap! app-state assoc-in [:form-editor :projection :dirty?] false))
             ctx))}])
 
 (def delete-current-record-flow
@@ -219,9 +216,9 @@
     :fn (fn [ctx]
           (let [state @app-state
                 record-source (get-in state [:form-editor :current :record-source])
-                current-record (get-in state [:form-editor :current-record])
-                records (get-in state [:form-editor :records] [])
-                pos (get-in state [:form-editor :record-position :current] 1)
+                current-record (get-in state [:form-editor :projection :record])
+                records (get-in state [:form-editor :projection :records] [])
+                pos (get-in state [:form-editor :projection :position] 1)
                 fields (app.state-form/get-record-source-fields record-source)
                 pk-field-name (detect-pk-field fields)
                 pk-value (pk-value-for-record current-record pk-field-name)]
@@ -242,13 +239,9 @@
                                                        (subvec records pos)))
                               new-total (count new-records)
                               new-pos (min pos new-total)]
-                          (swap! app-state assoc-in [:form-editor :records] new-records)
-                          (if (> new-total 0)
-                            (do (swap! app-state assoc-in [:form-editor :record-position] {:current new-pos :total new-total})
-                                (swap! app-state assoc-in [:form-editor :current-record] (nth new-records (dec new-pos))))
-                            (do (swap! app-state assoc-in [:form-editor :record-position] {:current 0 :total 0})
-                                (swap! app-state assoc-in [:form-editor :current-record] {})))
-                          (swap! app-state assoc-in [:form-editor :record-dirty?] false))
+                          (swap! app-state update-in [:form-editor :projection]
+                                 projection/sync-records new-records new-pos new-total)
+                          (swap! app-state assoc-in [:form-editor :projection :dirty?] false))
                         (state/log-error! "Failed to delete record" "delete-record"))
                       ctx)))}]}])
 
@@ -352,6 +345,17 @@
           (state-form/new-subform-record!
             (:source-form ctx) (:link-child-fields ctx)
             (:link-master-fields ctx) (:current-record ctx))
+          ctx)}])
+
+(defn create-subform-record-flow
+  "Create a new record in a subform with link fields + initial column value.
+   Context requires: {:source-form :link-data :col-name :col-value}"
+  []
+  [{:step :do
+    :fn (fn [ctx]
+          (state-form/create-subform-record!
+            (:source-form ctx) (:link-data ctx)
+            (:col-name ctx) (:col-value ctx))
           ctx)}])
 
 (defn delete-subform-record-flow

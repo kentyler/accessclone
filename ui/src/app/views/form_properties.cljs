@@ -81,6 +81,33 @@
 (def combo-box-control-types
   #{:combo-box :list-box})
 
+;; Subform-specific properties (merged into control-property-defs for subform controls)
+(def subform-property-defs
+  {:data [{:key :source-form :label "Source Object" :type :text}
+          {:key :link-master-fields :label "Link Master Fields" :type :text}
+          {:key :link-child-fields :label "Link Child Fields" :type :text}]})
+
+(def subform-control-types
+  #{:subform :sub-form})
+
+(def link-field-keys
+  #{:link-master-fields :link-child-fields})
+
+(defn link-fields->str
+  "Convert link fields array to semicolon-separated string for display."
+  [v]
+  (cond
+    (sequential? v) (str/join ";" v)
+    (string? v) v
+    :else ""))
+
+(defn str->link-fields
+  "Convert semicolon-separated string to link fields array for storage."
+  [s]
+  (if (str/blank? s)
+    []
+    (mapv str/trim (str/split s #";"))))
+
 ;; Property definitions for each control type
 (def control-property-defs
   {:format [{:key :name :label "Name" :type :text}
@@ -276,14 +303,17 @@
                                       (image-control-types (:type selected-control))
                                       (merge-with into image-property-defs)
                                       (combo-box-control-types (:type selected-control))
-                                      (merge-with into combo-box-property-defs))
+                                      (merge-with into combo-box-property-defs)
+                                      (subform-control-types (:type selected-control))
+                                      (merge-with into subform-property-defs))
                         is-section? section-property-defs
                         :else form-property-defs)
         section-data (when is-section? (get current section-key))
         get-value (cond
-                    is-control? #(if (event-flag-keys %)
-                                   (resolve-event-value selected-control %)
-                                   (get selected-control %))
+                    is-control? #(cond
+                                   (event-flag-keys %) (resolve-event-value selected-control %)
+                                   (link-field-keys %) (link-fields->str (get selected-control %))
+                                   :else (get selected-control %))
                     is-section? #(if (event-flag-keys %)
                                    (resolve-event-value section-data %)
                                    (get section-data %))
@@ -291,7 +321,9 @@
                              (resolve-event-value current %)
                              (get current %)))
         on-change (cond
-                    is-control? #(t/dispatch! :update-control section-key idx %1 %2)
+                    is-control? #(if (link-field-keys %1)
+                                   (t/dispatch! :update-control section-key idx %1 (str->link-fields %2))
+                                   (t/dispatch! :update-control section-key idx %1 %2))
                     is-section? #(t/dispatch! :set-form-definition
                                   (assoc-in current [section-key %1] %2))
                     :else #(t/dispatch! :set-form-definition (assoc current %1 %2)))]

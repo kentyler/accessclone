@@ -289,16 +289,98 @@
 
 ;; --- Subform ---
 
+(defn- match-header-label
+  "Find the header label closest to a detail control's x position.
+   In Access, header labels are positioned above their corresponding detail controls."
+  [header-labels ctrl-x]
+  (when (seq header-labels)
+    (let [threshold 20
+          best (apply min-key #(js/Math.abs (- (or (:x %) 0) ctrl-x)) header-labels)]
+      (when (<= (js/Math.abs (- (or (:x best) 0) ctrl-x)) threshold)
+        (or (:text best) (:caption best))))))
+
 (defn- subform-columns
-  "Extract column definitions from child form's detail controls."
-  [definition]
+  "Extract column definitions from child form's detail controls.
+   Sorted by tab-index (then x position), excludes hidden controls,
+   preserves control type and combo-box properties.
+   Column captions matched from header labels by x-position proximity.
+   Access overlay pattern: when a combo-box sits at the same x as a text-box,
+   the combo takes visual priority. If the combo has its own field, the text-box
+   is redundant and skipped. If the combo is unbound, its combo properties
+   (row-source, bound-column, etc.) merge onto the text-box.
+   When form-name and record-source are provided, combo columns get a :state-mapping
+   for cascading session-state sync."
+  [definition & [{:keys [form-name record-source]}]]
   (when-let [detail-ctrls (when (map? definition)
                             (get-in definition [:detail :controls]))]
-    (let [bound (filter #(or (:control-source %) (:field %)) detail-ctrls)]
+    (let [header-labels (->> (get-in definition [:header :controls])
+                             (filter #(= (keyword (or (:type %) "")) :label)))
+          ;; Build lookup: x-position -> combo with row-source (bound or unbound)
+          combo-by-x (->> detail-ctrls
+                          (filter #(and (= :combo-box (keyword (or (:type %) "")))
+                                        (:row-source %)))
+                          (reduce (fn [m c] (assoc m (or (:x c) 0) c)) {}))
+          ;; x positions where a BOUND combo exists (has :field) — text-boxes here are redundant
+          bound-combo-xs (->> (vals combo-by-x)
+                              (filter :field)
+                              (map #(or (:x %) 0))
+                              set)
+          bound (->> detail-ctrls
+                     (filter #(and (or (:control-source %) (:field %))
+                                   (not= 0 (get % :visible 1))
+                                   (not (false? (:visible %)))))
+                     ;; Skip text-boxes where a bound combo already covers the same x
+                     (remove #(and (not= :combo-box (keyword (or (:type %) "")))
+                                   (contains? bound-combo-xs (or (:x %) 0))))
+                     (sort-by (fn [c] [(or (:tab-index c) 999) (or (:x c) 0)])))]
       (when (seq bound)
         (mapv (fn [c]
-                {:field (str/lower-case (or (:control-source c) (:field c)))
-                 :caption (or (:caption c) (:label c) (:control-source c) (:field c))})
+                (let [cs (:control-source c)
+                      calculated? (and cs (str/starts-with? cs "="))
+                      ;; Check for combo overlay at this x (only applies to non-combo controls)
+                      overlay (when (not= :combo-box (keyword (or (:type c) "")))
+                                (get combo-by-x (or (:x c) 0)))
+                      effective-type (if overlay :combo-box (keyword (or (:type c) "text-box")))
+                      field-name (if calculated?
+                                   (or (:computed-alias c)
+                                       (str "_calc_" (str/lower-case (or (:name c) (:id c) "expr"))))
+                                   (str/lower-case (or cs (:field c))))
+                      header-text (match-header-label header-labels (or (:x c) 0))
+                      ;; State mapping for cascading combos (session_state sync)
+                      combo-ctrl (or overlay (when (= :combo-box effective-type) c))
+                      state-map (when (and combo-ctrl (or (:row-source c) (:row-source overlay)))
+                                  (if (and (:field combo-ctrl) record-source)
+                                    ;; Bound combo: use record-source as table, field as column
+                                    {:table-name (state-form/sanitize-name record-source)
+                                     :column-name (state-form/sanitize-name (:field combo-ctrl))}
+                                    ;; Overlay/unbound combo: use form-name as table, control name as column
+                                    (when form-name
+                                      {:table-name (state-form/sanitize-name form-name)
+                                       :column-name (state-form/sanitize-name (or (:name combo-ctrl) (:id combo-ctrl)))})))]
+                  (cond-> {:field field-name
+                           :caption (or header-text
+                                        (:caption c) (:label c) (:name c)
+                                        (:control-source c) (:field c))
+                           :type effective-type}
+                    ;; Combo properties: from the control itself or from an overlay combo
+                    (or (:row-source c) (:row-source overlay))
+                    (assoc :row-source (or (:row-source c) (:row-source overlay)))
+                    (or (:bound-column c) (:bound-column overlay))
+                    (assoc :bound-column (or (:bound-column c) (:bound-column overlay)))
+                    (or (:column-count c) (:column-count overlay))
+                    (assoc :column-count (or (:column-count c) (:column-count overlay)))
+                    (or (:column-widths c) (:column-widths overlay))
+                    (assoc :column-widths (or (:column-widths c) (:column-widths overlay)))
+                    state-map (assoc :state-mapping state-map)
+                    calculated? (assoc :locked true)
+                    ;; For overlay combos, use the overlay's locked status (the text-box
+                    ;; underneath may be locked as a display-only field, but the combo itself
+                    ;; should remain interactive unless the combo is explicitly locked)
+                    (let [lock-source (if overlay overlay c)]
+                      (or (:locked lock-source)
+                          (= true (:locked lock-source))
+                          (= 1 (:locked lock-source))))
+                    (assoc :locked true))))
               bound)))))
 
 (defn- subform-toolbar
@@ -326,24 +408,117 @@
                        (reset! editing nil))}
          "\u2715"])])])
 
+(defn- subform-combo-display
+  "Get display text for a combo-box value using cached row-source data."
+  [col raw-val]
+  (if-let [cached (when (:row-source col) (state-form/get-row-source-options (:row-source col)))]
+    (let [rows (:rows cached)
+          fields (:fields cached)
+          bound-col (:bound-column col)
+          col-widths (parse-column-widths (:column-widths col))
+          match (some (fn [row]
+                        (let [[bv display] (build-option-display row fields bound-col col-widths)]
+                          (when (= (str bv) (str raw-val)) display)))
+                      rows)]
+      (or match (str raw-val)))
+    (str raw-val)))
+
+(defn- combo-bound-field
+  "Resolve the bound field name for a combo column from its cached row-source.
+   Returns the field name that option values correspond to (e.g. 'productcategoryid'),
+   so we can read the correct value from the record."
+  [col]
+  (when-let [cached (when (:row-source col) (state-form/get-row-source-options (:row-source col)))]
+    (when (map? cached)
+      (let [fields (:fields cached)
+            field-names (mapv (fn [f] (or (:name f) (name (first (keys f))))) fields)
+            bound-idx (max 0 (dec (or (:bound-column col) 1)))]
+        (when (< bound-idx (count field-names))
+          (str/lower-case (nth field-names bound-idx)))))))
+
+(defn- combo-display-value
+  "Resolve display text for a combo cell. Tries multiple strategies:
+   1. If the column's field differs from the bound field (overlay pattern),
+      the column field IS the display column - use it directly.
+   2. Look up display text from cached row-source data.
+   3. If field ends with 'id', look for a companion Xname field in the record.
+   4. Fall back to raw value."
+  [rec col col-field val-field raw-val]
+  ;; Strategy 1: overlay pattern — col-field is the display column
+  (or (when (not= col-field val-field)
+        (let [v (or (get rec (keyword col-field)) (get rec col-field))]
+          (when v (str v))))
+      ;; Strategy 2: cached row-source lookup
+      (let [cached-display (subform-combo-display col raw-val)]
+        (when (not= cached-display (str raw-val))
+          cached-display))
+      ;; Strategy 3: companion Xname field in record
+      (let [field-lc (str/lower-case (or val-field ""))]
+        (when (str/ends-with? field-lc "id")
+          (let [base (subs field-lc 0 (- (count field-lc) 2))
+                name-field (str base "name")
+                display (or (get rec (keyword name-field)) (get rec name-field))]
+            (when display (str display)))))
+      ;; Strategy 4: raw value
+      (str (or raw-val ""))))
+
 (defn- subform-cell
   "Render a single cell in the subform datasheet."
-  [rec idx col-field selected editing edit-value allow-edits? commit-edit!]
-  (let [is-selected? (and @selected (= (:row @selected) idx) (= (:col @selected) col-field))
-        is-editing? (and @editing (= (:row @editing) idx) (= (:col @editing) col-field))]
+  [rec idx col selected editing edit-value allow-edits? commit-edit! active-combo cols]
+  (let [col-field (:field col)
+        is-combo? (= :combo-box (:type col))
+        is-locked? (:locked col)
+        editable? (and allow-edits? (not is-locked?))
+        is-selected? (and @selected (= (:row @selected) idx) (= (:col @selected) col-field))
+        is-editing? (and @editing (= (:row @editing) idx) (= (:col @editing) col-field))
+        ;; For combos, resolve the bound field from row-source to match option values
+        combo-field (when is-combo? (combo-bound-field col))
+        val-field (or combo-field col-field)
+        raw-val (or (get rec (keyword val-field)) (get rec val-field))]
     [:td {:class (str (when is-selected? "selected ") (when is-editing? "editing"))
           :on-click (fn [e]
                       (.stopPropagation e)
-                      (when-not is-editing? (commit-edit!) (reset! selected {:row idx :col col-field})))
+                      (if (and is-combo? editable?)
+                        ;; Combo click: open dropdown overlay
+                        (let [rect (.getBoundingClientRect (.. e -currentTarget))]
+                          (reset! active-combo {:row idx :col col :rect rect :rec rec :cols cols})
+                          ;; Check for cascading: collect parent combo values from this row
+                          (let [parent-entries (->> cols
+                                                    (keep (fn [c]
+                                                            (when-let [sm (:state-mapping c)]
+                                                              (let [cf (or (combo-bound-field c) (:field c))
+                                                                    v (or (get rec (keyword cf)) (get rec cf))]
+                                                                {:tableName (:table-name sm)
+                                                                 :columnName (:column-name sm)
+                                                                 :value (when (some? v) (str v))}))))
+                                                    vec)]
+                            (if (seq parent-entries)
+                              ;; Cascading: sync state, invalidate, then fetch
+                              (state-form/sync-form-state! parent-entries
+                                (fn []
+                                  (when-let [rs (:row-source col)]
+                                    (state-form/invalidate-row-source! rs)
+                                    (f/run-fire-and-forget! (form-flow/fetch-row-source-flow) {:row-source rs}))))
+                              ;; Non-cascading: just fetch
+                              (when-let [rs (:row-source col)]
+                                (f/run-fire-and-forget! (form-flow/fetch-row-source-flow) {:row-source rs})))))
+                        ;; Non-combo click
+                        (when-not is-editing? (commit-edit!) (reset! selected {:row idx :col col-field}))))
           :on-double-click (fn [e]
                              (.stopPropagation e)
-                             (when allow-edits?
+                             (when (and editable? (not is-combo?))
                                (reset! selected {:row idx :col col-field})
                                (reset! editing {:row idx :col col-field})
-                               (reset! edit-value
-                                       (str (or (get rec (keyword col-field))
-                                                (get rec col-field) "")))))}
-     (if is-editing?
+                               (reset! edit-value (str (or raw-val "")))))}
+     (cond
+       ;; Combo-box: display mode — text + dropdown arrow
+       is-combo?
+       [:div.subform-combo-display
+        [:span.combo-display-text (combo-display-value rec col col-field val-field raw-val)]
+        (when editable? [:span.combo-display-arrow "\u25BC"])]
+
+       ;; Text: editable input
+       is-editing?
        [:input.subform-cell-input
         {:type "text" :auto-focus true :value @edit-value
          :on-change #(reset! edit-value (.. % -target -value))
@@ -353,11 +528,58 @@
                           "Enter" (commit-edit!)
                           "Escape" (reset! editing nil)
                           nil))}]
-       (str (or (get rec (keyword col-field)) (get rec col-field) "")))]))
+
+       :else
+       (str (or raw-val "")))]))
+
+(defn- new-row-cell
+  "Render a single cell in the tentative new-record row.
+   On first value commit, creates the record server-side (with generated ID),
+   appends it to the records list, and the new row resets to blank."
+  [col selected editing edit-value commit-new-row! active-combo cols]
+  (let [col-field (:field col)
+        is-combo? (= :combo-box (:type col))
+        is-locked? (:locked col)
+        new-idx :new
+        is-selected? (and @selected (= (:row @selected) new-idx) (= (:col @selected) col-field))
+        is-editing? (and @editing (= (:row @editing) new-idx) (= (:col @editing) col-field))]
+    [:td {:class (str "new-row-cell " (when is-selected? "selected ") (when is-editing? "editing"))
+          :on-click (fn [e]
+                      (.stopPropagation e)
+                      (if (and is-combo? (not is-locked?))
+                        ;; Combo click: open dropdown overlay for new row
+                        (let [rect (.getBoundingClientRect (.. e -currentTarget))]
+                          (reset! active-combo {:row :new :col col :rect rect :rec {} :cols cols})
+                          (when-let [rs (:row-source col)]
+                            (f/run-fire-and-forget! (form-flow/fetch-row-source-flow) {:row-source rs})))
+                        ;; Text click (or locked combo — no action)
+                        (when-not (or is-combo? is-locked?)
+                          (reset! selected {:row new-idx :col col-field})
+                          (reset! editing {:row new-idx :col col-field})
+                          (reset! edit-value ""))))}
+     (cond
+       is-combo?
+       [:div.subform-combo-display
+        [:span.combo-display-text ""]
+        (when-not is-locked? [:span.combo-display-arrow "\u25BC"])]
+
+       is-editing?
+       [:input.subform-cell-input
+        {:type "text" :auto-focus true :value @edit-value
+         :on-change #(reset! edit-value (.. % -target -value))
+         :on-blur #(commit-new-row! col-field @edit-value)
+         :on-key-down (fn [e]
+                        (case (.-key e)
+                          "Enter" (commit-new-row! col-field @edit-value)
+                          "Escape" (do (reset! editing nil) (reset! selected nil))
+                          nil))}]
+
+       :else "")]))
 
 (defn- subform-table
   "Render the datasheet table for a subform."
-  [cols records selected editing edit-value allow-edits? commit-edit! show-selectors?]
+  [cols records selected editing edit-value allow-edits? commit-edit! show-selectors?
+   active-combo & [allow-additions? commit-new-row!]]
   (when (seq cols)
     (let [header-row (into [:tr]
                        (concat
@@ -378,7 +600,18 @@
                     (if is-sel? "\u25B6" "")]])
                 (for [[ci col] (map-indexed vector cols)]
                   ^{:key ci}
-                  [subform-cell rec idx (:field col) selected editing edit-value allow-edits? commit-edit!])))))]])))
+                  [subform-cell rec idx col selected editing edit-value allow-edits? commit-edit! active-combo cols])))))
+        (when (and allow-additions? commit-new-row!)
+          ^{:key :new}
+          (into [:tr.new-record-row {:class (when (= (:row @selected) :new) "selected-row")}]
+            (concat
+              (when show-selectors?
+                [[:td.subform-selector
+                  {:on-click #(reset! selected {:row :new :col (:field (first cols))})}
+                  "*"]])
+              (for [[ci col] (map-indexed vector cols)]
+                ^{:key ci}
+                [new-row-cell col selected editing edit-value commit-new-row! active-combo cols]))))]])))
 
 
 (defn- subform-status-view
@@ -446,7 +679,8 @@
 
 (defn- subform-records-view
   "Render records grid or status for a subform."
-  [definition records columns allow-additions? allow-edits? selected editing edit-value commit-edit! show-selectors?]
+  [definition records columns allow-additions? allow-edits? selected editing edit-value commit-edit! show-selectors?
+   active-combo & [commit-new-row!]]
   (or (subform-status-view definition records allow-additions?)
       (when (and (vector? records) (or (seq records) allow-additions?))
         (let [cols (or columns
@@ -455,7 +689,8 @@
                                (keys (first records))))
                        [])]
           [:div.subform-datasheet
-           [subform-table cols records selected editing edit-value allow-edits? commit-edit! show-selectors?]]))
+           [subform-table cols records selected editing edit-value allow-edits? commit-edit! show-selectors?
+            active-combo allow-additions? commit-new-row!]]))
       [:div.subform-datasheet [:span.subform-loading "Loading..."]]))
 
 (defn- normalize-source-form
@@ -478,13 +713,14 @@
   (let [source-form (normalize-source-form (or (:source-form ctrl) (:source_form ctrl)))
         selected (r/atom nil)
         editing (r/atom nil)
-        edit-value (r/atom "")]
+        edit-value (r/atom "")
+        active-combo (r/atom nil)]
     (when source-form (f/run-fire-and-forget! (form-flow/fetch-subform-definition-flow) {:source-form source-form}))
     (fn [ctrl _field _value _on-change _opts]
       (let [source-form (normalize-source-form (or (:source-form ctrl) (:source_form ctrl)))
             link-child (split-link-fields (or (:link-child-fields ctrl) (:link_child_fields ctrl)))
             link-master (split-link-fields (or (:link-master-fields ctrl) (:link_master_fields ctrl)))
-            current-record (or (get-in @state/app-state [:form-editor :current-record]) {})
+            current-record (or (get-in @state/app-state [:form-editor :projection :record]) {})
             definition (when source-form
                          (get-in @state/app-state [:form-editor :subform-cache source-form :definition]))
             {:keys [allow-edits? allow-additions? allow-deletions? show-nav-buttons? show-selectors? child-rs]}
@@ -495,30 +731,115 @@
                    :link-master link-master :current-record current-record}))
             records (when source-form
                       (get-in @state/app-state [:form-editor :subform-cache source-form :records]))
-            ;; Diagnostic: log why subform might be stuck
-            _ (when (and source-form (map? definition) (nil? records)
-                        (not (get-in @state/app-state [:form-editor :subform-cache source-form :_diag-logged])))
-                (println "[SUBFORM]" source-form
-                         "child-rs:" child-rs
-                         "link-child:" link-child
-                         "link-master:" link-master
-                         "master-vals:" (mapv #(or (get current-record (keyword %))
-                                                   (get current-record %)) (or link-master [])))
-                (swap! state/app-state assoc-in
-                       [:form-editor :subform-cache source-form :_diag-logged] true))
+            ;; Compute columns with state-mapping for cascading combos
+            cols (when (map? definition)
+                   (subform-columns definition
+                     {:form-name source-form
+                      :record-source (or (:record-source definition) (:record_source definition))}))
+            ;; Pre-fetch row-sources for locked combos (needed for display text only)
+            _ (doseq [col cols]
+                (when (and (= :combo-box (:type col)) (:locked col) (:row-source col))
+                  (f/run-fire-and-forget! (form-flow/fetch-row-source-flow) {:row-source (:row-source col)})))
+            ;; Build link-data once for new record creation
+            link-data (reduce (fn [m [child-field master-field]]
+                                (let [lc-master (str/lower-case master-field)
+                                      master-val (or (get current-record (keyword lc-master))
+                                                     (get current-record lc-master)
+                                                     (get current-record (keyword master-field))
+                                                     (get current-record master-field))]
+                                  (if master-val
+                                    (assoc m (str/lower-case child-field) master-val)
+                                    m)))
+                              {}
+                              (map vector (or link-child []) (or link-master [])))
             commit-edit! (fn []
                            (when-let [{:keys [row col]} @editing]
-                             (let [old-val (str (or (get (nth records row) (keyword col))
-                                                    (get (nth records row) col) ""))
-                                   new-val @edit-value]
-                               (when (not= old-val new-val)
-                                 (f/run-fire-and-forget! (form-flow/save-subform-cell-flow)
-                                  {:source-form source-form :row row :col col :new-val new-val})))
-                             (reset! editing nil)))]
+                             (when (not= row :new)
+                               (let [old-val (str (or (get (nth records row) (keyword col))
+                                                      (get (nth records row) col) ""))
+                                     new-val @edit-value]
+                                 (when (not= old-val new-val)
+                                   (f/run-fire-and-forget! (form-flow/save-subform-cell-flow)
+                                    {:source-form source-form :row row :col col :new-val new-val}))))
+                             (reset! editing nil)))
+            commit-new-row! (fn [col-name col-value]
+                              (reset! editing nil)
+                              (when (and col-value (not (str/blank? (str col-value))))
+                                (f/run-fire-and-forget! (form-flow/create-subform-record-flow)
+                                  {:source-form source-form
+                                   :link-data link-data
+                                   :col-name col-name
+                                   :col-value col-value})))
+            ;; Inline dropdown rendering (avoids Form-2 component lifecycle issues)
+            close-combo! #(reset! active-combo nil)
+            dropdown-hiccup
+            (when-let [{:keys [row col rect rec]} @active-combo]
+              (let [rs (:row-source col)
+                    cached (when rs (state-form/get-row-source-options rs))
+                    loading? (or (nil? cached) (= cached :loading))
+                    rows (when (map? cached) (:rows cached))
+                    fields (when (map? cached) (:fields cached))
+                    bound-col (:bound-column col)
+                    col-widths (parse-column-widths (:column-widths col))
+                    combo-field (combo-bound-field col)
+                    val-field (or combo-field (:field col))
+                    current-val (str (or (get rec (keyword val-field)) (get rec val-field) ""))
+                    top (when rect (+ (.-bottom rect) 1))
+                    left (when rect (.-left rect))
+                    width (when rect (max 200 (.-width rect)))]
+                [:<>
+                 [:div.combo-backdrop {:on-mouse-down (fn [e] (.preventDefault e) (close-combo!))}]
+                 [:div.subform-combo-overlay
+                  {:style (cond-> {}
+                            top (assoc :top (str top "px"))
+                            left (assoc :left (str left "px"))
+                            width (assoc :width (str width "px")))
+                   :on-key-down (fn [e] (when (= (.-key e) "Escape") (close-combo!)))}
+                  (if loading?
+                    [:div.combo-loading "Loading..."]
+                    (when (seq rows)
+                      (into [:<>]
+                        (for [[idx r] (map-indexed vector rows)]
+                          (let [[bv display] (build-option-display r fields bound-col col-widths)
+                                selected? (= (str bv) current-val)]
+                            ^{:key idx}
+                            [:div.combo-option
+                             {:class (when selected? "selected")
+                              :on-click (fn [_e]
+                                          (if (= row :new)
+                                            (commit-new-row! (:field col) (str bv))
+                                            (let [edit-col (or combo-field (:field col))]
+                                              (reset! edit-value (str bv))
+                                              (reset! editing {:row row :col edit-col})
+                                              (commit-edit!)
+                                              ;; Update display field in local cache
+                                              (let [field-lc (str/lower-case (or (:field col) ""))]
+                                                (when (str/ends-with? field-lc "id")
+                                                  (let [base (subs field-lc 0 (- (count field-lc) 2))
+                                                        name-field (keyword (str base "name"))
+                                                        display-name (some (fn [fname]
+                                                                             (when (str/ends-with? (str/lower-case (str fname)) "name")
+                                                                               (or (get r fname) (get r (keyword fname)))))
+                                                                           (mapv (fn [f] (or (:name f) (name (first (keys f))))) fields))]
+                                                    (when display-name
+                                                      (swap! state/app-state assoc-in
+                                                        [:form-editor :subform-cache source-form :records row name-field]
+                                                        display-name)))))
+                                              ;; Cascading combo: sync state after change
+                                              (when-let [sm (:state-mapping col)]
+                                                (state-form/sync-form-state!
+                                                  [{:tableName (:table-name sm)
+                                                    :columnName (:column-name sm)
+                                                    :value (when (some? bv) (str bv))}]
+                                                  state-form/invalidate-query-row-sources!))))
+                                          (close-combo!))}
+                             display])))))]]))]
         [:div.view-subform
          (when source-form
-           [subform-records-view definition records (subform-columns definition)
-            allow-additions? allow-edits? selected editing edit-value commit-edit! show-selectors?])
+           [subform-records-view definition records cols
+            allow-additions? allow-edits? selected editing edit-value commit-edit! show-selectors?
+            active-combo commit-new-row!])
+         dropdown-hiccup
          (when (and source-form show-nav-buttons?)
            [subform-nav-bar records source-form allow-additions? allow-deletions?
             selected editing link-child link-master current-record])]))))
@@ -601,7 +922,7 @@
         can-edit? (not= 0 (get-in @state/app-state [:form-editor :current :allow-edits]))
         can-add? (not= 0 (get-in @state/app-state [:form-editor :current :allow-additions]))
         can-del? (not= 0 (get-in @state/app-state [:form-editor :current :allow-deletions]))
-        has-rec? (> (get-in @state/app-state [:form-editor :record-position :total] 0) 0)]
+        has-rec? (> (or (get-in @state/app-state [:form-editor :projection :total]) 0) 0)]
     (when (:visible menu)
       [:div.context-menu
        {:style {:left (:x menu) :top (:y menu)}
@@ -832,9 +1153,10 @@
   []
   (let [fe (:form-editor @state/app-state)
         current (:current fe)
-        current-record (or (:current-record fe) {})
-        all-records (or (:records fe) [])
-        record-pos (or (:record-position fe) {:current 0 :total 0})
+        projection (:projection fe)
+        current-record (or (:record projection) {})
+        all-records (or (:records projection) [])
+        record-pos {:current (or (:position projection) 0) :total (or (:total projection) 0)}
         record-source (:record-source current)
         continuous? (= (or (:default-view current) "Single Form") "Continuous Forms")
         on-change (fn [field value] (f/run-fire-and-forget! (form-flow/update-record-field-flow) {:field field :value value}))
@@ -860,6 +1182,6 @@
           [single-form-body current current-record on-change opts])
         [:div.no-records (no-records-message record-source current)])]
      (when-not (= 0 (:navigation-buttons current))
-       [record-nav-bar record-pos (:allow-additions? opts) (:allow-deletions? opts) (:record-dirty? fe)])
+       [record-nav-bar record-pos (:allow-additions? opts) (:allow-deletions? opts) (:dirty? projection)])
      [form-record-context-menu]
      [canvas-context-menu]]))

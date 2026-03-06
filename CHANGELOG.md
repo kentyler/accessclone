@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Projection system (Phases 0-3)** — pure data projection in `projection.cljs` that extracts a complete snapshot from the form definition: field bindings, computed fields (with dependency-tracked re-evaluation), row-source specs (with eager value-list parsing and async SQL/query population), subform links, event flags, and field triggers. Wired into `state_form.cljs` at hydration, record navigation, field edit, and row-source cache points. Additive — no UI reads changed yet.
 - **Pre-import database assessment** — deterministic analysis of Access databases before import. Checks for PostgreSQL reserved words, wide tables (>30 columns), empty unreferenced tables, action queries, missing relationships (naming-pattern heuristic), large VBA modules (>500 lines), crosstab/passthrough queries, and naming inconsistency. Results appear as an interactive widget in the chat panel with collapsible sections (structural/design/complexity), radio buttons for "Import as-is" vs "Fix if possible", and a single Import button.
 - **Relationship extraction** — new `list_relationships.ps1` PowerShell script extracts Access database relationships via DAO. Added to `GET /api/access-import/database` response.
 - **Assessment endpoint** — `POST /api/access-import/assess` accepts scan data and returns grouped findings with fixability flags and suggestions.

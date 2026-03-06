@@ -6,7 +6,16 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 
 ## Current State
 
-### Just Shipped (2026-03-02)
+### Just Shipped (2026-03-05)
+- **Projection Phase 0-3**: Pure data projection in `ui/src/app/projection.cljs` — a complete snapshot of form data concerns extracted from the form definition and kept in sync with live data.
+  - Phase 0: `build-projection` extracts bindings, computed fields, row-sources, subforms, events, and field triggers from the form definition.
+  - Phase 1: `hydrate-bindings`/`sync-records`/`sync-position` populate bindings with live record data. Wired in `state_form.cljs`.
+  - Phase 2: Computed field evaluation + field-edit sync. `evaluate-computed` runs all computed fields after hydration; `evaluate-computed-for` selectively re-evaluates fields whose deps intersect changed fields; `update-field` updates a binding + re-evaluates dependents.
+  - Phase 3: Row-source options mirrored into projection. `populate-row-source` sets `:options` on the matching row-source entry by `:source` string. Value-lists (e.g. `"Yes;No;Maybe"`) parsed eagerly at build time in `extract-row-sources`. SQL/query row-sources populated async when `cache-row-source!` fires in `state_form.cljs`.
+  - **Still additive** — UI reads from `[:form-editor :row-source-cache]` not the projection. No UI behavior changed yet.
+  - **Gotcha**: `flows/form.cljs` has a duplicate of `setup-form-editor!` in `load-form-for-editing-flow` — must keep both in sync (was missing `:projection` key).
+
+### Previously Shipped (2026-03-02)
 - **Updatable query support**: Forms whose record source is a multi-table view (like `qryOrder` joining `orders` + `orderstatus`) can now be edited. Full pipeline: `shared.view_metadata` stores base table, PK, and writable columns at import time. `resolveWriteTarget()` redirects writes to the base table. Non-writable lookup fields are greyed out and disabled in forms. After UPDATE, the in-memory record is preserved (not replaced by server response, which would lose lookup columns). After INSERT, server response is merged to pick up auto-generated PK. See `skills/updatable-queries.md`.
 
 ### Previously Shipped (2026-02-25)

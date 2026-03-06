@@ -2,7 +2,8 @@
   "Pure form transforms — (state, args) -> state.
    17 transforms covering form definition, lint, context menu, records,
    controls, caches, clipboard, header/footer toggle, and properties tab."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [app.projection :as projection]))
 
 ;; ============================================================
 ;; FORM DEFINITION & LINT
@@ -49,21 +50,25 @@
             {} all-controls)))
 
 (defn new-record [state]
-  (let [total (get-in state [:form-editor :record-position :total] 0)
+  (let [total (get-in state [:form-editor :projection :total] 0)
         form-def (get-in state [:form-editor :current])
         defaults (collect-default-values form-def)
-        new-record (merge defaults {:__new__ true})]
+        new-record (merge defaults {:__new__ true})
+        new-pos (inc total)]
     (-> state
-        (update-in [:form-editor :records] #(conj (vec %) new-record))
-        (assoc-in [:form-editor :current-record] new-record)
-        (assoc-in [:form-editor :record-position] {:current (inc total) :total (inc total)})
-        (assoc-in [:form-editor :record-dirty?] true))))
+        (update-in [:form-editor :projection :records] #(conj (vec %) new-record))
+        (update-in [:form-editor :projection] projection/hydrate-bindings new-record)
+        (assoc-in [:form-editor :projection :position] new-pos)
+        (assoc-in [:form-editor :projection :total] new-pos)
+        (assoc-in [:form-editor :projection :dirty?] true))))
 
 (defn set-current-record [state record]
-  (assoc-in state [:form-editor :current-record] record))
+  (update-in state [:form-editor :projection] projection/hydrate-bindings record))
 
 (defn set-record-position [state pos total]
-  (assoc-in state [:form-editor :record-position] {:current pos :total total}))
+  (-> state
+      (assoc-in [:form-editor :projection :position] pos)
+      (assoc-in [:form-editor :projection :total] total)))
 
 ;; ============================================================
 ;; CONTROL OPERATIONS
@@ -120,7 +125,7 @@
    is an external atom. The caller should handle the external clipboard write."
   [state]
   ;; Pure version returns state unchanged — clipboard is a side effect.
-  ;; The record to copy is available at [:form-editor :current-record].
+  ;; The record to copy is available at [:form-editor :projection :record].
   state)
 
 ;; ============================================================

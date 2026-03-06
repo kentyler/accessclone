@@ -221,9 +221,10 @@ module.exports = function(pool) {
           const filter = JSON.parse(req.query.filter);
           const conditions = [];
           for (const [col, val] of Object.entries(filter)) {
+            const lcCol = col.toLowerCase();
             // Validate column name to prevent injection
-            if (NAME_RE.test(col)) {
-              conditions.push(`"${col}" = $${paramIdx}`);
+            if (NAME_RE.test(lcCol)) {
+              conditions.push(`"${lcCol}" = $${paramIdx}`);
               params.push(val);
               paramIdx++;
             }
@@ -264,8 +265,9 @@ module.exports = function(pool) {
             const conditions = [];
             let ci = 1;
             for (const [col, val] of Object.entries(filter)) {
-              if (NAME_RE.test(col)) {
-                conditions.push(`"${col}" = $${ci}`);
+              const lcCol = col.toLowerCase();
+              if (NAME_RE.test(lcCol)) {
+                conditions.push(`"${lcCol}" = $${ci}`);
                 countParams.push(val);
                 ci++;
               }

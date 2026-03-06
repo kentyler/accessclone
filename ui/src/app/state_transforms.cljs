@@ -268,9 +268,8 @@
     :fn-ref  'app.state-form/new-record!
     :domain  :form
     :args    []
-    :reads   [[:form-editor :record-position] [:form-editor :current]]
-    :writes  [[:form-editor :records] [:form-editor :current-record]
-              [:form-editor :record-position] [:form-editor :record-dirty?]]
+    :reads   [[:form-editor :projection :total] [:form-editor :current]]
+    :writes  [[:form-editor :projection]]
     :desc    "Create a new record pre-populated with default values from controls"}
 
    :set-current-record!
@@ -279,7 +278,7 @@
     :domain  :form
     :args    [{:name 'record :type [:or :map :nil]}]
     :reads   []
-    :writes  [[:form-editor :current-record]]
+    :writes  [[:form-editor :projection]]
     :desc    "Set the current record being viewed/edited"}
 
    :set-record-position!
@@ -289,7 +288,7 @@
     :args    [{:name 'pos :type :number}
               {:name 'total :type :number}]
     :reads   []
-    :writes  [[:form-editor :record-position]]
+    :writes  [[:form-editor :projection :position] [:form-editor :projection :total]]
     :desc    "Set the record navigation position"}
 
    :select-control!
@@ -356,7 +355,7 @@
     :fn-ref  'app.state-form/copy-form-record!
     :domain  :form
     :args    []
-    :reads   [[:form-editor :current-record]]
+    :reads   [[:form-editor :projection :record]]
     :writes  []
     :desc    "Copy the current record to the form clipboard (external atom, not app-state)"}
 

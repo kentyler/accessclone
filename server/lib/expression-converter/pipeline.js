@@ -106,6 +106,10 @@ function translateExpression(expression, schemaName, columnTypes, formName, cont
   if (/\bcount\s*\(/.test(sqlLower)) returnType = 'bigint';
   else if (/\bsum\s*\(/.test(sqlLower) || /\bavg\s*\(/.test(sqlLower)) returnType = 'numeric';
   else if (/\bmin\s*\(/.test(sqlLower) || /\bmax\s*\(/.test(sqlLower)) returnType = 'text';
+  // Pure arithmetic expressions (*, /, +, - with parameters) default to numeric
+  else if (/[*\/]/.test(sql) && params.length > 0) returnType = 'numeric';
+  // All numeric-typed parameters suggest numeric result
+  else if (params.length > 0 && params.every(p => /^(numeric|integer|bigint|smallint|real|double precision|decimal)$/.test(p.pgType))) returnType = 'numeric';
 
   return { sql, params, returnType };
 }
@@ -181,7 +185,6 @@ async function processDefinitionExpressions(pool, definition, objectName, schema
       const controlSource = ctrl['control-source'] || ctrl['field'];
       if (!controlSource || typeof controlSource !== 'string') continue;
       if (!controlSource.startsWith('=')) continue;
-      if (!hasDomainFunctions(controlSource)) continue;
 
       const ctrlName = sanitizeName(ctrl.name || ctrl.id || `ctrl${i}`);
       const functionName = `${pgObjectName}_calc_${ctrlName}`;

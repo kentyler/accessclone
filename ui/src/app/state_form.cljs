@@ -12,7 +12,8 @@
                                          coerce-yes-no coerce-to-number coerce-to-keyword
                                          yes-no-control-props yes-no-control-defaults number-control-props
                                          normalize-control
-                                         maybe-auto-analyze!]]))
+                                         maybe-auto-analyze!]]
+            [app.projection :as projection]))
 
 ;; Forward declarations for functions used before definition
 (declare save-current-record! save-form! save-form-to-file!
@@ -35,7 +36,7 @@
 (defn copy-form-record!
   "Copy the current record to the form clipboard"
   []
-  (let [record (get-in @app-state [:form-editor :current-record])]
+  (let [record (get-in @app-state [:form-editor :projection :record])]
     (reset! form-clipboard (dissoc record :__new__ :id))))
 
 (defn cut-form-record!
@@ -48,12 +49,15 @@
   "Create a new record pre-filled with clipboard values"
   []
   (when-let [data @form-clipboard]
-    (let [total (get-in @app-state [:form-editor :record-position :total] 0)
-          new-record (assoc data :__new__ true)]
-      (swap! app-state update-in [:form-editor :records] #(conj (vec %) new-record))
-      (swap! app-state assoc-in [:form-editor :current-record] new-record)
-      (swap! app-state assoc-in [:form-editor :record-position] {:current (inc total) :total (inc total)})
-      (swap! app-state assoc-in [:form-editor :record-dirty?] true))))
+    (let [total (get-in @app-state [:form-editor :projection :total] 0)
+          new-record (assoc data :__new__ true)
+          new-pos (inc total)]
+      (swap! app-state update-in [:form-editor :projection :records] #(conj (vec %) new-record))
+      (swap! app-state update-in [:form-editor :projection]
+             projection/hydrate-bindings new-record)
+      (swap! app-state assoc-in [:form-editor :projection :position] new-pos)
+      (swap! app-state assoc-in [:form-editor :projection :total] new-pos)
+      (swap! app-state assoc-in [:form-editor :projection :dirty?] true))))
 
 ;; ============================================================
 ;; CLOSE TABS (form-aware auto-save)
@@ -63,7 +67,7 @@
   "Close all open tabs"
   []
   ;; Auto-save dirty record before closing
-  (when (get-in @app-state [:form-editor :record-dirty?])
+  (when (get-in @app-state [:form-editor :projection :dirty?])
     (save-current-record!))
   ;; Auto-save dirty form definition before closing
   (when (get-in @app-state [:form-editor :dirty?])
@@ -79,7 +83,7 @@
   (let [active (:active-tab @app-state)]
     (when active
       ;; Auto-save dirty record before closing
-      (when (get-in @app-state [:form-editor :record-dirty?])
+      (when (get-in @app-state [:form-editor :projection :dirty?])
         (save-current-record!))
       ;; Auto-save dirty form definition before closing
       (when (get-in @app-state [:form-editor :dirty?])
@@ -247,7 +251,7 @@
           (load-form-for-editing! target-form))
       (log-event! "warning" (str "Navigate target form not found: " navigate-to) "handle-session-navigate"))))
 
-(defn- collect-computed-specs
+(defn collect-computed-specs
   "Scan a form definition for controls with :computed-function and build
    the computed column spec array for the data API."
   [form-def]
@@ -284,13 +288,11 @@
           (when (:success data-resp)
             (let [data (get-in data-resp [:body :data])
                   total (get-in data-resp [:body :pagination :totalCount] (count data))
-                  pos (get-in @app-state [:form-editor :record-position :current] 1)
+                  pos (get-in @app-state [:form-editor :projection :position] 1)
                   safe-pos (min pos (count data))]
-              (swap! app-state assoc-in [:form-editor :records] (vec data))
-              (swap! app-state assoc-in [:form-editor :record-position] {:current safe-pos :total total})
-              (when (and (seq data) (> safe-pos 0))
-                (swap! app-state assoc-in [:form-editor :current-record] (nth data (dec safe-pos))))
-              (swap! app-state assoc-in [:form-editor :record-dirty?] false))))))))
+              (swap! app-state update-in [:form-editor :projection]
+                     projection/sync-records (vec data) safe-pos total)
+              (swap! app-state assoc-in [:form-editor :projection :dirty?] false))))))))
 
 (defn- handle-session-response!
   "Handle response from a session function call (message, navigate, confirm)."
@@ -314,7 +316,7 @@
         (log-event! "error" "Failed to create session" "call-session-function" {:response (:body session-resp)})
         (let [session-id (get-in session-resp [:body :sessionId])
               state-vars (build-session-state-vars
-                           (get-in @app-state [:form-editor :current-record] {}))]
+                           (get-in @app-state [:form-editor :projection :record] {}))]
           (when (seq state-vars)
             (<! (http/put (str api-base "/api/session/" session-id "/state")
                           {:json-params state-vars})))
@@ -371,18 +373,49 @@
                                           :column-name ctrl-name}]))))))
           sections)))
 
-(defn- sync-form-state!
+(defn sync-form-state!
   "Upsert control values to shared.form_control_state.
-   entries-vec is [{:tableName t :columnName c :value v}, ...]."
-  [entries-vec]
+   entries-vec is [{:tableName t :columnName c :value v}, ...].
+   Optional on-complete callback fires after successful sync."
+  [entries-vec & [on-complete]]
   (when (seq entries-vec)
     (go
       (let [response (<! (http/put (str api-base "/api/form-state")
                                    {:json-params {:sessionId session-id
                                                   :entries entries-vec}}))]
-        (when-not (:success response)
+        (if (:success response)
+          (when on-complete (on-complete))
           (log-event! "warning" "Failed to sync form state" "sync-form-state"
                       {:error (get-in response [:body :error])}))))))
+
+(defn sanitize-name
+  "Port of server-side sanitizeName: lowercase, whitespace→underscore, strip non-alnum/underscore."
+  [s]
+  (when s
+    (-> (str/lower-case (str s))
+        (str/replace #"\s+" "_")
+        (str/replace #"[^a-z0-9_]" ""))))
+
+(defn invalidate-row-source!
+  "Remove a specific row-source from the cache, forcing re-fetch on next render."
+  [row-source]
+  (swap! app-state update-in [:form-editor :row-source-cache] dissoc row-source))
+
+(defn invalidate-query-row-sources!
+  "Remove all table/query-name row-source entries from cache (not SQL, not value-lists).
+   These are the entries that may reference session_state via cross-joins."
+  []
+  (swap! app-state update-in [:form-editor :row-source-cache]
+    (fn [cache]
+      (reduce-kv (fn [acc k v]
+                   (let [trimmed (str/trim (str k))]
+                     (if (or (re-find #"(?i)^select\s" trimmed)
+                             (str/includes? trimmed ";"))
+                       ;; SQL or value-list — keep it
+                       (assoc acc k v)
+                       ;; table/query name — remove it (may depend on session_state)
+                       acc)))
+                 {} (or cache {})))))
 
 (defn- collect-synced-values
   "Given a record and a synced-controls map, return a vector of
@@ -402,7 +435,7 @@
   "Sync all tagged control values from the current record to state table."
   []
   (let [synced (get-in @app-state [:form-editor :synced-controls])
-        record (get-in @app-state [:form-editor :current-record])]
+        record (get-in @app-state [:form-editor :projection :record])]
     (when (and (seq synced) record)
       (sync-form-state! (collect-synced-values record synced)))))
 
@@ -414,10 +447,9 @@
   "Initialize form in data-entry mode with a blank new record."
   []
   (let [new-record {:__new__ true}]
-    (swap! app-state assoc-in [:form-editor :records] [new-record])
-    (swap! app-state assoc-in [:form-editor :current-record] new-record)
-    (swap! app-state assoc-in [:form-editor :record-position] {:current 1 :total 1})
-    (swap! app-state assoc-in [:form-editor :record-dirty?] true)
+    (swap! app-state update-in [:form-editor :projection]
+           projection/sync-records [new-record] 1 1)
+    (swap! app-state assoc-in [:form-editor :projection :dirty?] true)
     (fire-form-event! :on-load)))
 
 (defn- load-form-records!
@@ -437,13 +469,10 @@
       (if (:success response)
         (let [data (get-in response [:body :data])
               total (get-in response [:body :pagination :totalCount] (count data))]
-          (swap! app-state assoc-in [:form-editor :records] (vec data))
-          (swap! app-state assoc-in [:form-editor :record-position] {:current 1 :total total})
-          (swap! app-state assoc-in [:form-editor :record-dirty?] false)
-          (when (seq data)
-            (swap! app-state assoc-in [:form-editor :current-record] (first data))
-            ;; Sync initial record state for tagged controls
-            (sync-current-record-state!))
+          (swap! app-state update-in [:form-editor :projection]
+                 projection/sync-records (vec data) 1 total)
+          (swap! app-state assoc-in [:form-editor :projection :dirty?] false)
+          (when (seq data) (sync-current-record-state!))
           (fire-form-event! :on-load))
         (log-error! "Failed to load form records" "load-form-records" {:response (:body response)})))))
 
@@ -451,7 +480,7 @@
   "Set form view mode - :design or :view"
   (let [current-mode (get-in @app-state [:form-editor :view-mode] :design)]
     (when (and (= current-mode :view) (not= mode :view))
-      (when (get-in @app-state [:form-editor :record-dirty?])
+      (when (get-in @app-state [:form-editor :projection :dirty?])
         (save-current-record!)))
     (swap! app-state assoc-in [:form-editor :view-mode] mode)
     (when (= mode :view)
@@ -467,35 +496,37 @@
 
 ;; Record navigation state
 (defn set-current-record! [record]
-  (swap! app-state assoc-in [:form-editor :current-record] record))
+  (swap! app-state update-in [:form-editor :projection]
+         projection/hydrate-bindings record))
 
 (defn set-record-position! [pos total]
-  (swap! app-state assoc-in [:form-editor :record-position] {:current pos :total total}))
+  (swap! app-state assoc-in [:form-editor :projection :position] pos)
+  (swap! app-state assoc-in [:form-editor :projection :total] total))
 
 (defn update-record-field! [field-name value]
-  (swap! app-state assoc-in [:form-editor :current-record (keyword field-name)] value)
-  (swap! app-state assoc-in [:form-editor :record-dirty?] true)
-  ;; If this field is tagged for state sync, upsert immediately
-  (let [synced (get-in @app-state [:form-editor :synced-controls])
-        field-lc (str/lower-case (if (keyword? field-name) (name field-name) (str field-name)))]
-    (when-let [mapping (and (seq synced) (get synced field-lc))]
-      (sync-form-state! [{:tableName (:table-name mapping)
-                          :columnName (:column-name mapping)
-                          :value (when (some? value) (str value))}]))))
+  (let [field-kw (keyword (str/lower-case (if (keyword? field-name) (name field-name) (str field-name))))]
+    (swap! app-state update-in [:form-editor :projection]
+           projection/update-field field-kw value)
+    ;; If this field is tagged for state sync, upsert immediately
+    (let [synced (get-in @app-state [:form-editor :synced-controls])]
+      (when-let [mapping (and (seq synced) (get synced (name field-kw)))]
+        (sync-form-state! [{:tableName (:table-name mapping)
+                            :columnName (:column-name mapping)
+                            :value (when (some? value) (str value))}])))))
 
 (defn navigate-to-record!
   "Navigate to a specific record by position (1-indexed)"
   [position]
   ;; Auto-save dirty record before navigating
-  (when (get-in @app-state [:form-editor :record-dirty?])
+  (when (get-in @app-state [:form-editor :projection :dirty?])
     (save-current-record!))
-  (let [records (get-in @app-state [:form-editor :records] [])
+  (let [records (get-in @app-state [:form-editor :projection :records] [])
         total (count records)
         pos (max 1 (min total position))]
     (when (and (> total 0) (<= pos total))
-      (swap! app-state assoc-in [:form-editor :record-position] {:current pos :total total})
-      (swap! app-state assoc-in [:form-editor :current-record] (nth records (dec pos)))
-      (swap! app-state assoc-in [:form-editor :record-dirty?] false)
+      (swap! app-state update-in [:form-editor :projection]
+             projection/sync-position pos)
+      (swap! app-state assoc-in [:form-editor :projection :dirty?] false)
       ;; Sync tagged control values to state table
       (sync-current-record-state!)
       ;; Fire on-current event after navigating to new record
@@ -536,12 +567,13 @@
           response (<! (http/post (str api-base "/api/data/" record-source)
                                   {:json-params insert-data :headers (db-headers)}))]
       (if (:success response)
-        (let [current-record (get-in @app-state [:form-editor :current-record])
+        (let [current-record (get-in @app-state [:form-editor :projection :record])
               server-record (get-in response [:body :data])
               merged (merge current-record server-record)]
-          (swap! app-state assoc-in [:form-editor :records (dec pos)] merged)
-          (swap! app-state assoc-in [:form-editor :current-record] merged)
-          (swap! app-state assoc-in [:form-editor :record-dirty?] false))
+          (swap! app-state assoc-in [:form-editor :projection :records (dec pos)] merged)
+          (swap! app-state update-in [:form-editor :projection]
+                 projection/hydrate-bindings merged)
+          (swap! app-state assoc-in [:form-editor :projection :dirty?] false))
         (log-error! "Failed to insert record" "save-record" {:response (:body response)})))))
 
 (defn- do-update-record!
@@ -554,9 +586,9 @@
           response (<! (http/put (str api-base "/api/data/" record-source "/" pk-value)
                                  {:json-params update-data :headers (db-headers)}))]
       (if (:success response)
-        (let [current-record (get-in @app-state [:form-editor :current-record])]
-          (swap! app-state assoc-in [:form-editor :records (dec pos)] current-record)
-          (swap! app-state assoc-in [:form-editor :record-dirty?] false))
+        (let [current-record (get-in @app-state [:form-editor :projection :record])]
+          (swap! app-state assoc-in [:form-editor :projection :records (dec pos)] current-record)
+          (swap! app-state assoc-in [:form-editor :projection :dirty?] false))
         (log-error! "Failed to update record" "save-record" {:response (:body response)})))))
 
 (defn- check-no-pk?
@@ -661,10 +693,10 @@
   "Save the current record to the database"
   []
   (let [record-source (get-in @app-state [:form-editor :current :record-source])
-        current-record (get-in @app-state [:form-editor :current-record])
+        current-record (get-in @app-state [:form-editor :projection :record])
         form-def (get-in @app-state [:form-editor :current])
-        pos (get-in @app-state [:form-editor :record-position :current] 1)
-        record-dirty? (get-in @app-state [:form-editor :record-dirty?])]
+        pos (get-in @app-state [:form-editor :projection :position] 1)
+        record-dirty? (get-in @app-state [:form-editor :projection :dirty?])]
     (when (and record-source current-record record-dirty?)
       (if-let [error (validate-record form-def current-record)]
         (js/alert (:text error))
@@ -700,38 +732,35 @@
 (defn new-record!
   "Create a new record, pre-populated with default values from controls"
   []
-  (let [total (get-in @app-state [:form-editor :record-position :total] 0)
+  (let [total (get-in @app-state [:form-editor :projection :total] 0)
         form-def (get-in @app-state [:form-editor :current])
         defaults (collect-default-values form-def)
-        new-record (merge defaults {:__new__ true})]
+        new-record (merge defaults {:__new__ true})
+        new-pos (inc total)]
     ;; Add record to records array (for continuous forms display)
-    (swap! app-state update-in [:form-editor :records] #(conj (vec %) new-record))
-    (swap! app-state assoc-in [:form-editor :current-record] new-record)
-    (swap! app-state assoc-in [:form-editor :record-position] {:current (inc total) :total (inc total)})
-    (swap! app-state assoc-in [:form-editor :record-dirty?] true)))
+    (swap! app-state update-in [:form-editor :projection :records] #(conj (vec %) new-record))
+    (swap! app-state update-in [:form-editor :projection]
+           projection/hydrate-bindings new-record)
+    (swap! app-state assoc-in [:form-editor :projection :position] new-pos)
+    (swap! app-state assoc-in [:form-editor :projection :total] new-pos)
+    (swap! app-state assoc-in [:form-editor :projection :dirty?] true)))
 
 (defn- update-state-after-delete!
   "Update form state after a record is successfully deleted."
   [new-records pos]
   (let [new-total (count new-records)
         new-pos (min pos new-total)]
-    (swap! app-state assoc-in [:form-editor :records] new-records)
-    (if (> new-total 0)
-      (do
-        (swap! app-state assoc-in [:form-editor :record-position] {:current new-pos :total new-total})
-        (swap! app-state assoc-in [:form-editor :current-record] (nth new-records (dec new-pos))))
-      (do
-        (swap! app-state assoc-in [:form-editor :record-position] {:current 0 :total 0})
-        (swap! app-state assoc-in [:form-editor :current-record] {})))
-    (swap! app-state assoc-in [:form-editor :record-dirty?] false)))
+    (swap! app-state update-in [:form-editor :projection]
+           projection/sync-records new-records new-pos new-total)
+    (swap! app-state assoc-in [:form-editor :projection :dirty?] false)))
 
 (defn delete-current-record!
   "Delete the current record from the database"
   []
   (let [record-source (get-in @app-state [:form-editor :current :record-source])
-        current-record (get-in @app-state [:form-editor :current-record])
-        records (get-in @app-state [:form-editor :records] [])
-        pos (get-in @app-state [:form-editor :record-position :current] 1)]
+        current-record (get-in @app-state [:form-editor :projection :record])
+        records (get-in @app-state [:form-editor :projection :records] [])
+        pos (get-in @app-state [:form-editor :projection :position] 1)]
     (when (and record-source current-record)
       (let [pk-field-name (detect-pk-field (get-record-source-fields record-source))
             pk-value (pk-value-for-record current-record pk-field-name)]
@@ -764,6 +793,11 @@
   (swap! app-state assoc-in [:form-editor :row-source-cache] {}))
 
 (defn- cache-row-source! [row-source data]
+  ;; Store in projection for controls belonging to this form
+  (when (map? data)
+    (swap! app-state update-in [:form-editor :projection]
+           projection/populate-row-source row-source data))
+  ;; Also cache by source string for subform combos (not in parent projection)
   (swap! app-state assoc-in [:form-editor :row-source-cache row-source] data))
 
 (defn- parse-value-list
@@ -821,10 +855,17 @@
           (fetch-table-row-source! row-source trimmed))))))
 
 (defn get-row-source-options
-  "Returns cached row-source data. nil if not loaded, :loading if in-flight,
-   {:rows [...] :fields [...]} if ready."
+  "Returns row-source data from projection. Falls back to cache for sources
+   not tracked in the projection (e.g. subform combos).
+   nil if not loaded, :loading if in-flight, {:rows [...] :fields [...]} if ready."
   [row-source]
-  (get-in @app-state [:form-editor :row-source-cache row-source]))
+  (let [projection (get-in @app-state [:form-editor :projection])
+        from-proj (some (fn [[_kw spec]]
+                          (when (= (:source spec) row-source)
+                            (:options spec)))
+                        (:row-sources projection))]
+    (or from-proj
+        (get-in @app-state [:form-editor :row-source-cache row-source]))))
 
 ;; ============================================================
 ;; SUBFORM CACHE (child form definition + child records)
@@ -862,10 +903,13 @@
     (let [;; Build filter from paired child/master fields (empty map if no link fields)
           filter-map (if (and (seq link-child-fields) (seq link-master-fields))
                        (reduce (fn [m [child-field master-field]]
-                                 (let [master-val (or (get current-record (keyword master-field))
+                                 (let [lc-master (str/lower-case master-field)
+                                       master-val (or (get current-record (keyword lc-master))
+                                                      (get current-record lc-master)
+                                                      (get current-record (keyword master-field))
                                                       (get current-record master-field))]
                                    (if master-val
-                                     (assoc m child-field master-val)
+                                     (assoc m (str/lower-case child-field) master-val)
                                      m)))
                                {}
                                (map vector link-child-fields link-master-fields))
@@ -878,8 +922,11 @@
         (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :filter-key] filter-key)
         (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :records] :loading)
         (go
-          (let [query-params (cond-> {:limit 1000}
-                               (seq filter-map) (assoc :filter (.stringify js/JSON (clj->js filter-map))))
+          (let [sub-def (get-in @app-state [:form-editor :subform-cache source-form-name :definition])
+                computed (when (map? sub-def) (collect-computed-specs sub-def))
+                query-params (cond-> {:limit 1000}
+                               (seq filter-map) (assoc :filter (.stringify js/JSON (clj->js filter-map)))
+                               (seq computed) (assoc :computed (.stringify js/JSON (clj->js computed))))
                 response (<! (http/get (str api-base "/api/data/" record-source)
                                         {:query-params query-params
                                          :headers (db-headers)}))]
@@ -944,6 +991,33 @@
               ;; Clear filter-key to force re-fetch
               (swap! app-state assoc-in (conj cache-path :filter-key) nil)
               (log-event! "error" "Failed to create subform record" "new-subform-record" {:response (:body response)}))))))))
+
+(defn create-subform-record!
+  "Create a new record in a subform with link fields + initial column value.
+   On success, appends the server-returned record (with generated ID) to
+   the local records cache so the row becomes immediately editable."
+  [source-form-name link-data col-name col-value]
+  (let [cache-path [:form-editor :subform-cache source-form-name]
+        definition (get-in @app-state (conj cache-path :definition))
+        child-record-source (when (map? definition)
+                              (or (:record-source definition) (:record_source definition)))]
+    (when child-record-source
+      (let [post-data (cond-> link-data
+                        (and col-name (not (str/blank? (str col-value))))
+                        (assoc col-name col-value))]
+        (go
+          (let [response (<! (http/post (str api-base "/api/data/" child-record-source)
+                                          {:json-params post-data
+                                           :headers (db-headers)}))]
+            (if (:success response)
+              ;; Append the new record (with generated ID) to the local cache
+              (let [new-record (:data (:body response))
+                    records (get-in @app-state (conj cache-path :records))]
+                (when (vector? records)
+                  (swap! app-state assoc-in (conj cache-path :records)
+                         (conj records new-record))))
+              (log-event! "error" "Failed to create subform record" "create-subform-record"
+                          {:response (:body response)}))))))))
 
 (defn delete-subform-record!
   "Delete a child record from a subform by row index."
@@ -1019,23 +1093,28 @@
           (assoc % :record-source (str/lower-case rs))
           %))))
 
+(defn build-form-editor-state
+  "Build the initial form-editor state map. Pure — no side effects."
+  [form-id definition]
+  {:form-id form-id
+   :dirty? false
+   :original definition
+   :current definition
+   :selected-control nil
+   :synced-controls (build-synced-controls definition)
+   :projection (projection/build-projection definition)})
+
 (defn- setup-form-editor!
   "Initialize the form editor state with a normalized definition."
   [form-id definition]
-  (swap! app-state assoc :form-editor
-         {:form-id form-id
-          :dirty? false
-          :original definition
-          :current definition
-          :selected-control nil
-          :synced-controls (build-synced-controls definition)})
+  (swap! app-state assoc :form-editor (build-form-editor-state form-id definition))
   (maybe-auto-analyze!)
   (set-view-mode! :view))
 
 (defn- auto-save-form-state!
   "Auto-save dirty record and/or form definition before switching."
   []
-  (when (get-in @app-state [:form-editor :record-dirty?])
+  (when (get-in @app-state [:form-editor :projection :dirty?])
     (save-current-record!))
   (when (get-in @app-state [:form-editor :dirty?])
     (save-form!)))

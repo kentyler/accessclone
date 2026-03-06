@@ -1195,7 +1195,7 @@
 (defn navigate-to-record-by-id!
   "Navigate to a record by its primary key ID (used by chat)"
   [record-id]
-  (let [records (get-in @app-state [:form-editor :records] [])
+  (let [records (get-in @app-state [:form-editor :projection :records] [])
         record-source (get-in @app-state [:form-editor :current :record-source])
         fields (get-record-source-fields-for-chat record-source)
         pk-field-name (or (some #(when (:pk %) (:name %)) fields) "id")
@@ -1211,9 +1211,15 @@
       ;; Inline navigate logic (avoids circular dep with state_form/navigate-to-record!)
       (let [total (count records)]
         (when (and (> total 0) (<= pos total))
-          (swap! app-state assoc-in [:form-editor :record-position] {:current pos :total total})
-          (swap! app-state assoc-in [:form-editor :current-record] (nth records (dec pos)))
-          (swap! app-state assoc-in [:form-editor :record-dirty?] false))))))
+          ;; projection/sync-position not available here (circular dep),
+          ;; so update projection fields directly
+          (swap! app-state assoc-in [:form-editor :projection :position] pos)
+          (swap! app-state assoc-in [:form-editor :projection :total] total)
+          ;; Hydrate the record at the new position
+          (let [record (nth records (dec pos))
+                record-lc (into {} (map (fn [[k v]] [(keyword (clojure.string/lower-case (name k))) v])) record)]
+            (swap! app-state assoc-in [:form-editor :projection :record] record-lc))
+          (swap! app-state assoc-in [:form-editor :projection :dirty?] false))))))
 
 (defn send-chat-message!
   "Send a message to the LLM and get a response"

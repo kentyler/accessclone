@@ -793,11 +793,16 @@
   (swap! app-state assoc-in [:form-editor :row-source-cache] {}))
 
 (defn- cache-row-source! [row-source data]
-  ;; Store in projection for controls belonging to this form
   (when (map? data)
+    ;; Try parent projection
     (swap! app-state update-in [:form-editor :projection]
-           projection/populate-row-source row-source data))
-  ;; Also cache by source string for subform combos (not in parent projection)
+           projection/populate-row-source row-source data)
+    ;; Try all subform projections
+    (doseq [[sf-name sf-data] (get-in @app-state [:form-editor :subform-cache])]
+      (when (:projection sf-data)
+        (swap! app-state update-in [:form-editor :subform-cache sf-name :projection]
+               projection/populate-row-source row-source data))))
+  ;; Keep flat cache for fetch dedup sentinel
   (swap! app-state assoc-in [:form-editor :row-source-cache row-source] data))
 
 (defn- parse-value-list
@@ -855,16 +860,25 @@
           (fetch-table-row-source! row-source trimmed))))))
 
 (defn get-row-source-options
-  "Returns row-source data from projection. Falls back to cache for sources
-   not tracked in the projection (e.g. subform combos).
+  "Returns row-source data from projection (parent or subform).
+   Falls back to flat cache for sources not tracked in any projection.
    nil if not loaded, :loading if in-flight, {:rows [...] :fields [...]} if ready."
   [row-source]
   (let [projection (get-in @app-state [:form-editor :projection])
         from-proj (some (fn [[_kw spec]]
                           (when (= (:source spec) row-source)
                             (:options spec)))
-                        (:row-sources projection))]
+                        (:row-sources projection))
+        from-subform (when-not from-proj
+                       (some (fn [[_sf-name sf-data]]
+                               (when-let [sp (:projection sf-data)]
+                                 (some (fn [[_kw spec]]
+                                         (when (= (:source spec) row-source)
+                                           (:options spec)))
+                                       (:row-sources sp))))
+                             (get-in @app-state [:form-editor :subform-cache])))]
     (or from-proj
+        from-subform
         (get-in @app-state [:form-editor :row-source-cache row-source]))))
 
 ;; ============================================================
@@ -887,8 +901,10 @@
           (let [response (<! (http/get (str api-base "/api/forms/" source-form-name)
                                         {:headers (db-headers)}))]
             (if (:success response)
-              (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :definition]
-                     (:body response))
+              (let [def (:body response)]
+                (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :definition] def)
+                (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :projection]
+                       (projection/build-projection def)))
               (do
                 (log-event! "error" (str "Failed to fetch subform definition: " source-form-name) "fetch-subform-definition")
                 (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :definition]

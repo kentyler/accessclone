@@ -230,6 +230,22 @@ describe('generateIntentCljs', () => {
     expect(cljs).toContain('_tempvars');
     expect(cljs).toContain('CurrentUser');
   });
+
+  test('value-switch generates condp with cases', () => {
+    const cljs = generateIntentCljs({
+      type: 'value-switch',
+      field: 'OptionGroup1',
+      cases: [
+        { when: 1, then: [{ type: 'set-control-visible', control: 'Subform1', value: true }] },
+        { when: 2, then: [{ type: 'set-control-visible', control: 'Subform2', value: true }] }
+      ]
+    }, 2);
+    expect(cljs).toContain('condp = v');
+    expect(cljs).toContain(':option-group1');
+    expect(cljs).toContain('projection/set-control-state');
+    expect(cljs).toContain(':subform1');
+    expect(cljs).toContain(':subform2');
+  });
 });
 
 // ============================================================
@@ -371,6 +387,18 @@ describe('collectRequires', () => {
       }]
     }]);
     expect(needs['state-form']).toBe(true);
+    expect(needs.state).toBe(true);
+  });
+
+  test('detects projection needs from value-switch', () => {
+    const needs = collectRequires([{
+      intents: [{
+        type: 'value-switch',
+        field: 'OptionGroup',
+        cases: [{ when: 1, then: [{ type: 'set-control-visible' }] }]
+      }]
+    }]);
+    expect(needs.projection).toBe(true);
     expect(needs.state).toBe(true);
   });
 });

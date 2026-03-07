@@ -202,8 +202,8 @@ describe('KNOWN_INTENT_TYPES', () => {
     expect(KNOWN_INTENT_TYPES.has('gap')).toBe(true);
   });
 
-  test('has 30 intent types', () => {
-    expect(KNOWN_INTENT_TYPES.size).toBe(30);
+  test('has 31 intent types', () => {
+    expect(KNOWN_INTENT_TYPES.size).toBe(31);
   });
 });
 

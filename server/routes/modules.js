@@ -81,21 +81,53 @@ function createRouter(pool) {
         const trigger = toKw(match[1]);
 
         const allIntents = proc.intents || [];
-        // Skip if any intent is async, branching, or unknown
-        const isSimple = allIntents.every(i =>
+        const hasAsync = allIntents.some(i => ASYNC_TYPES.has(i.type));
+        if (hasAsync) continue;
+
+        // Path 1: all intents are flat set-control-* (no branches)
+        const isAllSimple = allIntents.every(i =>
           SIMPLE_TYPES.has(i.type) && i.classification !== 'gap'
         );
-        const hasAsync = allIntents.some(i => ASYNC_TYPES.has(i.type));
-        if (!isSimple || hasAsync) continue;
+        if (isAllSimple) {
+          for (const intent of allIntents) {
+            if (!SIMPLE_TYPES.has(intent.type)) continue;
+            reactions.push({
+              trigger,
+              ctrl: toKw(intent.control),
+              prop: propFor(intent.type),
+              value: intent.value ?? null
+            });
+          }
+          continue;
+        }
 
-        for (const intent of allIntents) {
-          if (!SIMPLE_TYPES.has(intent.type)) continue;
-          reactions.push({
-            trigger,
-            ctrl: toKw(intent.control),
-            prop: propFor(intent.type),
-            value: intent.value ?? null
-          });
+        // Path 2: single value-switch intent
+        if (allIntents.length === 1 && allIntents[0].type === 'value-switch') {
+          const vs = allIntents[0];
+          const cases = vs.cases || [];
+          // All effects in all cases must be simple set-control-*
+          const allEffectsSimple = cases
+            .flatMap(c => c.then || [])
+            .every(i => SIMPLE_TYPES.has(i.type));
+          if (!allEffectsSimple) continue;
+
+          // Transpose: (ctrl, prop) → [{when, then}]
+          const effectMap = {};
+          for (const c of cases) {
+            for (const eff of (c.then || [])) {
+              const key = `${eff.control}|${propFor(eff.type)}`;
+              if (!effectMap[key]) {
+                effectMap[key] = {
+                  trigger,
+                  ctrl: toKw(eff.control),
+                  prop: propFor(eff.type),
+                  cases: []
+                };
+              }
+              effectMap[key].cases.push({ when: c.when, then: eff.value ?? null });
+            }
+          }
+          reactions.push(...Object.values(effectMap));
         }
       }
 

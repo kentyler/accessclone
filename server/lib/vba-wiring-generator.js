@@ -148,6 +148,25 @@ function generateIntentCljs(intent, indent) {
       return `${pad};; TempVar: ${intent.name} = ${intent.value}\n` +
              `${pad}(state/sync-form-state! {"_tempvars" {"${escapeCljs(intent.name)}" ${intent.value || 'nil'}}})`;
 
+    case 'value-switch': {
+      const fieldKw = `:${toClojureName(intent.field)}`;
+      const casesCljs = (intent.cases || []).map(c => {
+        const whenVal = typeof c.when === 'string' ? `"${escapeCljs(c.when)}"` : String(c.when ?? 'nil');
+        const thenLines = (c.then || [])
+          .map(i => generateIntentCljs(i, indent + 4))
+          .filter(Boolean)
+          .join('\n');
+        const body = (c.then || []).length !== 1
+          ? `(do\n${thenLines})`
+          : thenLines.trimStart();
+        return `${pad}  ${whenVal} ${body}`;
+      }).join('\n');
+      return `${pad}(let [v (get-in @state/app-state [:form-editor :projection :record ${fieldKw}])]\n` +
+             `${pad}  (condp = v\n` +
+             casesCljs + `\n` +
+             `${pad}    nil))`;
+    }
+
     case 'branch': {
       const thenCljs = (intent.then || [])
         .map(i => generateIntentCljs(i, indent + 2))
@@ -247,6 +266,10 @@ function collectRequires(procedures) {
           needs.state = true;
           needs.projection = true;
           break;
+        case 'value-switch':
+          needs.state = true;
+          needs.projection = true;
+          break;
         case 'error-handler':
           needs.state = true;
           break;
@@ -255,6 +278,12 @@ function collectRequires(procedures) {
       if (intent.then) scan(intent.then);
       if (intent.else) scan(intent.else);
       if (intent.children) scan(intent.children);
+      // value-switch cases
+      if (intent.cases) {
+        for (const c of intent.cases) {
+          if (c.then) scan(c.then);
+        }
+      }
     }
   }
 

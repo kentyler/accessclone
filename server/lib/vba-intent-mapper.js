@@ -36,7 +36,8 @@ const INTENT_VOCABULARY = {
   'dcount':              { description: 'DCount(...)', type: 'effect', target: 'run-query' },
   'dsum':                { description: 'DSum(...)', type: 'effect', target: 'run-query' },
   'run-sql':             { description: 'DoCmd.RunSQL "INSERT..."', type: 'effect', target: 'data-crud' },
-  'branch':              { description: 'If/ElseIf/Else', type: 'structural', target: null },
+  'value-switch':        { description: 'If/ElseIf testing same field against literals, set-control-* effects only', type: 'structural', target: null },
+  'branch':              { description: 'If/ElseIf/Else (general)', type: 'structural', target: null },
   'loop':                { description: 'For/Do While', type: 'structural', target: null },
   'error-handler':       { description: 'On Error GoTo/Resume', type: 'structural', target: null },
   'gap':                 { description: 'Unmappable pattern', type: 'gap', target: null }
@@ -52,7 +53,8 @@ const MECHANICAL_INTENTS = new Set([
   'show-message', 'confirm-action',
   'set-control-visible', 'set-control-enabled', 'set-control-value',
   'set-filter', 'set-record-source',
-  'read-field', 'write-field', 'set-tempvar'
+  'read-field', 'write-field', 'set-tempvar',
+  'value-switch'
 ]);
 
 // Intent types that need LLM assistance for code generation

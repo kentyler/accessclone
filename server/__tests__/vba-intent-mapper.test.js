@@ -267,7 +267,7 @@ describe('INTENT_VOCABULARY', () => {
   });
 
   test('vocabulary has expected count', () => {
-    expect(Object.keys(INTENT_VOCABULARY).length).toBe(30);
+    expect(Object.keys(INTENT_VOCABULARY).length).toBe(31);
   });
 });
 

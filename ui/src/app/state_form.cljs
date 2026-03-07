@@ -1121,9 +1121,10 @@
    :projection (projection/build-projection definition)})
 
 (defn load-reactions-for-form!
-  "Fetch simple reaction specs for a form's class module and register them
-   into the projection. Reactions represent FieldX_AfterUpdate handlers that
-   contain only set-control-* intents with no branches or async effects."
+  "Fetch reaction specs for a form's class module and register them into the projection.
+   Handles two spec formats:
+   - Simple: {:trigger :ctrl :prop :value} — constant value, flat set-control-* handlers
+   - Cases:  {:trigger :ctrl :prop :cases [{:when v :then r}]} — value-switch, lookup by field value"
   [form-name]
   (let [module-name (str "Form_" form-name)]
     (go
@@ -1134,13 +1135,18 @@
             (when (seq specs)
               (swap! app-state update-in [:form-editor :projection]
                      (fn [proj]
-                       (reduce (fn [p {:keys [trigger ctrl prop value]}]
-                                 (projection/register-reaction
-                                   p
-                                   (keyword trigger)
-                                   (keyword ctrl)
-                                   (keyword prop)
-                                   (constantly value)))
+                       (reduce (fn [p {:keys [trigger ctrl prop value cases]}]
+                                 (let [value-fn (if cases
+                                                  (fn [v _]
+                                                    (some (fn [c] (when (= v (:when c)) (:then c)))
+                                                          cases))
+                                                  (constantly value))]
+                                   (projection/register-reaction
+                                     p
+                                     (keyword trigger)
+                                     (keyword ctrl)
+                                     (keyword prop)
+                                     value-fn)))
                                proj
                                specs))))))))))
 

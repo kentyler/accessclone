@@ -53,6 +53,8 @@
                         definition (app.state-form/normalize-form-definition raw-def)]
                     (swap! app-state assoc :form-editor
                            (state-form/build-form-editor-state (:id form) definition))
+                    (when-let [fname (:filename form)]
+                      (state-form/load-reactions-for-form! fname))
                     (state/maybe-auto-analyze!)
                     ctx))}]}])
 

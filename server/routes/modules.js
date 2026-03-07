@@ -40,6 +40,72 @@ function createRouter(pool) {
    * GET /api/modules/:name
    * Read the current version of a module
    */
+  /**
+   * GET /api/modules/:name/reactions
+   * Extract simple reaction specs from a form module's after-update procedures.
+   * Returns [{trigger, ctrl, prop, value}] for procedures that are:
+   *   - named FieldX_AfterUpdate
+   *   - contain only set-control-visible / set-control-enabled / set-control-value intents
+   *   - no branches, no async effects (dlookup, run-sql, etc.)
+   */
+  router.get('/:name/reactions', async (req, res) => {
+    try {
+      const databaseId = req.databaseId;
+      const result = await pool.query(
+        `SELECT intents FROM shared.modules
+         WHERE database_id = $1 AND name = $2 AND is_current = true`,
+        [databaseId, req.params.name]
+      );
+
+      if (result.rows.length === 0 || !result.rows[0].intents) {
+        return res.json([]);
+      }
+
+      const intents = result.rows[0].intents;
+      const procedures = (intents?.mapped?.procedures) || [];
+      const reactions = [];
+
+      const toKw = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+
+      const propFor = (type) =>
+        type === 'set-control-visible' ? 'visible' :
+        type === 'set-control-enabled' ? 'enabled' : 'caption';
+
+      const SIMPLE_TYPES = new Set(['set-control-visible', 'set-control-enabled', 'set-control-value']);
+      const ASYNC_TYPES  = new Set(['dlookup', 'dcount', 'dsum', 'run-sql', 'loop', 'gap']);
+
+      for (const proc of procedures) {
+        if (proc.trigger !== 'after-update') continue;
+        const match = (proc.name || '').match(/^(.+)_AfterUpdate$/i);
+        if (!match) continue;
+        const trigger = toKw(match[1]);
+
+        const allIntents = proc.intents || [];
+        // Skip if any intent is async, branching, or unknown
+        const isSimple = allIntents.every(i =>
+          SIMPLE_TYPES.has(i.type) && i.classification !== 'gap'
+        );
+        const hasAsync = allIntents.some(i => ASYNC_TYPES.has(i.type));
+        if (!isSimple || hasAsync) continue;
+
+        for (const intent of allIntents) {
+          if (!SIMPLE_TYPES.has(intent.type)) continue;
+          reactions.push({
+            trigger,
+            ctrl: toKw(intent.control),
+            prop: propFor(intent.type),
+            value: intent.value ?? null
+          });
+        }
+      }
+
+      res.json(reactions);
+    } catch (err) {
+      logError(pool, 'GET /api/modules/:name/reactions', 'Failed to extract reactions', err, { databaseId: req.databaseId });
+      res.status(500).json({ error: 'Failed to extract reactions' });
+    }
+  });
+
   router.get('/:name', async (req, res) => {
     try {
       const databaseId = req.databaseId;

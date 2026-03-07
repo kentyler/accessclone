@@ -1120,10 +1120,36 @@
    :synced-controls (build-synced-controls definition)
    :projection (projection/build-projection definition)})
 
+(defn load-reactions-for-form!
+  "Fetch simple reaction specs for a form's class module and register them
+   into the projection. Reactions represent FieldX_AfterUpdate handlers that
+   contain only set-control-* intents with no branches or async effects."
+  [form-name]
+  (let [module-name (str "Form_" form-name)]
+    (go
+      (let [response (<! (http/get (str api-base "/api/modules/" (js/encodeURIComponent module-name) "/reactions")
+                                    {:headers (db-headers)}))]
+        (when (:success response)
+          (let [specs (:body response)]
+            (when (seq specs)
+              (swap! app-state update-in [:form-editor :projection]
+                     (fn [proj]
+                       (reduce (fn [p {:keys [trigger ctrl prop value]}]
+                                 (projection/register-reaction
+                                   p
+                                   (keyword trigger)
+                                   (keyword ctrl)
+                                   (keyword prop)
+                                   (constantly value)))
+                               proj
+                               specs))))))))))
+
 (defn- setup-form-editor!
   "Initialize the form editor state with a normalized definition."
-  [form-id definition]
+  [form-id definition & [form-name]]
   (swap! app-state assoc :form-editor (build-form-editor-state form-id definition))
+  (when (seq form-name)
+    (load-reactions-for-form! form-name))
   (maybe-auto-analyze!)
   (set-view-mode! :view))
 
@@ -1139,20 +1165,21 @@
   (auto-save-form-state!)
   (clear-row-source-cache!)
   (clear-subform-cache!)
-  (if (:definition form)
-    (setup-form-editor! (:id form) (normalize-form-definition (:definition form)))
-    (go
-      (let [response (<! (http/get (str api-base "/api/forms/" (:filename form))
-                                    {:headers (db-headers)}))]
-        (if (:success response)
-          (let [definition (normalize-form-definition (dissoc (:body response) :id :name))]
-            (swap! app-state update-in [:objects :forms]
-                   (fn [forms]
-                     (mapv #(if (= (:id %) (:id form))
-                              (assoc % :definition definition) %)
-                           forms)))
-            (setup-form-editor! (:id form) definition))
-          (log-error! (str "Failed to load form: " (:filename form)) "load-form-for-editing" {:form (:filename form)}))))))
+  (let [fname (:filename form)]
+    (if (:definition form)
+      (setup-form-editor! (:id form) (normalize-form-definition (:definition form)) fname)
+      (go
+        (let [response (<! (http/get (str api-base "/api/forms/" (js/encodeURIComponent fname))
+                                      {:headers (db-headers)}))]
+          (if (:success response)
+            (let [definition (normalize-form-definition (dissoc (:body response) :id :name))]
+              (swap! app-state update-in [:objects :forms]
+                     (fn [forms]
+                       (mapv #(if (= (:id %) (:id form))
+                                (assoc % :definition definition) %)
+                             forms)))
+              (setup-form-editor! (:id form) definition fname))
+            (log-error! (str "Failed to load form: " fname) "load-form-for-editing" {:form fname})))))))
 
 (defn select-control! [idx]
   (swap! app-state assoc-in [:form-editor :selected-control] idx))

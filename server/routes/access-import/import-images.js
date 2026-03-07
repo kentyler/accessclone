@@ -6,7 +6,7 @@
 
 const path = require('path');
 const { logError } = require('../../lib/events');
-const { runPowerShell, parsePowerShellJson } = require('./helpers');
+const { runPowerShell, parsePowerShellJson, withComLock } = require('./helpers');
 
 module.exports = function(router, pool) {
 
@@ -62,15 +62,19 @@ module.exports = function(router, pool) {
 
       let imageData;
       try {
-        const jsonOutput = await runPowerShell(exportScript, args);
-        // Parse JSON robustly — find first '{' and last '}' to ignore any surrounding output
-        const clean = jsonOutput.replace(/^\uFEFF/, '').trim();
-        const jsonStart = clean.indexOf('{');
-        const jsonEnd = clean.lastIndexOf('}');
-        if (jsonStart === -1 || jsonEnd === -1 || jsonEnd <= jsonStart) {
-          throw new Error('No JSON object found in PowerShell output');
-        }
-        imageData = JSON.parse(clean.substring(jsonStart, jsonEnd + 1));
+        const objectCount = formNames.length + reportNames.length;
+        const timeout = Math.max(60000, objectCount * 30000);
+        imageData = await withComLock(async () => {
+          const jsonOutput = await runPowerShell(exportScript, args, { timeout });
+          // Parse JSON robustly — find first '{' and last '}' to ignore any surrounding output
+          const clean = jsonOutput.replace(/^\uFEFF/, '').trim();
+          const jsonStart = clean.indexOf('{');
+          const jsonEnd = clean.lastIndexOf('}');
+          if (jsonStart === -1 || jsonEnd === -1 || jsonEnd <= jsonStart) {
+            throw new Error('No JSON object found in PowerShell output');
+          }
+          return JSON.parse(clean.substring(jsonStart, jsonEnd + 1));
+        });
       } catch (psErr) {
         console.error('PowerShell export_images.ps1 failed:', psErr.message);
         return res.status(500).json({ error: `Image extraction failed: ${psErr.message}` });

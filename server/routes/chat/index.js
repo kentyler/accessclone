@@ -274,12 +274,12 @@ You can see all objects in this application. Help the user understand cross-obje
         assessmentContextStr += `\n\nProvide a concise analysis of this database. Identify the domain/purpose from the table and object names. For the findings above, add domain-aware context: which empty tables might be used by VBA code, which missing relationships are likely real, and what the wide table's columns probably represent. Prioritize which issues matter most for a clean import.`;
       }
 
-      // Check import completeness for module/macro contexts
+      // Check import completeness for module/macro contexts (informational only)
       let completenessWarning = '';
       if ((module_context?.module_name || macro_context?.macro_name) && database_id) {
         const completeness = await checkImportCompleteness(pool, database_id);
         if (completeness?.has_discovery && !completeness.complete) {
-          completenessWarning = `\n\nIMPORTANT — INCOMPLETE IMPORT:\nThe following objects have NOT been imported from the Access source:\n${formatMissingList(completeness.missing)}\nYou MUST NOT produce ClojureScript code translations. You may analyze structure, identify dependencies, and explain logic, but do NOT generate translation code until all objects are imported.`;
+          completenessWarning = `\n\nNOTE — Some objects have not been imported yet:\n${formatMissingList(completeness.missing)}\nYou may still analyze and translate this module. If translation references unimported objects, note them as potential issues but proceed with best-effort translation.`;
         }
       }
 
@@ -482,18 +482,7 @@ Keep responses concise and helpful. When discussing code or SQL, use markdown co
       return res.status(400).json({ error: 'vba_source is required' });
     }
 
-    // Hard block: refuse translation if import is incomplete
     const databaseId = database_id || req.headers['x-database-id'];
-    if (databaseId) {
-      const completeness = await checkImportCompleteness(pool, databaseId);
-      if (completeness?.has_discovery && !completeness.complete) {
-        return res.status(400).json({
-          error: 'Cannot translate until all Access objects are imported.',
-          missing: completeness.missing,
-          missing_count: completeness.missing_count
-        });
-      }
-    }
 
     const apiKey = secrets.anthropic?.api_key || process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
@@ -561,18 +550,7 @@ Return ONLY the ClojureScript code, no markdown code fences, no explanations. In
       return res.status(400).json({ error: 'vba_source is required' });
     }
 
-    // Hard block: refuse if import is incomplete
     const databaseId = database_id || req.headers['x-database-id'];
-    if (databaseId) {
-      const completeness = await checkImportCompleteness(pool, databaseId);
-      if (completeness?.has_discovery && !completeness.complete) {
-        return res.status(400).json({
-          error: 'Cannot extract intents until all Access objects are imported.',
-          missing: completeness.missing,
-          missing_count: completeness.missing_count
-        });
-      }
-    }
 
     const apiKey = secrets.anthropic?.api_key || process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {

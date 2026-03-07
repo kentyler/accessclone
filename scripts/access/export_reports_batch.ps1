@@ -367,6 +367,19 @@ try {
 
     foreach ($reportName in $names) {
         try {
+            # Check COM health before each export — reconnect if dead
+            try { $null = $accessApp.Visible } catch {
+                Write-Host "COM connection lost. Reconnecting..." -ForegroundColor Yellow
+                try { [System.Runtime.Interopservices.Marshal]::ReleaseComObject($accessApp) | Out-Null } catch {}
+                Get-Process MSACCESS -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 2
+                Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
+                $accessApp = New-Object -ComObject Access.Application
+                $accessApp.AutomationSecurity = 3
+                $accessApp.Visible = $true
+                $accessApp.OpenCurrentDatabase($DatabasePath)
+            }
+
             Write-Host "Exporting report: $reportName" -ForegroundColor Cyan
             $reportObj = Export-SingleReport -accessApp $accessApp -reportName $reportName
             $results[$reportName] = $reportObj
@@ -376,13 +389,16 @@ try {
         }
     }
 
-    $accessApp.CloseCurrentDatabase()
+    try { $accessApp.CloseCurrentDatabase() } catch {}
 }
 finally {
     if ($accessApp) {
-        $accessApp.Quit()
-        [System.Runtime.Interopservices.Marshal]::ReleaseComObject($accessApp) | Out-Null
+        try {
+            $accessApp.Quit()
+            [System.Runtime.Interopservices.Marshal]::ReleaseComObject($accessApp) | Out-Null
+        } catch {}
     }
+    Get-Process MSACCESS -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 }
 
 # Build final output

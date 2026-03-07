@@ -1163,6 +1163,9 @@
         on-select (fn [idx] (f/run-fire-and-forget! form-flow/navigate-to-record-flow {:position (inc idx)}))
         opts (form-view-opts current)
         scroll-bars (or (:scroll-bars current) :both)
+        has-controls? (or (seq (fu/get-section-controls current :header))
+                          (seq (fu/get-section-controls current :detail))
+                          (seq (fu/get-section-controls current :footer)))
         has-data? (and record-source
                        (or (pos? (:total record-pos))
                            (and continuous? (:allow-additions? opts))))]
@@ -1176,10 +1179,14 @@
       {:style (cond-> {}
                 (#{:neither :vertical} scroll-bars) (assoc :overflow-x "hidden")
                 (#{:neither :horizontal} scroll-bars) (assoc :overflow-y "hidden"))}
-      (if has-data?
+      (cond
+        has-data?
         (if continuous?
           [continuous-form-body current current-record all-records record-pos on-change on-select opts]
           [single-form-body current current-record on-change opts])
+        (and (not record-source) has-controls?)
+        [single-form-body current current-record on-change (assoc opts :allow-edits? false)]
+        :else
         [:div.no-records (no-records-message record-source current)])]
      (when-not (= 0 (:navigation-buttons current))
        [record-nav-bar record-pos (:allow-additions? opts) (:allow-deletions? opts) (:dirty? projection)])

@@ -6,6 +6,7 @@
             [app.flows.core :as f]
             [app.flows.ui :as ui-flows]
             [app.flows.app :as app-flows]
+            [app.views.expressions :as expr]
             [cljs-http.client :as http]
             [cljs.core.async :refer [go <! chan put!]]
             [clojure.string :as str]))
@@ -321,6 +322,82 @@
       (:hasDeleteEvent form-data)       (assoc :has-delete-event true))))
 
 ;; ============================================================
+;; Server-side function call rewriting
+;; ============================================================
+
+(def ^:private client-side-fns
+  "Functions handled client-side by the expression evaluator.
+   Any function call NOT in this set is assumed to be a server-side PL/pgSQL function."
+  #{"iif" "nz" "now" "date" "format" "left" "right" "mid" "len" "trim"
+    "ucase" "lcase" "int" "round" "val" "instr" "replace" "abs"
+    "sum" "count" "avg" "min" "max" "dcount" "dsum" "first" "last"})
+
+(defn- server-fn-call?
+  "Returns true if the AST is a top-level call to a non-builtin function."
+  [ast]
+  (and (= (:type ast) :call)
+       (not (contains? client-side-fns (:fn ast)))))
+
+(defn- ast->sql
+  "Convert a simple expression AST to SQL text. Schema-qualifies function calls."
+  [ast schema]
+  (case (:type ast)
+    :literal (let [v (:value ast)]
+               (cond
+                 (nil? v) "NULL"
+                 (string? v) (str "'" (str/replace v "'" "''") "'")
+                 :else (str v)))
+    :string  (str "'" (str/replace (:value ast) "'" "''") "'")
+    :call    (str schema "." (:fn ast)
+                  "(" (str/join ", " (map #(ast->sql % schema) (:args ast))) ")")
+    ;; fallback
+    (str (:value ast))))
+
+(defn- rewrite-server-fn-controls
+  "Scan form def for control-sources with server-side function calls.
+   For forms with no record-source, creates a synthetic record-source SELECT.
+   For forms with an existing record-source, wraps it to add the function columns.
+   Returns the updated form definition."
+  [form-def schema]
+  (let [rewrites (atom [])
+        rewrite-controls
+        (fn [controls]
+          (mapv (fn [ctrl]
+                  (if-let [cs (:control-source ctrl)]
+                    (if (str/starts-with? cs "=")
+                      (try
+                        (let [expr-str (subs cs 1)
+                              tokens (expr/tokenize expr-str)
+                              ast (expr/parse tokens)]
+                          (if (server-fn-call? ast)
+                            (let [col-alias (str/lower-case (:name ctrl))
+                                  sql-expr (ast->sql ast schema)]
+                              (swap! rewrites conj {:col-alias col-alias :sql-expr sql-expr})
+                              (-> ctrl (dissoc :control-source) (assoc :field col-alias)))
+                            ctrl))
+                        (catch :default _ ctrl))
+                      ctrl)
+                    ctrl))
+                controls))
+        updated-def (cond-> form-def
+                      (:header form-def)
+                      (update-in [:header :controls] rewrite-controls)
+                      (:detail form-def)
+                      (update-in [:detail :controls] rewrite-controls)
+                      (:footer form-def)
+                      (update-in [:footer :controls] rewrite-controls))]
+    (if (seq @rewrites)
+      (let [select-cols (str/join ", " (map #(str (:sql-expr %) " AS " (:col-alias %))
+                                            @rewrites))
+            existing-rs (:record-source updated-def)]
+        (if existing-rs
+          ;; Wrap existing record-source to add function columns
+          (assoc updated-def :record-source
+                 (str "SELECT sub.*, " select-cols " FROM (" existing-rs ") sub"))
+          ;; No record-source — create synthetic
+          (assoc updated-def :record-source
+                 (str "SELECT " select-cols))))
+      updated-def)))
 
 ;; Local state for the viewer
 (defonce viewer-state
@@ -446,7 +523,8 @@
   ;; If viewer already has loaded data, just restore the sidebar list
   (if (seq (:selected-paths @viewer-state))
     (do
-      (state/load-access-databases!)
+      (when (empty? (get-in @state/app-state [:objects :access_databases]))
+        (state/load-access-databases!))
       (when-let [target (:target-database-id @viewer-state)]
         (load-target-existing! target)
         (load-import-chat-for-id! target))
@@ -465,7 +543,8 @@
               (load-target-existing! target_database_id)
               (load-import-chat-for-id! target_database_id))
             (when (seq paths)
-              (state/load-access-databases!)
+              (when (empty? (get-in @state/app-state [:objects :access_databases]))
+                (state/load-access-databases!))
               (swap! viewer-state assoc :selected-paths (vec paths))
               ;; Load contents for all selected paths; the last one loaded becomes active display
               (doseq [p paths]
@@ -700,7 +779,9 @@
         ;; Step 2: Convert JSON to AccessClone form definition
         (let [form-data (get-in response [:body :formData])
               import-log-id (get-in response [:body :import_log_id])
-              form-def (convert-access-form form-data)
+              schema (str "db_" target-database-id)
+              form-def (-> (convert-access-form form-data)
+                           (rewrite-server-fn-controls schema))
               ;; Step 3: Save to target database via forms API (with import source marker)
               save-url (str api-base "/api/forms/" form-name
                             "?source=import"
@@ -843,21 +924,25 @@
 
 (defn import-forms-batch!
   "Batch import forms: single COM session export, then convert + save each.
+   Falls back to individual import for any forms missing from the batch result.
    Returns {:imported [names] :failed [{:name :error}]}"
   [access-db-path form-names target-database-id]
   (go
     (let [response (<! (http/post (str api-base "/api/access-import/export-forms-batch")
                                   {:json-params {:databasePath access-db-path
                                                  :objectNames (vec form-names)
-                                                 :targetDatabaseId target-database-id}}))]
+                                                 :targetDatabaseId target-database-id}}))
+          imported (atom [])
+          failed (atom [])
+          schema (str "db_" target-database-id)]
       (if (and (:success response) (get-in response [:body :objects]))
         (let [objects (get-in response [:body :objects] {})
-              export-errors (get-in response [:body :errors] [])
-              imported (atom [])
-              failed (atom (vec (map (fn [e] {:name (:name e) :error (:error e)}) export-errors)))]
+              export-errors (get-in response [:body :errors] [])]
+          (reset! failed (vec (map (fn [e] {:name (:name e) :error (:error e)}) export-errors)))
           (doseq [[k form-data] objects]
             (let [form-name (name k)
-                  form-def (convert-access-form form-data)
+                  form-def (-> (convert-access-form form-data)
+                               (rewrite-server-fn-controls schema))
                   save-url (str api-base "/api/forms/" form-name "?source=import")
                   save-response (<! (http/put save-url
                                              {:json-params form-def
@@ -865,25 +950,38 @@
               (if (:success save-response)
                 (swap! imported conj form-name)
                 (swap! failed conj {:name form-name
-                                    :error (or (get-in save-response [:body :error]) "Save failed")}))))
-          {:imported @imported :failed @failed})
-        (let [err (or (get-in response [:body :error]) "Batch export failed")]
-          {:imported [] :failed (mapv (fn [n] {:name n :error err}) form-names)})))))
+                                    :error (or (get-in save-response [:body :error]) "Save failed")})))))
+        ;; Total batch failure -- all will be retried individually below
+        nil)
+      ;; Retry any forms missing from both imported and failed (dropped by COM crash)
+      (let [handled (set (concat @imported (map :name @failed)))
+            missing (remove handled form-names)]
+        (when (seq missing)
+          (println (str "[BATCH] Retrying " (count missing) " forms individually..."))
+          (doseq [form-name missing]
+            (let [result (<! (import-form! access-db-path form-name target-database-id))]
+              (if (true? result)
+                (swap! imported conj form-name)
+                (swap! failed conj {:name form-name
+                                    :error (if (map? result) (:error result) "Individual import failed")}))))))
+      {:imported @imported :failed @failed})))
 
 (defn import-reports-batch!
   "Batch import reports: single COM session export, then convert + save each.
+   Falls back to individual import for any reports missing from the batch result.
    Returns {:imported [names] :failed [{:name :error}]}"
   [access-db-path report-names target-database-id]
   (go
     (let [response (<! (http/post (str api-base "/api/access-import/export-reports-batch")
                                   {:json-params {:databasePath access-db-path
                                                  :objectNames (vec report-names)
-                                                 :targetDatabaseId target-database-id}}))]
+                                                 :targetDatabaseId target-database-id}}))
+          imported (atom [])
+          failed (atom [])]
       (if (and (:success response) (get-in response [:body :objects]))
         (let [objects (get-in response [:body :objects] {})
-              export-errors (get-in response [:body :errors] [])
-              imported (atom [])
-              failed (atom (vec (map (fn [e] {:name (:name e) :error (:error e)}) export-errors)))]
+              export-errors (get-in response [:body :errors] [])]
+          (reset! failed (vec (map (fn [e] {:name (:name e) :error (:error e)}) export-errors)))
           (doseq [[k report-data] objects]
             (let [report-name (name k)
                   report-def (convert-access-report report-data)
@@ -894,25 +992,37 @@
               (if (:success save-response)
                 (swap! imported conj report-name)
                 (swap! failed conj {:name report-name
-                                    :error (or (get-in save-response [:body :error]) "Save failed")}))))
-          {:imported @imported :failed @failed})
-        (let [err (or (get-in response [:body :error]) "Batch export failed")]
-          {:imported [] :failed (mapv (fn [n] {:name n :error err}) report-names)})))))
+                                    :error (or (get-in save-response [:body :error]) "Save failed")})))))
+        nil)
+      ;; Retry any reports missing from both imported and failed
+      (let [handled (set (concat @imported (map :name @failed)))
+            missing (remove handled report-names)]
+        (when (seq missing)
+          (println (str "[BATCH] Retrying " (count missing) " reports individually..."))
+          (doseq [report-name missing]
+            (let [result (<! (import-report! access-db-path report-name target-database-id))]
+              (if (true? result)
+                (swap! imported conj report-name)
+                (swap! failed conj {:name report-name
+                                    :error (if (map? result) (:error result) "Individual import failed")}))))))
+      {:imported @imported :failed @failed})))
 
 (defn import-modules-batch!
   "Batch import modules: single COM session export, then save each.
+   Falls back to individual import for any modules missing from the batch result.
    Returns {:imported [names] :failed [{:name :error}]}"
   [access-db-path module-names target-database-id]
   (go
     (let [response (<! (http/post (str api-base "/api/access-import/export-modules-batch")
                                   {:json-params {:databasePath access-db-path
                                                  :objectNames (vec module-names)
-                                                 :targetDatabaseId target-database-id}}))]
+                                                 :targetDatabaseId target-database-id}}))
+          imported (atom [])
+          failed (atom [])]
       (if (and (:success response) (get-in response [:body :objects]))
         (let [objects (get-in response [:body :objects] {})
-              export-errors (get-in response [:body :errors] [])
-              imported (atom [])
-              failed (atom (vec (map (fn [e] {:name (:name e) :error (:error e)}) export-errors)))]
+              export-errors (get-in response [:body :errors] [])]
+          (reset! failed (vec (map (fn [e] {:name (:name e) :error (:error e)}) export-errors)))
           (doseq [[k module-data] objects]
             (let [module-name (name k)
                   save-response (<! (http/put (str api-base "/api/modules/" module-name)
@@ -921,25 +1031,37 @@
               (if (:success save-response)
                 (swap! imported conj module-name)
                 (swap! failed conj {:name module-name
-                                    :error (or (get-in save-response [:body :error]) "Save failed")}))))
-          {:imported @imported :failed @failed})
-        (let [err (or (get-in response [:body :error]) "Batch export failed")]
-          {:imported [] :failed (mapv (fn [n] {:name n :error err}) module-names)})))))
+                                    :error (or (get-in save-response [:body :error]) "Save failed")})))))
+        nil)
+      ;; Retry any modules missing from both imported and failed
+      (let [handled (set (concat @imported (map :name @failed)))
+            missing (remove handled module-names)]
+        (when (seq missing)
+          (println (str "[BATCH] Retrying " (count missing) " modules individually..."))
+          (doseq [module-name missing]
+            (let [result (<! (import-module! access-db-path module-name target-database-id))]
+              (if (true? result)
+                (swap! imported conj module-name)
+                (swap! failed conj {:name module-name
+                                    :error (if (map? result) (:error result) "Individual import failed")}))))))
+      {:imported @imported :failed @failed})))
 
 (defn import-macros-batch!
   "Batch import macros: single COM session export, then save each.
+   Falls back to individual import for any macros missing from the batch result.
    Returns {:imported [names] :failed [{:name :error}]}"
   [access-db-path macro-names target-database-id]
   (go
     (let [response (<! (http/post (str api-base "/api/access-import/export-macros-batch")
                                   {:json-params {:databasePath access-db-path
                                                  :objectNames (vec macro-names)
-                                                 :targetDatabaseId target-database-id}}))]
+                                                 :targetDatabaseId target-database-id}}))
+          imported (atom [])
+          failed (atom [])]
       (if (and (:success response) (get-in response [:body :objects]))
         (let [objects (get-in response [:body :objects] {})
-              export-errors (get-in response [:body :errors] [])
-              imported (atom [])
-              failed (atom (vec (map (fn [e] {:name (:name e) :error (:error e)}) export-errors)))]
+              export-errors (get-in response [:body :errors] [])]
+          (reset! failed (vec (map (fn [e] {:name (:name e) :error (:error e)}) export-errors)))
           (doseq [[k macro-data] objects]
             (let [macro-name (name k)
                   save-response (<! (http/put (str api-base "/api/macros/" macro-name)
@@ -948,10 +1070,20 @@
               (if (:success save-response)
                 (swap! imported conj macro-name)
                 (swap! failed conj {:name macro-name
-                                    :error (or (get-in save-response [:body :error]) "Save failed")}))))
-          {:imported @imported :failed @failed})
-        (let [err (or (get-in response [:body :error]) "Batch export failed")]
-          {:imported [] :failed (mapv (fn [n] {:name n :error err}) macro-names)})))))
+                                    :error (or (get-in save-response [:body :error]) "Save failed")})))))
+        nil)
+      ;; Retry any macros missing from both imported and failed
+      (let [handled (set (concat @imported (map :name @failed)))
+            missing (remove handled macro-names)]
+        (when (seq missing)
+          (println (str "[BATCH] Retrying " (count missing) " macros individually..."))
+          (doseq [macro-name missing]
+            (let [result (<! (import-macro! access-db-path macro-name target-database-id))]
+              (if (true? result)
+                (swap! imported conj macro-name)
+                (swap! failed conj {:name macro-name
+                                    :error (if (map? result) (:error result) "Individual import failed")}))))))
+      {:imported @imported :failed @failed})))
 
 (defn- batch-import-fn-for-type
   "Return the batch import function for a given object type"
@@ -1217,14 +1349,30 @@
             ;; After modules phase, create PG stub functions from VBA declarations
             (when (= phase :modules)
               (<! (create-function-stubs! target-database-id)))
-            ;; After tables phase, extract attachment files
+            ;; After tables phase, extract attachment files (fire-and-forget —
+            ;; attachments are data files and must not block form/report import)
             (when (= phase :tables)
               (doseq [p (:selected-paths @viewer-state)]
-                (<! (import-attachments! p target-database-id))))
-            ;; After UI phase (forms & reports), extract and embed images
+                (import-attachments! p target-database-id)))
+            ;; After UI phase (forms & reports), extract and embed images (fire-and-forget —
+            ;; images are cosmetic and must not block module/query phases)
             (when (= phase :ui)
               (doseq [p (:selected-paths @viewer-state)]
-                (<! (import-images! p target-database-id)))))))
+                (import-images! p target-database-id)))
+            ;; After queries phase, translate modules (stubs → real PL/pgSQL functions)
+            (when (= phase :queries)
+              (swap! viewer-state assoc-in [:import-all-status :phase] :translating)
+              (swap! viewer-state assoc-in [:import-all-status :current] "Translating modules...")
+              ;; Ensure modules list is populated in app-state
+              (let [resp (<! (http/get (str api-base "/api/modules")
+                                       {:headers {"X-Database-ID" target-database-id}}))]
+                (when (:success resp)
+                  (swap! state/app-state assoc-in [:objects :modules] (:body resp))))
+              ;; Extract intents, auto-resolve gaps, submit decisions, generate code
+              (<! (app-flows/batch-extract-intents!))
+              (<! (app-flows/auto-resolve-gaps!))
+              (<! (app-flows/submit-all-gap-decisions!))
+              (<! (app-flows/batch-generate-code!))))))
       ;; Compute total — aggregate across all selected databases
       (let [all-source (reduce + (map (fn [t] (:total (type-progress t)))
                                       [:tables :queries :forms :reports :modules :macros]))

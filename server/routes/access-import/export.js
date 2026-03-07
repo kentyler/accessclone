@@ -4,7 +4,7 @@
 
 const path = require('path');
 const { logError } = require('../../lib/events');
-const { makeLogImport, runPowerShell, parsePowerShellJson } = require('./helpers');
+const { makeLogImport, runPowerShell, parsePowerShellJson, withComLock } = require('./helpers');
 
 module.exports = function(router, pool) {
 
@@ -21,15 +21,15 @@ module.exports = function(router, pool) {
         return res.status(400).json({ error: 'databasePath and formName required' });
       }
 
-      const scriptsDir = path.join(__dirname, '..', '..', '..', 'scripts', 'access');
-      const exportScript = path.join(scriptsDir, 'export_form.ps1');
-
-      const jsonOutput = await runPowerShell(exportScript, [
-        '-DatabasePath', databasePath,
-        '-FormName', formName
-      ]);
-
-      const formData = parsePowerShellJson(jsonOutput);
+      const formData = await withComLock(async () => {
+        const scriptsDir = path.join(__dirname, '..', '..', '..', 'scripts', 'access');
+        const exportScript = path.join(scriptsDir, 'export_form.ps1');
+        const jsonOutput = await runPowerShell(exportScript, [
+          '-DatabasePath', databasePath,
+          '-FormName', formName
+        ]);
+        return parsePowerShellJson(jsonOutput);
+      });
       const formLogId = await logImport('success', null, { controls: formData.controls ? formData.controls.length : 0 });
 
       res.json({
@@ -58,15 +58,15 @@ module.exports = function(router, pool) {
         return res.status(400).json({ error: 'databasePath and reportName required' });
       }
 
-      const scriptsDir = path.join(__dirname, '..', '..', '..', 'scripts', 'access');
-      const exportScript = path.join(scriptsDir, 'export_report.ps1');
-
-      const jsonOutput = await runPowerShell(exportScript, [
-        '-DatabasePath', databasePath,
-        '-ReportName', reportName
-      ]);
-
-      const reportData = parsePowerShellJson(jsonOutput);
+      const reportData = await withComLock(async () => {
+        const scriptsDir = path.join(__dirname, '..', '..', '..', 'scripts', 'access');
+        const exportScript = path.join(scriptsDir, 'export_report.ps1');
+        const jsonOutput = await runPowerShell(exportScript, [
+          '-DatabasePath', databasePath,
+          '-ReportName', reportName
+        ]);
+        return parsePowerShellJson(jsonOutput);
+      });
       const sectionCount = reportData.sections ? reportData.sections.length : 0;
       const reportLogId = await logImport('success', null, { sections: sectionCount });
 
@@ -96,15 +96,15 @@ module.exports = function(router, pool) {
         return res.status(400).json({ error: 'databasePath and moduleName required' });
       }
 
-      const scriptsDir = path.join(__dirname, '..', '..', '..', 'scripts', 'access');
-      const exportScript = path.join(scriptsDir, 'export_module.ps1');
-
-      const jsonOutput = await runPowerShell(exportScript, [
-        '-DatabasePath', databasePath,
-        '-ModuleName', moduleName
-      ]);
-
-      const moduleData = parsePowerShellJson(jsonOutput);
+      const moduleData = await withComLock(async () => {
+        const scriptsDir = path.join(__dirname, '..', '..', '..', 'scripts', 'access');
+        const exportScript = path.join(scriptsDir, 'export_module.ps1');
+        const jsonOutput = await runPowerShell(exportScript, [
+          '-DatabasePath', databasePath,
+          '-ModuleName', moduleName
+        ]);
+        return parsePowerShellJson(jsonOutput);
+      });
       const moduleLogId = await logImport('success', null, { lineCount: moduleData.lineCount || 0 });
 
       // Create issue for untranslated VBA
@@ -145,15 +145,15 @@ module.exports = function(router, pool) {
         return res.status(400).json({ error: 'databasePath and macroName required' });
       }
 
-      const scriptsDir = path.join(__dirname, '..', '..', '..', 'scripts', 'access');
-      const exportScript = path.join(scriptsDir, 'export_macro.ps1');
-
-      const jsonOutput = await runPowerShell(exportScript, [
-        '-DatabasePath', databasePath,
-        '-MacroName', macroName
-      ]);
-
-      const macroData = parsePowerShellJson(jsonOutput);
+      const macroData = await withComLock(async () => {
+        const scriptsDir = path.join(__dirname, '..', '..', '..', 'scripts', 'access');
+        const exportScript = path.join(scriptsDir, 'export_macro.ps1');
+        const jsonOutput = await runPowerShell(exportScript, [
+          '-DatabasePath', databasePath,
+          '-MacroName', macroName
+        ]);
+        return parsePowerShellJson(jsonOutput);
+      });
       const macroLogId = await logImport('success', null, { hasDefinition: !!macroData.definition });
 
       // Create issue for untranslated macro
@@ -192,21 +192,18 @@ module.exports = function(router, pool) {
         return res.status(400).json({ error: 'databasePath and objectNames[] required' });
       }
 
-      const scriptsDir = path.join(__dirname, '..', '..', '..', 'scripts', 'access');
-      const exportScript = path.join(scriptsDir, 'export_forms_batch.ps1');
+      const timeout = Math.max(60000, objectNames.length * 30000);
+      const batchData = await withComLock(async () => {
+        const scriptsDir = path.join(__dirname, '..', '..', '..', 'scripts', 'access');
+        const exportScript = path.join(scriptsDir, 'export_forms_batch.ps1');
+        const jsonOutput = await runPowerShell(exportScript, [
+          '-DatabasePath', databasePath,
+          '-FormNames', objectNames.join(',')
+        ], { timeout });
+        return parsePowerShellJson(jsonOutput);
+      });
 
-      const jsonOutput = await runPowerShell(exportScript, [
-        '-DatabasePath', databasePath,
-        '-FormNames', objectNames.join(',')
-      ]);
-
-      const batchData = parsePowerShellJson(jsonOutput);
-
-      for (const [formName, formData] of Object.entries(batchData.objects || {})) {
-        const logImport = makeLogImport(pool, databasePath, formName, 'form', targetDatabaseId);
-        await logImport('success', null, { controls: formData.controls ? formData.controls.length : 0 });
-      }
-
+      // Only log export errors — success is logged after client-side save
       for (const err of (batchData.errors || [])) {
         const logImport = makeLogImport(pool, databasePath, err.name, 'form', targetDatabaseId);
         await logImport('error', err.error);
@@ -237,22 +234,18 @@ module.exports = function(router, pool) {
         return res.status(400).json({ error: 'databasePath and objectNames[] required' });
       }
 
-      const scriptsDir = path.join(__dirname, '..', '..', '..', 'scripts', 'access');
-      const exportScript = path.join(scriptsDir, 'export_reports_batch.ps1');
+      const timeout = Math.max(60000, objectNames.length * 30000);
+      const batchData = await withComLock(async () => {
+        const scriptsDir = path.join(__dirname, '..', '..', '..', 'scripts', 'access');
+        const exportScript = path.join(scriptsDir, 'export_reports_batch.ps1');
+        const jsonOutput = await runPowerShell(exportScript, [
+          '-DatabasePath', databasePath,
+          '-ReportNames', objectNames.join(',')
+        ], { timeout });
+        return parsePowerShellJson(jsonOutput);
+      });
 
-      const jsonOutput = await runPowerShell(exportScript, [
-        '-DatabasePath', databasePath,
-        '-ReportNames', objectNames.join(',')
-      ]);
-
-      const batchData = parsePowerShellJson(jsonOutput);
-
-      for (const [reportName, reportData] of Object.entries(batchData.objects || {})) {
-        const logImport = makeLogImport(pool, databasePath, reportName, 'report', targetDatabaseId);
-        const sectionCount = reportData.sections ? reportData.sections.length : 0;
-        await logImport('success', null, { sections: sectionCount });
-      }
-
+      // Only log export errors — success is logged after client-side save
       for (const err of (batchData.errors || [])) {
         const logImport = makeLogImport(pool, databasePath, err.name, 'report', targetDatabaseId);
         await logImport('error', err.error);
@@ -283,33 +276,18 @@ module.exports = function(router, pool) {
         return res.status(400).json({ error: 'databasePath and objectNames[] required' });
       }
 
-      const scriptsDir = path.join(__dirname, '..', '..', '..', 'scripts', 'access');
-      const exportScript = path.join(scriptsDir, 'export_modules_batch.ps1');
+      const timeout = Math.max(60000, objectNames.length * 30000);
+      const batchData = await withComLock(async () => {
+        const scriptsDir = path.join(__dirname, '..', '..', '..', 'scripts', 'access');
+        const exportScript = path.join(scriptsDir, 'export_modules_batch.ps1');
+        const jsonOutput = await runPowerShell(exportScript, [
+          '-DatabasePath', databasePath,
+          '-ModuleNames', objectNames.join(',')
+        ], { timeout });
+        return parsePowerShellJson(jsonOutput);
+      });
 
-      const jsonOutput = await runPowerShell(exportScript, [
-        '-DatabasePath', databasePath,
-        '-ModuleNames', objectNames.join(',')
-      ]);
-
-      const batchData = parsePowerShellJson(jsonOutput);
-
-      for (const [moduleName, moduleData] of Object.entries(batchData.objects || {})) {
-        const logImport = makeLogImport(pool, databasePath, moduleName, 'module', targetDatabaseId);
-        const moduleLogId = await logImport('success', null, { lineCount: moduleData.lineCount || 0 });
-
-        if (moduleLogId && targetDatabaseId) {
-          try {
-            await pool.query(`
-              INSERT INTO shared.import_issues
-                (import_log_id, database_id, object_name, object_type, severity, category, message)
-              VALUES ($1, $2, $3, 'module', 'warning', 'untranslated-vba', $4)
-            `, [moduleLogId, targetDatabaseId, moduleName, 'VBA module needs translation to ClojureScript']);
-          } catch (issueErr) {
-            console.error('Error creating import issue for module:', issueErr);
-          }
-        }
-      }
-
+      // Only log export errors — success is logged after client-side save (via individual fallback)
       for (const err of (batchData.errors || [])) {
         const logImport = makeLogImport(pool, databasePath, err.name, 'module', targetDatabaseId);
         await logImport('error', err.error);
@@ -340,33 +318,18 @@ module.exports = function(router, pool) {
         return res.status(400).json({ error: 'databasePath and objectNames[] required' });
       }
 
-      const scriptsDir = path.join(__dirname, '..', '..', '..', 'scripts', 'access');
-      const exportScript = path.join(scriptsDir, 'export_macros_batch.ps1');
+      const timeout = Math.max(60000, objectNames.length * 30000);
+      const batchData = await withComLock(async () => {
+        const scriptsDir = path.join(__dirname, '..', '..', '..', 'scripts', 'access');
+        const exportScript = path.join(scriptsDir, 'export_macros_batch.ps1');
+        const jsonOutput = await runPowerShell(exportScript, [
+          '-DatabasePath', databasePath,
+          '-MacroNames', objectNames.join(',')
+        ], { timeout });
+        return parsePowerShellJson(jsonOutput);
+      });
 
-      const jsonOutput = await runPowerShell(exportScript, [
-        '-DatabasePath', databasePath,
-        '-MacroNames', objectNames.join(',')
-      ]);
-
-      const batchData = parsePowerShellJson(jsonOutput);
-
-      for (const [macroName, macroData] of Object.entries(batchData.objects || {})) {
-        const logImport = makeLogImport(pool, databasePath, macroName, 'macro', targetDatabaseId);
-        const macroLogId = await logImport('success', null, { hasDefinition: !!macroData.definition });
-
-        if (macroLogId && targetDatabaseId) {
-          try {
-            await pool.query(`
-              INSERT INTO shared.import_issues
-                (import_log_id, database_id, object_name, object_type, severity, category, message)
-              VALUES ($1, $2, $3, 'macro', 'warning', 'untranslated-macro', $4)
-            `, [macroLogId, targetDatabaseId, macroName, 'Access macro needs translation to ClojureScript']);
-          } catch (issueErr) {
-            console.error('Error creating import issue for macro:', issueErr);
-          }
-        }
-      }
-
+      // Only log export errors — success is logged after client-side save (via individual fallback)
       for (const err of (batchData.errors || [])) {
         const logImport = makeLogImport(pool, databasePath, err.name, 'macro', targetDatabaseId);
         await logImport('error', err.error);

@@ -37,6 +37,18 @@ try {
 
     foreach ($moduleName in $names) {
         try {
+            # Check COM health before each export — reconnect if dead
+            try { $null = $accessApp.Visible } catch {
+                Write-Host "COM connection lost. Reconnecting..." -ForegroundColor Yellow
+                try { [System.Runtime.Interopservices.Marshal]::ReleaseComObject($accessApp) | Out-Null } catch {}
+                Get-Process MSACCESS -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 2
+                Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
+                $accessApp = New-Object -ComObject Access.Application
+                $accessApp.AutomationSecurity = 3
+                $accessApp.OpenCurrentDatabase($DatabasePath)
+            }
+
             Write-Host "Exporting module: $moduleName" -ForegroundColor Cyan
             $component = $accessApp.VBE.ActiveVBProject.VBComponents.Item($moduleName)
             $lineCount = 0
@@ -88,11 +100,11 @@ try {
         }
     }
 
-    $accessApp.CloseCurrentDatabase()
+    try { $accessApp.CloseCurrentDatabase() } catch {}
 }
 catch {
-    Write-Error $_.Exception.Message
-    exit 1
+    Write-Host "Error in batch module export: $_" -ForegroundColor Red
+    $errors += [ordered]@{ name = "_batch"; error = $_.Exception.Message }
 }
 finally {
     if ($accessApp) {

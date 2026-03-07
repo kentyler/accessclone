@@ -186,6 +186,13 @@ async function processDefinitionExpressions(pool, definition, objectName, schema
       if (!controlSource || typeof controlSource !== 'string') continue;
       if (!controlSource.startsWith('=')) continue;
 
+      // Skip URL literals (e.g. ="https://...") — not computable expressions
+      const exprBody = controlSource.slice(1).trim();
+      if (/^"https?:\/\//i.test(exprBody)) {
+        warnings.push(`Control ${ctrl.name || ctrl.id}: URL control-source skipped (not a computable expression)`);
+        continue;
+      }
+
       const ctrlName = sanitizeName(ctrl.name || ctrl.id || `ctrl${i}`);
       const functionName = `${pgObjectName}_calc_${ctrlName}`;
 

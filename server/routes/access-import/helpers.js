@@ -34,9 +34,13 @@ const DEFAULT_SCAN_LOCATIONS = userProfile ? [
 ] : [];
 
 /**
- * Run a PowerShell script and return the output
+ * Run a PowerShell script and return the output.
+ * @param {string} scriptPath - Path to .ps1 script
+ * @param {string[]} args - Arguments to pass
+ * @param {object} opts
+ * @param {number} opts.timeout - Kill after this many ms (default 60000)
  */
-async function runPowerShell(scriptPath, args = []) {
+async function runPowerShell(scriptPath, args = [], { timeout = 60000 } = {}) {
   return new Promise((resolve, reject) => {
     const psArgs = [
       '-NoProfile',
@@ -48,6 +52,13 @@ async function runPowerShell(scriptPath, args = []) {
     const ps = spawn('powershell.exe', psArgs);
     let stdout = '';
     let stderr = '';
+    let killed = false;
+
+    const timer = setTimeout(() => {
+      killed = true;
+      ps.kill('SIGTERM');
+      reject(new Error(`PowerShell timed out after ${timeout / 1000}s: ${path.basename(scriptPath)}`));
+    }, timeout);
 
     // Use setEncoding to avoid garbling UTF-8 chars split across chunks
     ps.stdout.setEncoding('utf8');
@@ -62,6 +73,8 @@ async function runPowerShell(scriptPath, args = []) {
     });
 
     ps.on('close', (code) => {
+      clearTimeout(timer);
+      if (killed) return; // already rejected by timeout
       if (code === 0) {
         resolve(stdout.trim());
       } else {
@@ -70,9 +83,22 @@ async function runPowerShell(scriptPath, args = []) {
     });
 
     ps.on('error', (err) => {
-      reject(err);
+      clearTimeout(timer);
+      if (!killed) reject(err);
     });
   });
+}
+
+/**
+ * Promise-based mutex for COM-intensive operations.
+ * Only one COM operation runs at a time; concurrent callers queue.
+ */
+let comLock = Promise.resolve();
+function withComLock(fn) {
+  const prev = comLock;
+  let release;
+  comLock = new Promise(r => { release = r; });
+  return prev.then(fn).finally(release);
 }
 
 /**
@@ -132,5 +158,5 @@ function parsePowerShellJson(output) {
 }
 
 module.exports = {
-  makeLogImport, DEFAULT_SCAN_LOCATIONS, runPowerShell, scanDirectory, parsePowerShellJson
+  makeLogImport, DEFAULT_SCAN_LOCATIONS, runPowerShell, scanDirectory, parsePowerShellJson, withComLock
 };

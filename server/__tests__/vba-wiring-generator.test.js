@@ -216,7 +216,7 @@ describe('generateIntentCljs', () => {
       field: 'OrderDate',
       value: '(js/Date.)'
     }, 2);
-    expect(cljs).toContain('assoc-in');
+    expect(cljs).toContain('projection/update-field');
     expect(cljs).toContain(':order-date');
   });
 
@@ -356,9 +356,10 @@ describe('collectRequires', () => {
     expect(needs['state-form']).toBe(true);
   });
 
-  test('detects transforms needs from update-control', () => {
+  test('detects projection needs from set-control-visible', () => {
     const needs = collectRequires([{ intents: [{ type: 'set-control-visible' }] }]);
-    expect(needs.transforms).toBe(true);
+    expect(needs.projection).toBe(true);
+    expect(needs.state).toBe(true);
   });
 
   test('scans nested children', () => {

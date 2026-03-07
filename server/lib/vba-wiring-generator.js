@@ -102,17 +102,27 @@ function generateIntentCljs(intent, indent) {
       return code;
     }
 
-    case 'set-control-visible':
+    case 'set-control-visible': {
+      const ctrlKw = `:${toClojureName(intent.control)}`;
       return `${pad};; Set ${intent.control} visible=${intent.value}\n` +
-             `${pad}(t/dispatch! :update-control :detail nil :visible ${intent.value ? '1' : '0'})`;
+             `${pad}(swap! state/app-state update-in [:form-editor :projection]\n` +
+             `${pad}  projection/set-control-state ${ctrlKw} :visible ${intent.value ? 'true' : 'false'})`;
+    }
 
-    case 'set-control-enabled':
+    case 'set-control-enabled': {
+      const ctrlKw = `:${toClojureName(intent.control)}`;
       return `${pad};; Set ${intent.control} enabled=${intent.value}\n` +
-             `${pad}(t/dispatch! :update-control :detail nil :enabled ${intent.value ? '1' : '0'})`;
+             `${pad}(swap! state/app-state update-in [:form-editor :projection]\n` +
+             `${pad}  projection/set-control-state ${ctrlKw} :enabled ${intent.value ? 'true' : 'false'})`;
+    }
 
-    case 'set-control-value':
+    case 'set-control-value': {
+      const ctrlKw = `:${toClojureName(intent.control)}`;
+      const val = intent.value ? `"${escapeCljs(String(intent.value))}"` : 'nil';
       return `${pad};; Set ${intent.control} = ${intent.value}\n` +
-             `${pad}(t/dispatch! :update-control :detail nil :value ${intent.value || 'nil'})`;
+             `${pad}(swap! state/app-state update-in [:form-editor :projection]\n` +
+             `${pad}  projection/set-control-state ${ctrlKw} :caption ${val})`;
+    }
 
     case 'set-filter':
       return `${pad};; Set filter: ${escapeCljs(intent.filter)}\n` +
@@ -125,10 +135,14 @@ function generateIntentCljs(intent, indent) {
              `${pad}  (assoc (get-in @state/app-state [:form-editor :current]) :record-source "${escapeCljs(intent.record_source)}"))`;
 
     case 'read-field':
-      return `${pad}(get-in @state/app-state [:form-editor :current-record :${toClojureName(intent.field)}])`;
+      return `${pad}(get-in (:record (get-in @state/app-state [:form-editor :projection])) :${toClojureName(intent.field)})`;
 
-    case 'write-field':
-      return `${pad}(swap! state/app-state assoc-in [:form-editor :current-record :${toClojureName(intent.field)}] ${intent.value || 'nil'})`;
+    case 'write-field': {
+      const fieldKw = `:${toClojureName(intent.field)}`;
+      const fieldVal = intent.value ? `"${escapeCljs(String(intent.value))}"` : 'nil';
+      return `${pad}(swap! state/app-state update-in [:form-editor :projection]\n` +
+             `${pad}  projection/update-field ${fieldKw} ${fieldVal})`;
+    }
 
     case 'set-tempvar':
       return `${pad};; TempVar: ${intent.name} = ${intent.value}\n` +
@@ -205,6 +219,7 @@ function collectRequires(procedures) {
     state: false,
     'state-form': false,
     transforms: false,
+    projection: false,
   };
 
   function scan(intents) {
@@ -212,9 +227,12 @@ function collectRequires(procedures) {
       switch (intent.type) {
         case 'open-form': case 'open-form-filtered': case 'open-report':
         case 'close-form': case 'close-current':
-        case 'read-field': case 'write-field':
         case 'set-tempvar':
           needs.state = true;
+          break;
+        case 'read-field': case 'write-field':
+          needs.state = true;
+          needs.projection = true;
           break;
         case 'goto-record': case 'new-record': case 'requery':
         case 'save-record': case 'delete-record':
@@ -226,7 +244,8 @@ function collectRequires(procedures) {
           needs.transforms = true;
           break;
         case 'set-control-visible': case 'set-control-enabled': case 'set-control-value':
-          needs.transforms = true;
+          needs.state = true;
+          needs.projection = true;
           break;
         case 'error-handler':
           needs.state = true;
@@ -256,6 +275,9 @@ function generateNamespace(moduleName, needs) {
   requires.push('[app.state :as state :refer [app-state]]');
   if (needs['state-form']) {
     requires.push('[app.state-form :as state-form]');
+  }
+  if (needs.projection) {
+    requires.push('[app.projection :as projection]');
   }
   if (needs.transforms) {
     requires.push('[app.transforms.core :as t]');

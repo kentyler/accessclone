@@ -213,18 +213,50 @@
               computed
               computed))))
 
+(defn- settle-reactions
+  "Fire reactions for changed-fields, apply results to projection's control-state.
+   Only reactions whose trigger key is in changed-fields are evaluated."
+  [projection changed-fields]
+  (let [reactions (:reactions projection)]
+    (if (empty? reactions)
+      projection
+      (reduce
+        (fn [proj trigger-kw]
+          (let [entries   (get reactions trigger-kw)
+                field-val (get (:record proj) trigger-kw)]
+            (reduce
+              (fn [p {:keys [ctrl prop value-fn]}]
+                (assoc-in p [:control-state ctrl prop] (value-fn field-val (:record p))))
+              proj
+              entries)))
+        projection
+        (filter #(contains? reactions %) changed-fields)))))
+
+(defn register-reaction
+  "Register a reaction: when trigger-kw field changes, evaluate
+   (value-fn field-val record) and apply the result to ctrl-kw's prop-kw
+   in control-state.
+   E.g. (register-reaction proj :status :btn-approve :visible #(= % \"Active\"))"
+  [projection trigger-kw ctrl-kw prop-kw value-fn]
+  (update-in projection [:reactions trigger-kw]
+             (fnil conj [])
+             {:ctrl ctrl-kw :prop prop-kw :value-fn value-fn}))
+
 (defn update-field
-  "Update a field in bindings and record, mark dirty, re-evaluate affected computed fields."
+  "Update a field in bindings and record, mark dirty,
+   re-evaluate affected computed fields, settle dependent reactions."
   [projection field-kw value]
   (let [proj (-> projection
                  (assoc-in [:bindings field-kw] value)
                  (assoc-in [:record field-kw] value)
                  (assoc :dirty? true))]
-    (evaluate-computed-for proj #{field-kw})))
+    (-> proj
+        (evaluate-computed-for #{field-kw})
+        (settle-reactions #{field-kw}))))
 
 (defn hydrate-bindings
   "Fill binding values from a record map. Case-insensitive keyword lookup.
-   Stores the full record and evaluates all computed fields after hydration."
+   Stores the full record, evaluates all computed fields, and settles all reactions."
   [projection record]
   (if-not (map? record)
     projection
@@ -241,7 +273,8 @@
                         (assoc acc field-kw (get record-lc field-kw)))
                       bindings
                       bindings)))
-          evaluate-computed))))
+          evaluate-computed
+          (settle-reactions (set (keys (:reactions projection))))))))
 
 (defn sync-records
   "Assoc records, position, total, then hydrate bindings at position."
@@ -294,6 +327,7 @@
      :events (extract-events definition)
      :field-triggers (extract-field-triggers controls)
      :control-state (extract-control-state controls)
+     :reactions {}
      :records []
      :position 0
      :total 0

@@ -158,6 +158,25 @@
     {}
     controls))
 
+(defn- extract-control-state
+  "Extract initial mutable state for each named control.
+   Returns {ctrl-kw {:visible bool :enabled bool :locked bool :caption str-or-nil} ...}"
+  [controls]
+  (reduce
+    (fn [acc ctrl]
+      (let [ctrl-name (or (:name ctrl) (:field ctrl))
+            ctrl-kw   (when (seq (str ctrl-name))
+                        (keyword (str/lower-case (str ctrl-name))))]
+        (if ctrl-kw
+          (assoc acc ctrl-kw
+                 {:visible (not= 0 (get ctrl :visible 1))
+                  :enabled (not= 0 (get ctrl :enabled 1))
+                  :locked  (= 1 (:locked ctrl))
+                  :caption (when-let [c (or (:caption ctrl) (:text ctrl))] (str c))})
+          acc)))
+    {}
+    controls))
+
 ;; ============================================================
 ;; PUBLIC API
 ;; ============================================================
@@ -252,10 +271,17 @@
       (assoc-in projection [:row-sources match-kw :options] data)
       projection)))
 
+(defn set-control-state
+  "Set a mutable property on a control in the projection.
+   prop-kw is one of :visible :enabled :locked :caption.
+   E.g. (set-control-state projection :btn-save :visible false)"
+  [projection ctrl-kw prop-kw value]
+  (assoc-in projection [:control-state ctrl-kw prop-kw] value))
+
 (defn build-projection
   "Build a projection map from a normalized form definition.
    The projection captures all data concerns: bindings, computed fields,
-   row-sources, subforms, events, and field triggers."
+   row-sources, subforms, events, field triggers, and per-control mutable state."
   [definition]
   (let [controls (scan-controls definition)
         {:keys [bindings computed]} (extract-bindings controls)]
@@ -267,6 +293,7 @@
      :subforms (extract-subforms controls)
      :events (extract-events definition)
      :field-triggers (extract-field-triggers controls)
+     :control-state (extract-control-state controls)
      :records []
      :position 0
      :total 0

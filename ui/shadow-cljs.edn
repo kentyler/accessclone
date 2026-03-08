@@ -1,4 +1,4 @@
-{:source-paths ["src"]
+{:source-paths ["src" "test"]
 
  :dependencies [[reagent "1.2.0"]
                 [cljs-http "0.1.46"]
@@ -9,4 +9,8 @@
                 :asset-path "/js"
                 :modules {:main {:entries [app.core]}}
                 :devtools {:http-root "resources/public"
-                           :http-port 8281}}}}
+                           :http-port 8281}}
+
+          :test {:target    :node-test
+                 :output-to "target/test.js"
+                 :entries   [app.projection-test]}}}

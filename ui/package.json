@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "shadow-cljs watch app",
     "release": "shadow-cljs release app",
-    "server": "shadow-cljs server"
+    "server": "shadow-cljs server",
+    "test": "shadow-cljs compile test && node target/test.js"
   },
   "devDependencies": {
     "shadow-cljs": "^2.27.0"

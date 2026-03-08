@@ -241,7 +241,10 @@
                 field-val (get (:record proj) trigger-kw)]
             (reduce
               (fn [p {:keys [ctrl prop value-fn]}]
-                (assoc-in p [:control-state ctrl prop] (value-fn field-val (:record p))))
+                (let [result (value-fn field-val (:record p))]
+                  (if (some? result)
+                    (assoc-in p [:control-state ctrl prop] result)
+                    p)))
               proj
               entries)))
         projection

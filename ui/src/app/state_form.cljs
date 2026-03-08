@@ -1137,9 +1137,10 @@
                      (fn [proj]
                        (reduce (fn [p {:keys [trigger ctrl prop value cases]}]
                                  (let [value-fn (if cases
+                                                  ;; `some` would swallow false values — use filter+first
                                                   (fn [v _]
-                                                    (some (fn [c] (when (= v (:when c)) (:then c)))
-                                                          cases))
+                                                    (let [match (first (filter #(= v (:when %)) cases))]
+                                                      (when (some? match) (:then match))))
                                                   (constantly value))]
                                    (projection/register-reaction
                                      p

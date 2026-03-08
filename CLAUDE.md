@@ -230,78 +230,16 @@ See `skills/form-state-sync.md` for full architecture. Key points:
 ### Query Import Retry Loop
 Both `import-selected!` and `import-all!` use a multi-pass retry loop for queries to handle dependency ordering (query A depends on query B which depends on query C). Each pass imports what it can; failed queries are retried in the next pass. The loop continues while progress is made (at least one query succeeded), up to 20 passes max. Dependency errors (PG 42P01/42883) are identified server-side and returned with `category: 'missing-dependency'`.
 
-## Documentation Index
+## Documentation Manifest
 
-All `.md` files in the project (excluding node_modules). Read the relevant files before working on a topic.
+See `MANIFEST.md` for a complete index of all `.md` files with summaries and startup-priority flags.
 
-### Root-Level Docs
+**On session start**, read these files in full:
+1. `CLAUDE.md` (this file)
+2. `HANDOFF.md` — current state, recent changes, known landmines
+3. `tasks.md` — pending/completed tasks
 
-| File | Read when... |
-|------|-------------|
-| `README.md` | Updating the public project description, features list, or architecture overview |
-| `PRODUCT.md` | Understanding the product vision, transform architecture, AI automation thesis |
-| `ARCHITECTURE.md` | Understanding state management, design decisions (why not re-frame), multi-DB isolation |
-| `INSTRUCTIONS.md` | Modifying setup/install flow, onboarding new users |
-| `CHANGELOG.md` | Documenting new releases, checking what shipped when |
-| `HANDOFF.md` | Start of session — current state, recent changes, known landmines, conventions |
-| `CONTRIBUTING.md` | Updating contributor guidelines |
-| `CODE_OF_CONDUCT.md` | Standard CoC (rarely needs changes) |
-| `tasks.md` | Checking pending/completed project tasks |
-| `server/README.md` | Quick reference for backend route files |
-
-### Skills Files (`skills/`)
-
-**Conversion pipeline** (read in order for full import workflow):
-
-| File | Topic |
-|------|-------|
-| `conversion.md` | Master orchestrator — 7-phase workflow, import order, completion checklist |
-| `conversion-setup.md` | Phase 1: DB creation, infrastructure, git setup |
-| `conversion-tables.md` | Phase 2: Table migration, type mapping, PK detection |
-| `conversion-queries.md` | Phase 3: Query→view/function, LLM fallback, retry loop, form state refs |
-| `conversion-forms.md` | Phase 4: Form import, twips→pixels, control type mapping, section organization |
-| `conversion-vba.md` | Phase 5: VBA→PostgreSQL functions (session-state pattern) |
-| `conversion-vba-cljs.md` | VBA→ClojureScript translation (DoCmd, DLookup, MsgBox, API patterns) |
-| `conversion-macros.md` | Phase 6: Macro import, LoadFromText format, XML, translation strategy |
-
-**Architecture and design:**
-
-| File | Topic |
-|------|-------|
-| `form-design.md` | Form definition structure, control types, layout, binding, hotkeys |
-| `form-state-sync.md` | Cross-form state sync (control_column_map, session_state cross-join, runtime) |
-| `updatable-queries.md` | View write-target resolution (Access updatable queries vs PG read-only views) |
-| `database-patterns.md` | PostgreSQL function patterns (session-state, validator/executor/orchestrator) |
-| `transform-architecture.md` | Pure transform architecture — 3 layers, 5 build phases, VBA intent mapping |
-| `capability-ontology.md` | Three-layer model (Could Do / Should Do / Doing Now), four primitives, Deleuzian reading |
-| `access-system-tables.md` | MSys* table handling in graph and intent extraction |
-
-**AI and automation:**
-
-| File | Topic |
-|------|-------|
-| `intent-extraction.md` | VBA intent extraction prompt — 30 intent types, trigger mapping, JSON schema, examples |
-| `ai-import.md` | AI agent import skill — full-pipeline (Claude Code) vs post-extraction (Codex) paths |
-
-**Development guides:**
-
-| File | Topic |
-|------|-------|
-| `codebase-guide.md` | Pipeline-oriented walkthrough of every subsystem (best starting point for new contributors) |
-| `testing.md` | Test map, patterns, coverage gaps, templates for new tests |
-| `install.md` | Installation assistant skill — auto-detect, PostgreSQL setup, troubleshooting |
-| `writing-skills.md` | Meta-guide for writing new skill files (cross-platform patterns, checklist) |
-
-### Other Docs
-
-| File | Topic |
-|------|-------|
-| `docs/northwind-openclaw.md` | Northwind automation analysis (70/20/10 split), OpenClaw integration vision |
-| `databases/accessclone/notes.md` | Per-database notes template (AccessClone DB) |
-| `databases/threehorse/notes.md` | Per-database notes template (ThreeHorse DB) |
-| `.github/ISSUE_TEMPLATE/bug_report.md` | Bug report template |
-| `.github/ISSUE_TEMPLATE/feature_request.md` | Feature request template |
-| `.github/PULL_REQUEST_TEMPLATE.md` | PR template |
+All other files: consult the manifest summary, read in full only when working on that topic.
 
 ## Testing
 

@@ -1346,9 +1346,19 @@
               (swap! total-failed conj {:type obj-type :name obj-name :error err}))
             ;; Refresh target-existing after this phase (await completion)
             (<! (load-target-existing-async! target-database-id))
-            ;; After modules phase, create PG stub functions from VBA declarations
+            ;; After modules phase, create PG stub functions then extract intents + resolve gaps
             (when (= phase :modules)
-              (<! (create-function-stubs! target-database-id)))
+              (<! (create-function-stubs! target-database-id))
+              ;; Extract intents + resolve gaps (no deps needed)
+              (swap! viewer-state assoc-in [:import-all-status :phase] :extracting)
+              (swap! viewer-state assoc-in [:import-all-status :current] "Extracting intents...")
+              (let [resp (<! (http/get (str api-base "/api/modules")
+                                        {:headers {"X-Database-ID" target-database-id}}))]
+                (when (:success resp)
+                  (swap! state/app-state assoc-in [:objects :modules] (:body resp))))
+              (<! (app-flows/batch-extract-intents!))
+              (<! (app-flows/auto-resolve-gaps!))
+              (<! (app-flows/submit-all-gap-decisions!)))
             ;; After tables phase, extract attachment files (fire-and-forget —
             ;; attachments are data files and must not block form/report import)
             (when (= phase :tables)
@@ -1359,19 +1369,14 @@
             (when (= phase :ui)
               (doseq [p (:selected-paths @viewer-state)]
                 (import-images! p target-database-id)))
-            ;; After queries phase, translate modules (stubs → real PL/pgSQL functions)
+            ;; After queries phase, generate code (all deps now available)
             (when (= phase :queries)
-              (swap! viewer-state assoc-in [:import-all-status :phase] :translating)
-              (swap! viewer-state assoc-in [:import-all-status :current] "Translating modules...")
-              ;; Ensure modules list is populated in app-state
+              (swap! viewer-state assoc-in [:import-all-status :phase] :generating)
+              (swap! viewer-state assoc-in [:import-all-status :current] "Generating code...")
               (let [resp (<! (http/get (str api-base "/api/modules")
                                        {:headers {"X-Database-ID" target-database-id}}))]
                 (when (:success resp)
                   (swap! state/app-state assoc-in [:objects :modules] (:body resp))))
-              ;; Extract intents, auto-resolve gaps, submit decisions, generate code
-              (<! (app-flows/batch-extract-intents!))
-              (<! (app-flows/auto-resolve-gaps!))
-              (<! (app-flows/submit-all-gap-decisions!))
               (<! (app-flows/batch-generate-code!))))))
       ;; Compute total — aggregate across all selected databases
       (let [all-source (reduce + (map (fn [t] (:total (type-progress t)))

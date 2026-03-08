@@ -7,6 +7,7 @@
 const express = require('express');
 const router = express.Router();
 const { logEvent, logError } = require('../lib/events');
+const { extractReactions } = require('../lib/reactions-extractor');
 
 function createRouter(pool) {
   /**
@@ -63,75 +64,7 @@ function createRouter(pool) {
 
       const intents = result.rows[0].intents;
       const procedures = (intents?.mapped?.procedures) || [];
-      const reactions = [];
-
-      const toKw = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-
-      const propFor = (type) =>
-        type === 'set-control-visible' ? 'visible' :
-        type === 'set-control-enabled' ? 'enabled' : 'caption';
-
-      const SIMPLE_TYPES = new Set(['set-control-visible', 'set-control-enabled', 'set-control-value']);
-      const ASYNC_TYPES  = new Set(['dlookup', 'dcount', 'dsum', 'run-sql', 'loop', 'gap']);
-
-      for (const proc of procedures) {
-        if (proc.trigger !== 'after-update') continue;
-        const match = (proc.name || '').match(/^(.+)_AfterUpdate$/i);
-        if (!match) continue;
-        const trigger = toKw(match[1]);
-
-        const allIntents = proc.intents || [];
-        const hasAsync = allIntents.some(i => ASYNC_TYPES.has(i.type));
-        if (hasAsync) continue;
-
-        // Path 1: all intents are flat set-control-* (no branches)
-        const isAllSimple = allIntents.every(i =>
-          SIMPLE_TYPES.has(i.type) && i.classification !== 'gap'
-        );
-        if (isAllSimple) {
-          for (const intent of allIntents) {
-            if (!SIMPLE_TYPES.has(intent.type)) continue;
-            reactions.push({
-              trigger,
-              ctrl: toKw(intent.control),
-              prop: propFor(intent.type),
-              value: intent.value ?? null
-            });
-          }
-          continue;
-        }
-
-        // Path 2: single value-switch intent
-        if (allIntents.length === 1 && allIntents[0].type === 'value-switch') {
-          const vs = allIntents[0];
-          const cases = vs.cases || [];
-          // All effects in all cases must be simple set-control-*
-          const allEffectsSimple = cases
-            .flatMap(c => c.then || [])
-            .every(i => SIMPLE_TYPES.has(i.type));
-          if (!allEffectsSimple) continue;
-
-          // Transpose: (ctrl, prop) → [{when, then}]
-          const effectMap = {};
-          for (const c of cases) {
-            for (const eff of (c.then || [])) {
-              const key = `${eff.control}|${propFor(eff.type)}`;
-              if (!effectMap[key]) {
-                effectMap[key] = {
-                  trigger,
-                  ctrl: toKw(eff.control),
-                  prop: propFor(eff.type),
-                  cases: []
-                };
-              }
-              effectMap[key].cases.push({ when: c.when, then: eff.value ?? null });
-            }
-          }
-          reactions.push(...Object.values(effectMap));
-        }
-      }
-
-      res.json(reactions);
+      res.json(extractReactions(procedures));
     } catch (err) {
       logError(pool, 'GET /api/modules/:name/reactions', 'Failed to extract reactions', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to extract reactions' });

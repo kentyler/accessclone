@@ -865,8 +865,10 @@
   [ctrl current-record on-change & [{:keys [auto-focus? allow-edits? all-controls]}]]
   (let [ctrl-name     (or (:name ctrl) (:field ctrl))
         ctrl-kw       (projection/ctrl->kw ctrl-name)
+        ;; Named controls: cs is always non-nil (extract-control-state seeds all named controls).
+        ;; Unnamed controls (decorative labels etc.): cs is nil, use static definition as fallback.
         cs            (when ctrl-kw (get-in @state/app-state [:form-editor :projection :control-state ctrl-kw]))
-        ctrl-visible? (if cs (:visible cs) (not= 0 (get ctrl :visible 1)))]
+        ctrl-visible? (if ctrl-kw (:visible cs) (not= 0 (get ctrl :visible 1)))]
     (when ctrl-visible?
       (let [ctrl-type  (:type ctrl)
             ;; Overlay mutable caption/text from control-state onto ctrl
@@ -890,8 +892,8 @@
             style      (if cf-style (merge base-style cf-style) base-style)
             tab-idx    (if (= 0 (:tab-stop ctrl)) -1 (:tab-index ctrl))
             tip        (:control-tip-text ctrl)
-            ctrl-enabled? (if cs (:enabled cs) (not= 0 (get ctrl :enabled 1)))
-            ctrl-locked?  (if cs (:locked cs) (= 1 (:locked ctrl)))
+            ctrl-enabled? (if ctrl-kw (:enabled cs) (not= 0 (get ctrl :enabled 1)))
+            ctrl-locked?  (if ctrl-kw (:locked cs)  (= 1 (:locked ctrl)))
             effective-edits? (and allow-edits? ctrl-enabled? (not ctrl-locked?) field-writable?)
             hotkey     (fu/extract-hotkey (or (:text ctrl) (:caption ctrl)))]
         [:div.view-control

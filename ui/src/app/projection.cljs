@@ -173,7 +173,9 @@
     controls))
 
 (defn- extract-control-state
-  "Extract initial mutable state for each named control.
+  "Seed mutable state for every named control from the form definition.
+   Invariant: every control with a non-nil ctrl->kw will have an entry here,
+   so form-view-control can use ctrl-kw (not cs) as the 'has projection entry?' gate.
    Returns {ctrl-kw {:visible bool :enabled bool :locked bool :caption str-or-nil} ...}"
   [controls]
   (reduce

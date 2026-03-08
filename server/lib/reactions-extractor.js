@@ -18,8 +18,18 @@
 const SIMPLE_TYPES = new Set(['set-control-visible', 'set-control-enabled', 'set-control-value']);
 const ASYNC_TYPES  = new Set(['dlookup', 'dcount', 'dsum', 'run-sql', 'loop', 'gap']);
 
+/**
+ * Convert a control or field name to a keyword string using the same algorithm
+ * as the wiring generator (toClojureName) and projection/ctrl->kw:
+ * split camelCase, lowercase, collapse non-alphanumeric to hyphens.
+ * e.g. SubformCustomers → "subform-customers", OptionGroup1 → "option-group1"
+ */
 function toKw(s) {
-  return (s || '').toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  return (s || '')
+    .replace(/([a-z])([A-Z])/g, '$1-$2')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
 }
 
 function propFor(type) {

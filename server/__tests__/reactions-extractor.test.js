@@ -127,9 +127,9 @@ describe('flat set-control-* handlers', () => {
   test('extracts visible and enabled from flat handler', () => {
     const specs = extractReactions([flatVisible]);
     expect(specs).toHaveLength(2);
-    // toKw lowercases and replaces non-alphanumeric — no camelCase splitting
-    expect(specs[0]).toEqual({ trigger: 'chkshowdetails', ctrl: 'details', prop: 'visible', value: true });
-    expect(specs[1]).toEqual({ trigger: 'chkshowdetails', ctrl: 'btnedit', prop: 'enabled', value: false });
+    // toKw splits camelCase: chkShowDetails → chk-show-details, BtnEdit → btn-edit
+    expect(specs[0]).toEqual({ trigger: 'chk-show-details', ctrl: 'details', prop: 'visible', value: true });
+    expect(specs[1]).toEqual({ trigger: 'chk-show-details', ctrl: 'btn-edit', prop: 'enabled', value: false });
   });
 
   test('ignores non-AfterUpdate triggers', () => {
@@ -162,9 +162,9 @@ describe('value-switch handlers', () => {
 
     const byCtrl = Object.fromEntries(specs.map(s => [s.ctrl, s]));
 
-    expect(byCtrl['subformcustomers']).toMatchObject({
-      trigger: 'optiongroup1',
-      ctrl: 'subformcustomers',
+    expect(byCtrl['subform-customers']).toMatchObject({
+      trigger: 'option-group1',
+      ctrl: 'subform-customers',
       prop: 'visible',
       cases: [
         { when: 1, then: true },
@@ -173,11 +173,11 @@ describe('value-switch handlers', () => {
       ]
     });
 
-    expect(byCtrl['subformorders']).toMatchObject({
+    expect(byCtrl['subform-orders']).toMatchObject({
       cases: [{ when: 1, then: false }, { when: 2, then: true }, { when: 3, then: false }]
     });
 
-    expect(byCtrl['subformproducts']).toMatchObject({
+    expect(byCtrl['subform-products']).toMatchObject({
       cases: [{ when: 1, then: false }, { when: 2, then: false }, { when: 3, then: true }]
     });
   });
@@ -187,11 +187,11 @@ describe('value-switch handlers', () => {
     // 2 visible + 1 caption = 3 distinct (ctrl, prop) keys — but panel-a and panel-b each appear once
     // panel-a visible: [{when:A,then:true},{when:B,then:false}]
     expect(specs.length).toBeGreaterThan(0);
-    const panelA = specs.find(s => s.ctrl === 'panela' && s.prop === 'visible');
+    const panelA = specs.find(s => s.ctrl === 'panel-a' && s.prop === 'visible');
     expect(panelA).toBeDefined();
     expect(panelA.cases).toEqual([{ when: 'A', then: true }, { when: 'B', then: false }]);
 
-    const status = specs.find(s => s.ctrl === 'lblstatus' && s.prop === 'caption');
+    const status = specs.find(s => s.ctrl === 'lbl-status' && s.prop === 'caption');
     expect(status).toBeDefined();
     expect(status.cases[0]).toEqual({ when: 'A', then: 'Category A selected' });
   });

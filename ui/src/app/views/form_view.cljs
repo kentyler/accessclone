@@ -9,6 +9,7 @@
             [app.flows.navigation :as nav]
             [app.views.form-utils :as fu]
             [app.views.expressions :as expr]
+            [app.projection :as projection]
             [clojure.string :as str]))
 
 (declare show-record-menu form-view-control)
@@ -863,7 +864,7 @@
   "Render a single control in view mode"
   [ctrl current-record on-change & [{:keys [auto-focus? allow-edits? all-controls]}]]
   (let [ctrl-name     (or (:name ctrl) (:field ctrl))
-        ctrl-kw       (when (seq (str ctrl-name)) (keyword (str/lower-case (str ctrl-name))))
+        ctrl-kw       (projection/ctrl->kw ctrl-name)
         cs            (when ctrl-kw (get-in @state/app-state [:form-editor :projection :control-state ctrl-kw]))
         ctrl-visible? (if cs (:visible cs) (not= 0 (get ctrl :visible 1)))]
     (when ctrl-visible?

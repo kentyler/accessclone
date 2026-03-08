@@ -10,6 +10,20 @@
 ;; HELPERS
 ;; ============================================================
 
+(defn ctrl->kw
+  "Convert a control name to a keyword using the same algorithm as the
+   wiring generator (toClojureName): split camelCase, lowercase, collapse
+   non-alphanumeric to hyphens.
+   E.g. SubformCustomers → :subform-customers, OptionGroup1 → :option-group1"
+  [s]
+  (when (seq (str s))
+    (-> (str s)
+        (str/replace #"([a-z])([A-Z])" "$1-$2")
+        str/lower-case
+        (str/replace #"[^a-z0-9]+" "-")
+        (str/replace #"^-|-$" "")
+        keyword)))
+
 (defn- scan-controls
   "Walk header/detail/footer sections, collect all controls into a flat seq."
   [definition]
@@ -165,8 +179,7 @@
   (reduce
     (fn [acc ctrl]
       (let [ctrl-name (or (:name ctrl) (:field ctrl))
-            ctrl-kw   (when (seq (str ctrl-name))
-                        (keyword (str/lower-case (str ctrl-name))))]
+            ctrl-kw   (ctrl->kw ctrl-name)]
         (if ctrl-kw
           (assoc acc ctrl-kw
                  {:visible (not= 0 (get ctrl :visible 1))

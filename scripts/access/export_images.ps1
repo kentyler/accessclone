@@ -82,6 +82,20 @@ function Find-ImageStart {
             $bytes[$i] -eq 0x47 -and $bytes[$i+1] -eq 0x49 -and $bytes[$i+2] -eq 0x46 -and $bytes[$i+3] -eq 0x38) {
             return @{ offset = $i; mimeType = "image/gif" }
         }
+        # DIB (raw BITMAPINFOHEADER without BMP file header)
+        # Starts with header size = 40 (0x28), followed by valid width/height/planes/bpp
+        if ($i + 15 -lt $bytes.Length -and
+            $bytes[$i] -eq 0x28 -and $bytes[$i+1] -eq 0x00 -and $bytes[$i+2] -eq 0x00 -and $bytes[$i+3] -eq 0x00) {
+            $dibWidth = [BitConverter]::ToInt32($bytes, $i + 4)
+            $dibHeight = [BitConverter]::ToInt32($bytes, $i + 8)
+            $dibPlanes = [BitConverter]::ToUInt16($bytes, $i + 12)
+            $dibBpp = [BitConverter]::ToUInt16($bytes, $i + 14)
+            if ($dibWidth -gt 0 -and $dibWidth -lt 32768 -and
+                [Math]::Abs($dibHeight) -gt 0 -and [Math]::Abs($dibHeight) -lt 32768 -and
+                $dibPlanes -eq 1 -and ($dibBpp -eq 1 -or $dibBpp -eq 4 -or $dibBpp -eq 8 -or $dibBpp -eq 16 -or $dibBpp -eq 24 -or $dibBpp -eq 32)) {
+                return @{ offset = $i; mimeType = "image/bmp"; isDIB = $true }
+            }
+        }
     }
     return $null
 }
@@ -90,30 +104,44 @@ function Load-SharedImages {
     param($accessApp)
     $shared = @{}
     try {
-        $db = $accessApp.CurrentDb
+        $db = $accessApp.CurrentDb()
         # MSysResources stores shared image resources (PictureType = Shared)
+        # Data column is an attachment field (type 101) — requires child recordset + SaveToFile
         $rs = $db.OpenRecordset("SELECT Name, Extension, Data FROM MSysResources WHERE Type = 'img'", 4)  # 4 = dbOpenSnapshot
+        $tmpDir = [System.IO.Path]::GetTempPath()
         while (-not $rs.EOF) {
             $name = $rs.Fields("Name").Value
             $ext = $rs.Fields("Extension").Value
-            $field = $rs.Fields("Data")
-            $size = $field.FieldSize
-            if ($size -gt 0 -and $size -le 512000) {
-                [byte[]]$bytes = $field.GetChunk(0, $size)
-                $result = Find-ImageStart -bytes $bytes
-                if ($result) {
-                    $offset = $result.offset
-                    $imageLength = $bytes.Length - $offset
-                    $imageBytes = New-Object byte[] $imageLength
-                    [Array]::Copy($bytes, $offset, $imageBytes, 0, $imageLength)
-                    $shared[$name] = @{
-                        base64 = [Convert]::ToBase64String($imageBytes)
-                        mimeType = $result.mimeType
+            try {
+                $childRS = $rs.Fields("Data").Value
+                if (-not $childRS.EOF) {
+                    $tmpPath = [System.IO.Path]::Combine($tmpDir, "msysres_export.$ext")
+                    $childRS.Fields("FileData").SaveToFile($tmpPath)
+                    [byte[]]$bytes = [System.IO.File]::ReadAllBytes($tmpPath)
+                    Remove-Item $tmpPath -Force -ErrorAction SilentlyContinue
+
+                    if ($bytes.Length -gt 512000) {
+                        Log-Warn "Skipping shared image ${name}: too large ($($bytes.Length) bytes)"
+                    } else {
+                        # Shared images from MSysResources are stored as raw files (PNG, etc.)
+                        # — no OLE header, so detect mime type from first bytes directly
+                        $mimeType = "image/png"  # default for shared resources
+                        if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xD8) {
+                            $mimeType = "image/jpeg"
+                        } elseif ($bytes.Length -ge 4 -and $bytes[0] -eq 0x47 -and $bytes[1] -eq 0x49) {
+                            $mimeType = "image/gif"
+                        } elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0x42 -and $bytes[1] -eq 0x4D) {
+                            $mimeType = "image/bmp"
+                        }
+                        $shared[$name] = @{
+                            base64 = [Convert]::ToBase64String($bytes)
+                            mimeType = $mimeType
+                        }
+                        Log-Info "  Loaded shared image: $name ($ext, $($bytes.Length) bytes)"
                     }
-                    Log-Info "  Loaded shared image: $name ($ext, $imageLength bytes)"
                 }
-            } elseif ($size -gt 512000) {
-                Log-Warn "Skipping shared image ${name}: too large ($size bytes)"
+            } catch {
+                Log-Warn "  Could not read shared image ${name}: $_"
             }
             $rs.MoveNext()
         }
@@ -232,8 +260,29 @@ function Convert-HexToImage {
     $offset = $result.offset
     $mimeType = $result.mimeType
     $imageLength = $bytes.Length - $offset
-    $imageBytes = New-Object byte[] $imageLength
-    [Array]::Copy($bytes, $offset, $imageBytes, 0, $imageLength)
+
+    if ($result.isDIB) {
+        # Raw DIB (BITMAPINFOHEADER without BMP file header) — prepend a 14-byte BITMAPFILEHEADER
+        # so browsers can render it as a standard BMP
+        $dibHeaderSize = [BitConverter]::ToUInt32($bytes, $offset)
+        $dibBpp = [BitConverter]::ToUInt16($bytes, $offset + 14)
+        # Color table size: for bpp <= 8, there's a color table
+        $colorTableSize = 0
+        if ($dibBpp -le 8) { $colorTableSize = [Math]::Pow(2, $dibBpp) * 4 }
+        $pixelDataOffset = 14 + $dibHeaderSize + $colorTableSize
+        $fileSize = 14 + $imageLength
+        $fileHeader = New-Object byte[] 14
+        $fileHeader[0] = 0x42; $fileHeader[1] = 0x4D  # 'BM'
+        [Array]::Copy([BitConverter]::GetBytes([uint32]$fileSize), 0, $fileHeader, 2, 4)
+        # bytes 6-9 reserved (already 0)
+        [Array]::Copy([BitConverter]::GetBytes([uint32]$pixelDataOffset), 0, $fileHeader, 10, 4)
+        $imageBytes = New-Object byte[] $fileSize
+        [Array]::Copy($fileHeader, 0, $imageBytes, 0, 14)
+        [Array]::Copy($bytes, $offset, $imageBytes, 14, $imageLength)
+    } else {
+        $imageBytes = New-Object byte[] $imageLength
+        [Array]::Copy($bytes, $offset, $imageBytes, 0, $imageLength)
+    }
     $base64 = [Convert]::ToBase64String($imageBytes)
 
     $context = Get-ImageContext $stack $objectType $objectName
@@ -550,7 +599,7 @@ try {
         try {
             # acForm=2, acReport=3
             $acType = if ($objType -eq "form") { 2 } else { 3 }
-            Log-Info "Scanning $objType: $objName"
+            Log-Info "Scanning ${objType}: $objName"
 
             # SaveAsText dumps the entire definition as text — no need to open in design view
             $accessApp.SaveAsText($acType, $objName, $tempFile)

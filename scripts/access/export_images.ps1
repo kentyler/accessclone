@@ -1,7 +1,12 @@
-# Export image data from Access form/report image controls
+# Export image data from Access form/report controls via SaveAsText
 # Usage: .\export_images.ps1 -DatabasePath "path\to\db.accdb"
 # Optional: -FormNames "Form1,Form2" -ReportNames "Report1,Report2"
-# Output: JSON with images array [{objectType, objectName, controlName, base64, mimeType}]
+# Output: JSON with images array [{objectType, objectName, controlName, level, sectionName, base64, mimeType}]
+#
+# Approach: Uses Application.SaveAsText to dump form/report definitions as text,
+# then parses PictureData hex blocks from the output. This avoids reading
+# PictureData byte arrays via COM (which has never worked reliably).
+# Shared images from MSysResources are still loaded via COM/DAO.
 #
 # COM Recovery: If Access crashes mid-session, the script restarts it and
 # continues with the remaining forms/reports.
@@ -41,17 +46,6 @@ function Escape-JsonStr([string]$s) {
     $s = $s.Replace("`n", '\n')
     $s = $s.Replace("`r", '\r')
     return $s
-}
-
-function Safe-GetProperty {
-    param($obj, [string]$propName, $default = $null)
-    try {
-        $val = $obj.$propName
-        if ($null -ne $val) { return $val }
-        return $default
-    } catch {
-        return $default
-    }
 }
 
 function Find-ImageStart {
@@ -130,134 +124,327 @@ function Load-SharedImages {
     return $shared
 }
 
-function Extract-ImageFromControl {
-    param($ctl, [string]$objectType, [string]$objectName, $sharedImages)
+# --- Section name mapping ---
 
-    $controlName = $ctl.Name
-    try {
-        # PictureData is a byte array property on image controls
-        $pictureData = $ctl.PictureData
-        if ($null -eq $pictureData -or $pictureData.Length -eq 0) {
-            # Fallback: if PictureType is Shared, look up by Picture name in MSysResources
-            $pictureName = Safe-GetProperty $ctl "Picture"
-            if ($pictureName -and $sharedImages -and $sharedImages.ContainsKey($pictureName)) {
-                $shared = $sharedImages[$pictureName]
-                Log-Info "  Extracted $controlName (${objectName}) from shared resource: $pictureName"
-                return @{
-                    objectType = $objectType
-                    objectName = $objectName
-                    controlName = $controlName
-                    base64 = $shared.base64
-                    mimeType = $shared.mimeType
-                }
+function Map-SectionName {
+    param([string]$eventProcPrefix, [string]$objectType)
+
+    if (-not $eventProcPrefix) { return $null }
+
+    switch ($eventProcPrefix) {
+        'Form_Header'    { return 'header' }
+        'Detail'         { return 'detail' }
+        'Form_Footer'    { return 'footer' }
+        'Report_Header'  { return 'report-header' }
+        'Report_Footer'  { return 'report-footer' }
+        'Page_Header'    { return 'page-header' }
+        'Page_Footer'    { return 'page-footer' }
+        default {
+            if ($eventProcPrefix -match '^GroupHeader(\d+)$') {
+                return "group-header-$($Matches[1])"
             }
-            return $null
+            if ($eventProcPrefix -match '^GroupFooter(\d+)$') {
+                return "group-footer-$($Matches[1])"
+            }
+            return $eventProcPrefix
         }
-
-        [byte[]]$bytes = $pictureData
-
-        # Skip images larger than 500KB (too large for data URIs in JSON definitions)
-        if ($bytes.Length -gt 512000) {
-            Log-Warn "Skipping $controlName (${objectName}): too large ($($bytes.Length) bytes)"
-            return $null
-        }
-
-        # Find the actual image data start (skip OLE header)
-        $result = Find-ImageStart -bytes $bytes
-        if ($null -eq $result) {
-            Log-Warn "Skipping $controlName (${objectName}): no recognized image signature"
-            return $null
-        }
-
-        $offset = $result.offset
-        $mimeType = $result.mimeType
-
-        # Extract just the image bytes
-        $imageLength = $bytes.Length - $offset
-        $imageBytes = New-Object byte[] $imageLength
-        [Array]::Copy($bytes, $offset, $imageBytes, 0, $imageLength)
-
-        $base64 = [Convert]::ToBase64String($imageBytes)
-
-        Log-Info "  Extracted $controlName (${objectName}): $mimeType, $imageLength bytes"
-
-        return @{
-            objectType = $objectType
-            objectName = $objectName
-            controlName = $controlName
-            base64 = $base64
-            mimeType = $mimeType
-        }
-    } catch {
-        Log-Warn "Error reading $controlName (${objectName}): $_"
-        return $null
     }
 }
 
-function Extract-ImageFromObject {
-    param($obj, [string]$objectType, [string]$objectName,
-          [string]$level, [string]$sectionName, $sharedImages)
-    try {
-        $pictureData = $obj.PictureData
-        if ($null -eq $pictureData -or $pictureData.Length -eq 0) {
-            # Fallback: check for shared image reference
-            $pictureName = Safe-GetProperty $obj "Picture"
-            if ($pictureName -and $sharedImages -and $sharedImages.ContainsKey($pictureName)) {
-                $shared = $sharedImages[$pictureName]
-                $label = if ($sectionName) { "$level/$sectionName" } else { $level }
-                Log-Info "  Extracted $label (${objectName}) from shared resource: $pictureName"
-                return @{
-                    objectType = $objectType
-                    objectName = $objectName
-                    controlName = $null
-                    level = $level
-                    sectionName = $sectionName
-                    base64 = $shared.base64
-                    mimeType = $shared.mimeType
-                }
-            }
-            return $null
+# --- Determine image context from parser stack ---
+
+function Get-ImageContext {
+    param($stack, [string]$objectType, [string]$objectName)
+
+    $controlEntry = $null
+    $sectionEntry = $null
+
+    for ($i = $stack.Count - 1; $i -ge 0; $i--) {
+        $entry = $stack[$i]
+        $t = $entry.type
+        if ($t -eq '_container') { continue }
+        if ($t -eq 'Form' -or $t -eq 'Report') { break }
+        if ($t -eq 'Section') {
+            if (-not $sectionEntry) { $sectionEntry = $entry }
+            continue
         }
-
-        [byte[]]$bytes = $pictureData
-
-        if ($bytes.Length -gt 512000) {
-            Log-Warn "Skipping $level picture (${objectName}/$sectionName): too large ($($bytes.Length) bytes)"
-            return $null
+        # Everything else is a control type
+        if (-not $controlEntry) {
+            $controlEntry = $entry
         }
+    }
 
-        $result = Find-ImageStart -bytes $bytes
-        if ($null -eq $result) {
-            Log-Warn "Skipping $level picture (${objectName}/$sectionName): no recognized image signature"
-            return $null
+    if ($controlEntry) {
+        return @{
+            controlName = $controlEntry.name
+            level = $null
+            sectionName = $null
+            label = "$($controlEntry.name) ($objectName)"
         }
+    }
+    elseif ($sectionEntry) {
+        $secName = Map-SectionName $sectionEntry.eventProcPrefix $objectType
+        return @{
+            controlName = $null
+            level = 'section'
+            sectionName = $secName
+            label = "section/$secName ($objectName)"
+        }
+    }
+    else {
+        return @{
+            controlName = $null
+            level = $objectType
+            sectionName = $null
+            label = "$objectType ($objectName)"
+        }
+    }
+}
 
-        $offset = $result.offset
-        $mimeType = $result.mimeType
+# --- Convert hex string to image ---
 
-        $imageLength = $bytes.Length - $offset
-        $imageBytes = New-Object byte[] $imageLength
-        [Array]::Copy($bytes, $offset, $imageBytes, 0, $imageLength)
+function Convert-HexToImage {
+    param(
+        [string]$hexStr,
+        $stack,
+        [string]$objectType,
+        [string]$objectName
+    )
 
-        $base64 = [Convert]::ToBase64String($imageBytes)
+    $byteCount = [Math]::Floor($hexStr.Length / 2)
+    if ($byteCount -eq 0) { return $null }
+    if ($byteCount -gt 512000) {
+        Log-Warn "Skipping image in $objectType '$objectName': too large ($byteCount bytes)"
+        return $null
+    }
 
-        $label = if ($sectionName) { "$level/$sectionName" } else { $level }
-        Log-Info "  Extracted $label (${objectName}): $mimeType, $imageLength bytes"
+    [byte[]]$bytes = New-Object byte[] $byteCount
+    for ($i = 0; $i -lt $byteCount; $i++) {
+        $bytes[$i] = [Convert]::ToByte($hexStr.Substring($i * 2, 2), 16)
+    }
 
+    $result = Find-ImageStart -bytes $bytes
+    if ($null -eq $result) {
+        Log-Warn "Skipping image in $objectType '$objectName': no recognized image signature"
+        return $null
+    }
+
+    $offset = $result.offset
+    $mimeType = $result.mimeType
+    $imageLength = $bytes.Length - $offset
+    $imageBytes = New-Object byte[] $imageLength
+    [Array]::Copy($bytes, $offset, $imageBytes, 0, $imageLength)
+    $base64 = [Convert]::ToBase64String($imageBytes)
+
+    $context = Get-ImageContext $stack $objectType $objectName
+
+    Log-Info "  Extracted $($context.label): $mimeType, $imageLength bytes"
+
+    return @{
+        objectType = $objectType
+        objectName = $objectName
+        controlName = $context.controlName
+        level = $context.level
+        sectionName = $context.sectionName
+        base64 = $base64
+        mimeType = $mimeType
+    }
+}
+
+# --- Resolve shared image reference ---
+
+function Resolve-SharedImage {
+    param($entry, $stack, [string]$objectType, [string]$objectName, $shared)
+
+    $t = $entry.type
+
+    if ($t -eq 'Form' -or $t -eq 'Report') {
+        Log-Info "  Extracted $objectType ($objectName) from shared: $($entry.picture)"
         return @{
             objectType = $objectType
             objectName = $objectName
             controlName = $null
-            level = $level
-            sectionName = $sectionName
-            base64 = $base64
-            mimeType = $mimeType
+            level = $objectType
+            sectionName = $null
+            base64 = $shared.base64
+            mimeType = $shared.mimeType
         }
-    } catch {
-        $label = if ($sectionName) { "$level/$sectionName" } else { $level }
-        Log-Warn "Error reading $label picture (${objectName}): $_"
-        return $null
     }
+    elseif ($t -eq 'Section') {
+        $secName = Map-SectionName $entry.eventProcPrefix $objectType
+        Log-Info "  Extracted section/$secName ($objectName) from shared: $($entry.picture)"
+        return @{
+            objectType = $objectType
+            objectName = $objectName
+            controlName = $null
+            level = 'section'
+            sectionName = $secName
+            base64 = $shared.base64
+            mimeType = $shared.mimeType
+        }
+    }
+    elseif ($t -ne '_container') {
+        # Control level
+        Log-Info "  Extracted $($entry.name) ($objectName) from shared: $($entry.picture)"
+        return @{
+            objectType = $objectType
+            objectName = $objectName
+            controlName = $entry.name
+            level = $null
+            sectionName = $null
+            base64 = $shared.base64
+            mimeType = $shared.mimeType
+        }
+    }
+
+    return $null
+}
+
+# --- Parse SaveAsText output ---
+# State-machine parser that tracks Begin/End nesting via a stack.
+# Extracts PictureData hex blocks and resolves shared image references.
+# Also handles non-PictureData property blocks (ObjectPalette, NameMap, etc.)
+# that use the same Begin/End syntax so their End doesn't mis-pop the stack.
+
+function Parse-SaveAsText {
+    param(
+        [string]$textContent,
+        [string]$objectType,
+        [string]$objectName,
+        [hashtable]$sharedImages
+    )
+
+    $results = @()
+    $stack = [System.Collections.ArrayList]::new()
+    $collectingHex = $false
+    $hexBuffer = [System.Text.StringBuilder]::new()
+    # Depth counter for non-PictureData property blocks (ObjectPalette = Begin, etc.)
+    $propertyBlockDepth = 0
+
+    foreach ($line in $textContent -split "`r?`n") {
+        $trimmed = $line.Trim()
+        if ($trimmed -eq '') { continue }
+
+        # --- Hex collection mode (inside PictureData = Begin ... End) ---
+        if ($collectingHex) {
+            if ($trimmed -match '^0x([0-9A-Fa-f]+)') {
+                [void]$hexBuffer.Append($Matches[1])
+            }
+            elseif ($trimmed -eq 'End') {
+                # End of PictureData block — convert hex to image
+                $hexStr = $hexBuffer.ToString()
+                if ($hexStr.Length -gt 0) {
+                    $img = Convert-HexToImage $hexStr $stack $objectType $objectName
+                    if ($img) { $results += $img }
+                }
+                # Mark enclosing stack entry as having embedded picture data
+                if ($stack.Count -gt 0) {
+                    $stack[$stack.Count - 1].hasPictureData = $true
+                }
+                $collectingHex = $false
+                [void]$hexBuffer.Clear()
+            }
+            continue
+        }
+
+        # --- Inside a non-PictureData property block (ObjectPalette, NameMap, etc.) ---
+        if ($propertyBlockDepth -gt 0) {
+            if ($trimmed -eq 'End') {
+                $propertyBlockDepth--
+            }
+            elseif ($trimmed -match '=\s*Begin\s*$') {
+                # Nested property block (unlikely but handle safely)
+                $propertyBlockDepth++
+            }
+            continue
+        }
+
+        # --- PictureData = Begin (start hex collection) ---
+        if ($trimmed -match '^PictureData\s*=\s*Begin') {
+            $collectingHex = $true
+            [void]$hexBuffer.Clear()
+            continue
+        }
+
+        # --- Other property blocks with Begin/End syntax ---
+        # e.g. ObjectPalette = Begin, NameMap = Begin, PrtMip = Begin, LayoutData = Begin
+        if ($trimmed -match '^\w+\s*=\s*Begin\s*$') {
+            $propertyBlockDepth++
+            continue
+        }
+
+        # --- Begin <Type> (structural nesting) ---
+        if ($trimmed -match '^Begin\s+(\S+)') {
+            [void]$stack.Add(@{
+                type = $Matches[1]
+                name = $null
+                eventProcPrefix = $null
+                picture = $null
+                hasPictureData = $false
+            })
+            continue
+        }
+
+        # --- Begin (anonymous container) ---
+        if ($trimmed -eq 'Begin') {
+            [void]$stack.Add(@{
+                type = '_container'
+                name = $null
+                eventProcPrefix = $null
+                picture = $null
+                hasPictureData = $false
+            })
+            continue
+        }
+
+        # --- End (pop stack, check for shared image reference) ---
+        if ($trimmed -eq 'End') {
+            if ($stack.Count -gt 0) {
+                $popped = $stack[$stack.Count - 1]
+                [void]$stack.RemoveAt($stack.Count - 1)
+
+                # If this entry had a Picture property but no embedded PictureData,
+                # it may reference a shared image from MSysResources
+                if ($popped.picture -and
+                    $popped.picture -ne '(bitmap)' -and
+                    -not $popped.hasPictureData -and
+                    $sharedImages -and
+                    $sharedImages.ContainsKey($popped.picture))
+                {
+                    $shared = $sharedImages[$popped.picture]
+                    $img = Resolve-SharedImage $popped $stack $objectType $objectName $shared
+                    if ($img) { $results += $img }
+                }
+            }
+            continue
+        }
+
+        # --- Property: Name ---
+        if ($trimmed -match '^Name\s*=\s*"([^"]*)"') {
+            if ($stack.Count -gt 0) {
+                $stack[$stack.Count - 1].name = $Matches[1]
+            }
+            continue
+        }
+
+        # --- Property: EventProcPrefix (identifies section type) ---
+        if ($trimmed -match '^EventProcPrefix\s*=\s*"([^"]*)"') {
+            if ($stack.Count -gt 0) {
+                $stack[$stack.Count - 1].eventProcPrefix = $Matches[1]
+            }
+            continue
+        }
+
+        # --- Property: Picture (image name, may be shared ref) ---
+        if ($trimmed -match '^Picture\s*=\s*"([^"]*)"') {
+            if ($stack.Count -gt 0) {
+                $stack[$stack.Count - 1].picture = $Matches[1]
+            }
+            continue
+        }
+    }
+
+    return $results
 }
 
 # --- COM session management ---
@@ -329,6 +516,7 @@ Log-Info "Image export: $($formList.Count) forms, $($reportList.Count) reports t
 
 $accessApp = $null
 $maxRetries = 2  # how many times to restart Access after a crash
+$tempFile = [System.IO.Path]::GetTempFileName()
 
 try {
     $accessApp = Open-AccessSession
@@ -360,79 +548,17 @@ try {
         }
 
         try {
-            if ($objType -eq "form") {
-                Log-Info "Scanning form: $objName"
-                $accessApp.DoCmd.OpenForm($objName, 1)  # 1 = acDesign
-                Start-Sleep -Milliseconds 500
+            # acForm=2, acReport=3
+            $acType = if ($objType -eq "form") { 2 } else { 3 }
+            Log-Info "Scanning $objType: $objName"
 
-                $form = $accessApp.Screen.ActiveForm
-                foreach ($ctl in $form.Controls) {
-                    $ct = [int]$ctl.ControlType
-                    if ($ct -eq 103 -or $ct -eq 114) {  # 103=image, 114=object-frame
-                        $img = Extract-ImageFromControl -ctl $ctl -objectType "form" -objectName $objName -sharedImages $sharedImages
-                        if ($img) { $images += $img }
-                    }
-                }
+            # SaveAsText dumps the entire definition as text — no need to open in design view
+            $accessApp.SaveAsText($acType, $objName, $tempFile)
+            $textContent = [System.IO.File]::ReadAllText($tempFile)
 
-                # Form-level picture
-                $img = Extract-ImageFromObject $form "form" $objName "form" "" $sharedImages
-                if ($img) { $images += $img }
-
-                # Section-level pictures (1=header, 0=detail, 2=footer)
-                foreach ($secDef in @(@(1, "header"), @(0, "detail"), @(2, "footer"))) {
-                    try {
-                        $sec = $form.Section($secDef[0])
-                        $img = Extract-ImageFromObject $sec "form" $objName "section" $secDef[1] $sharedImages
-                        if ($img) { $images += $img }
-                    } catch {}
-                }
-
-                $accessApp.DoCmd.Close(2, $objName, 0)  # 2 = acForm, 0 = acSaveNo
-            }
-            elseif ($objType -eq "report") {
-                Log-Info "Scanning report: $objName"
-                $accessApp.DoCmd.OpenReport($objName, 1)  # 1 = acDesign
-                Start-Sleep -Milliseconds 500
-
-                $report = $accessApp.Screen.ActiveReport
-
-                # Section name map for reports
-                $reportSectionNames = @{
-                    0 = "detail"; 1 = "report-header"; 2 = "report-footer"
-                    3 = "page-header"; 4 = "page-footer"
-                }
-
-                for ($secIdx = 0; $secIdx -lt 20; $secIdx++) {
-                    try {
-                        $section = $report.Section($secIdx)
-                        foreach ($ctl in $section.Controls) {
-                            $ct = [int]$ctl.ControlType
-                            if ($ct -eq 103 -or $ct -eq 114) {  # 103=image, 114=object-frame
-                                $img = Extract-ImageFromControl -ctl $ctl -objectType "report" -objectName $objName -sharedImages $sharedImages
-                                if ($img) { $images += $img }
-                            }
-                        }
-
-                        # Section-level picture
-                        $secName = $reportSectionNames[$secIdx]
-                        if (-not $secName) {
-                            # Group headers/footers: 5=group-header-0, 6=group-footer-0, etc.
-                            $grpLevel = [Math]::Floor(($secIdx - 5) / 2)
-                            if (($secIdx - 5) % 2 -eq 0) { $secName = "group-header-$grpLevel" }
-                            else { $secName = "group-footer-$grpLevel" }
-                        }
-                        $img = Extract-ImageFromObject $section "report" $objName "section" $secName $sharedImages
-                        if ($img) { $images += $img }
-                    } catch {
-                        # Section doesn't exist, continue
-                    }
-                }
-
-                # Report-level picture
-                $img = Extract-ImageFromObject $report "report" $objName "report" "" $sharedImages
-                if ($img) { $images += $img }
-
-                $accessApp.DoCmd.Close(3, $objName, 0)  # 3 = acReport, 0 = acSaveNo
+            $parsed = @(Parse-SaveAsText -textContent $textContent -objectType $objType -objectName $objName -sharedImages $sharedImages)
+            if ($parsed.Count -gt 0) {
+                $images += $parsed
             }
 
             # Success — move to next item
@@ -454,12 +580,8 @@ try {
                 $sharedImages = Load-SharedImages $accessApp
                 # Don't increment — retry the same item
             } else {
-                # Non-COM error (e.g., form doesn't exist) — skip this item
+                # Non-COM error (e.g., object doesn't exist) — skip this item
                 Log-Warn "Error scanning $objType '${objName}': $errMsg"
-                try {
-                    if ($objType -eq "form") { $accessApp.DoCmd.Close(2, $objName, 0) }
-                    else { $accessApp.DoCmd.Close(3, $objName, 0) }
-                } catch {}
                 $itemIndex++
             }
         }
@@ -475,6 +597,8 @@ finally {
     if ($accessApp) {
         Close-AccessSession $accessApp
     }
+    # Clean up temp file
+    Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
     # Final cleanup — make sure no orphan Access process lingers
     Get-Process MSACCESS -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 }

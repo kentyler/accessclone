@@ -259,16 +259,47 @@
 
 ;; ============================================================
 
+(defn- pascal->kebab
+  "Convert PascalCase to kebab-case: BackColor -> back-color"
+  [s]
+  (-> s
+      (str/replace #"([a-z0-9])([A-Z])" "$1-$2")
+      str/lower-case))
+
+(def ^:private section-color-props
+  #{"BackColor" "AlternateBackColor" "ForeColor" "BorderColor"})
+
+(defn- extract-section-props
+  "Extract all properties for a named section from the flat sections map.
+   Keys like :detailBackColor → :back-color in the section map.
+   Color properties are converted to hex; PictureSizeMode mapped to strings."
+  [sections section-name]
+  (let [prefix section-name
+        prefix-len (count prefix)]
+    (reduce-kv
+      (fn [m k v]
+        (let [k-str (name k)]
+          (if (and (str/starts-with? k-str prefix)
+                   (> (count k-str) prefix-len)
+                   (not= k-str (str prefix "Height")))
+            (let [prop-name (subs k-str prefix-len)
+                  kebab-key (keyword (pascal->kebab prop-name))
+                  converted-val (cond
+                                  (section-color-props prop-name) (access-color->hex v)
+                                  (= prop-name "PictureSizeMode") (get picture-size-mode-map v "clip")
+                                  :else v)]
+              (assoc m kebab-key converted-val))
+            m)))
+      {}
+      sections)))
+
 (defn- build-form-section
-  "Build a single form section with optional picture properties."
+  "Build a single form section with all properties from Access export."
   [sections section-name height-key by-section section-idx]
-  (cond-> {:height (twips->px (get sections height-key))
-           :controls (mapv convert-control (get by-section section-idx []))}
-    (get sections (keyword (str section-name "Picture")))
-    (assoc :picture (get sections (keyword (str section-name "Picture"))))
-    (some? (get sections (keyword (str section-name "PictureSizeMode"))))
-    (assoc :picture-size-mode (get picture-size-mode-map
-                                   (get sections (keyword (str section-name "PictureSizeMode"))) "clip"))))
+  (merge
+    (extract-section-props sections section-name)
+    {:height (twips->px (get sections height-key))
+     :controls (mapv convert-control (get by-section section-idx []))}))
 
 (defn- build-form-sections
   "Build header/detail/footer sections from Access form data.

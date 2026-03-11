@@ -310,15 +310,25 @@ try {
     $pictureSizeMode = Safe-GetProperty $form "PictureSizeMode"
     if ($null -ne $pictureSizeMode) { $formObj.pictureSizeMode = [int]$pictureSizeMode }
 
-    # Section-level pictures
+    # Section-level properties (enumerate all via COM Properties collection)
     foreach ($secDef in @(@(1, "header"), @(0, "detail"), @(2, "footer"))) {
         try {
             $sec = $form.Section($secDef[0])
-            $secPic = Safe-GetProperty $sec "Picture"
-            if ($secPic) {
-                $formObj.sections["$($secDef[1])Picture"] = $secPic
-                $secPicSM = Safe-GetProperty $sec "PictureSizeMode"
-                if ($null -ne $secPicSM) { $formObj.sections["$($secDef[1])PictureSizeMode"] = [int]$secPicSM }
+            foreach ($prop in $sec.Properties) {
+                try {
+                    $propName = $prop.Name
+                    if ($propName -eq "Height") { continue }  # Already extracted separately
+                    $val = $prop.Value
+                    if ($null -eq $val) { continue }
+                    $key = "$($secDef[1])$propName"
+                    if ($val -is [string]) {
+                        if ($val -ne "") { $formObj.sections[$key] = $val }
+                    } elseif ($val -is [bool]) {
+                        $formObj.sections[$key] = [int]$val
+                    } else {
+                        try { $formObj.sections[$key] = [long]$val } catch {}
+                    }
+                } catch {}
             }
         } catch {}
     }

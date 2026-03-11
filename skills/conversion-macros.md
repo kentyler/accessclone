@@ -190,6 +190,49 @@ The macro viewer (`ui/src/app/views/macro_viewer.cljs`) displays:
 
 Translation is done via the chat panel — the LLM receives the macro XML as context and can generate ClojureScript equivalents. Auto-analyze fires when a macro is first opened, producing a structural analysis.
 
+## Infrastructure Actions — Log and Skip
+
+Some macro actions are specific to the Access desktop environment and have no meaningful equivalent in a web application. During import and translation, these should be **logged to `shared.import_log`** (severity `info`, category `skipped-action`) and **skipped** rather than translated or treated as errors.
+
+### Actions to skip
+
+| Action / Pattern | Why it doesn't apply |
+|-----------------|---------------------|
+| `[CurrentProject].[IsTrusted]` checks | Access trust/security model — web apps use their own auth |
+| `RunCode` calling VBA startup functions | VBA runtime doesn't exist; startup logic handled by app initialization |
+| `SetWarnings` (on/off) | Access UI warning suppression — no equivalent in web context |
+| `Quit` / `CloseDatabase` | Closing the Access application — web apps don't quit |
+| `TransferDatabase` / `TransferSpreadsheet` | COM-based file import/export — handled differently in web |
+| `SendObject` | Access email integration via Outlook COM — not applicable |
+| `OutputTo` | Export to file via Access runtime — not applicable |
+| `PrintOut` | Direct printer access — web uses browser print |
+| `RunApp` | Launch external executables — not applicable in web |
+| `LockNavigationPane` / `ShowToolbar` | Access UI chrome — no equivalent |
+
+### AutoExec macros specifically
+
+AutoExec macros (like the one shown below) typically combine trust checks with startup form/function calls:
+
+    If Not [CurrentProject].[IsTrusted] Then
+        OpenForm "frmStartup"    ← may be translatable (open a tab)
+    End If
+    If [CurrentProject].[IsTrusted] Then
+        RunCode "Startup()"      ← skip: VBA runtime function
+    End If
+
+The translatable parts (e.g. `OpenForm`) should still be extracted as intents. The infrastructure-specific parts (`IsTrusted` conditions, `RunCode`) should be logged and dropped. The net result for an AutoExec is typically: "on app load, open the startup form" — which maps to setting the default tab in the web app.
+
+### Logging format
+
+When skipping an action during translation, log it as:
+
+    source: "macro-translation"
+    severity: "info"
+    category: "skipped-action"
+    message: "Skipped [ActionName]: [reason] in macro [MacroName]"
+
+This ensures nothing is silently lost — users can review skipped actions in the import log.
+
 ## Translation Strategy
 
 Access macros map to ClojureScript event handler functions. General approach:

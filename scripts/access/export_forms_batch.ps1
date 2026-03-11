@@ -235,6 +235,29 @@ function Export-SingleForm {
     try { $formObj.sections.detailHeight = [int]$form.Section(0).Height } catch { $formObj.sections.detailHeight = 3000 }
     try { $formObj.sections.footerHeight = [int]$form.Section(2).Height } catch { $formObj.sections.footerHeight = 0 }
 
+    # Section-level properties (enumerate all via COM Properties collection)
+    foreach ($secDef in @(@(1, "header"), @(0, "detail"), @(2, "footer"))) {
+        try {
+            $sec = $form.Section($secDef[0])
+            foreach ($prop in $sec.Properties) {
+                try {
+                    $propName = $prop.Name
+                    if ($propName -eq "Height") { continue }  # Already extracted separately
+                    $val = $prop.Value
+                    if ($null -eq $val) { continue }
+                    $key = "$($secDef[1])$propName"
+                    if ($val -is [string]) {
+                        if ($val -ne "") { $formObj.sections[$key] = $val }
+                    } elseif ($val -is [bool]) {
+                        $formObj.sections[$key] = [int]$val
+                    } else {
+                        try { $formObj.sections[$key] = [long]$val } catch {}
+                    }
+                } catch {}
+            }
+        } catch {}
+    }
+
     $formObj.navigationButtons = [bool](Safe-GetProperty $form "NavigationButtons" $true)
     $formObj.recordSelectors = [bool](Safe-GetProperty $form "RecordSelectors" $true)
     $formObj.allowAdditions = [bool](Safe-GetProperty $form "AllowAdditions" $true)

@@ -8,7 +8,16 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git push:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(xargs grep:*)",
+      "Bash(\"C:/Program Files/PostgreSQL/17/bin/psql.exe\":*)",
+      "Bash(\"/c/Program Files/PostgreSQL/17/bin/psql.exe\":*)",
+      "Bash(\"/c/Program Files/PostgreSQL/18/bin/psql.exe\":*)",
+      "Bash(powershell.exe:*)",
+      "Bash(grep:*)",
+      "Bash(node:*)",
+      "Bash(\"C:\\\\Program Files\\\\PostgreSQL\\\\18\\\\bin\\\\psql.exe\":*)",
+      "Bash(tasklist:*)"
     ]
   }
 }

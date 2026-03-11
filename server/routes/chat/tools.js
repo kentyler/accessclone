@@ -199,4 +199,22 @@ const queryTools = [
   }
 ];
 
-module.exports = { dataTools, graphTools, moduleTools, queryTools };
+// Design check tool — always available
+const designCheckTools = [
+  {
+    name: 'run_design_check',
+    description: 'Run design checks against the current database to find structural issues, naming problems, or UX improvements. Use this when you encounter naming confusion, structural problems, or the user asks about design quality.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        scope: {
+          type: 'string',
+          description: 'Optional scope: "full" (default), "form:formName", "table:tableName" — limits checks to a specific object'
+        }
+      },
+      required: []
+    }
+  }
+];
+
+module.exports = { dataTools, graphTools, moduleTools, queryTools, designCheckTools };

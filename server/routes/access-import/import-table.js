@@ -80,6 +80,7 @@ module.exports = function(router, pool) {
           isAutoNumber: f.isAutoNumber,
           defaultValue: f.defaultValue,
           isCalculated: !!f.isCalculated,
+          isAttachment: !!f.isAttachment,
           expression: f.expression || null
         };
       });
@@ -93,12 +94,7 @@ module.exports = function(router, pool) {
         `SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2`,
         [schemaName, pgTableName]
       );
-      if (existsResult.rows.length > 0) {
-        if (!force) {
-          await logImport('error', `Table "${pgTableName}" already exists in target database`);
-          return res.status(409).json({ error: `Table "${pgTableName}" already exists in target database` });
-        }
-      }
+      const tableExists = existsResult.rows.length > 0;
 
       // 5. BEGIN transaction
       const client = await pool.connect();
@@ -106,8 +102,8 @@ module.exports = function(router, pool) {
       try {
         await client.query('BEGIN');
 
-        // Drop existing table if force re-import
-        if (force && existsResult.rows.length > 0) {
+        // Drop existing table if re-importing
+        if (tableExists) {
           await client.query(`DROP TABLE IF EXISTS ${schemaName}.${quoteIdent(pgTableName)} CASCADE`);
         }
 
@@ -144,7 +140,7 @@ module.exports = function(router, pool) {
         await client.query(createSQL);
 
         // 7. Batch INSERT rows (500 per statement)
-        const insertableColumns = columnInfo.filter(c => !c.isCalculated);
+        const insertableColumns = columnInfo.filter(c => !c.isCalculated && !c.isAttachment);
         const hasIdentity = insertableColumns.some(c => c.isAutoNumber);
         const BATCH_SIZE = 500;
 
@@ -222,33 +218,33 @@ module.exports = function(router, pool) {
         calculatedWarnings: calculatedWarnings.length > 0 ? calculatedWarnings : undefined
       });
 
-      // 13. Create issues for skipped columns
-      if (logId && skippedNames.length > 0) {
+      // 13. Log issues for skipped columns
+      if (skippedNames.length > 0) {
         try {
           for (const sc of tableData.skippedColumns) {
             await pool.query(`
-              INSERT INTO shared.import_issues
-                (import_log_id, database_id, object_name, object_type, severity, category, message)
-              VALUES ($1, $2, $3, 'table', 'warning', 'skipped-column', $4)
-            `, [logId, targetDatabaseId, tableName, `Column '${sc.name}' skipped (Access type: ${sc.type}) — not importable`]);
+              INSERT INTO shared.import_log
+                (target_database_id, source_object_name, source_object_type, status, severity, category, message)
+              VALUES ($1, $2, 'table', 'issue', 'warning', 'skipped-column', $3)
+            `, [targetDatabaseId, tableName, `Column '${sc.name}' skipped (Access type: ${sc.type}) — not importable`]);
           }
         } catch (issueErr) {
-          console.error('Error creating import issues for skipped columns:', issueErr);
+          console.error('Error logging skipped columns:', issueErr);
         }
       }
 
-      // 14. Create issues for calculated column warnings
-      if (logId && calculatedWarnings.length > 0) {
+      // 14. Log issues for calculated column warnings
+      if (calculatedWarnings.length > 0) {
         try {
           for (const warning of calculatedWarnings) {
             await pool.query(`
-              INSERT INTO shared.import_issues
-                (import_log_id, database_id, object_name, object_type, severity, category, message)
-              VALUES ($1, $2, $3, 'table', 'warning', 'calculated-column', $4)
-            `, [logId, targetDatabaseId, tableName, warning]);
+              INSERT INTO shared.import_log
+                (target_database_id, source_object_name, source_object_type, status, severity, category, message)
+              VALUES ($1, $2, 'table', 'issue', 'warning', 'calculated-column', $3)
+            `, [targetDatabaseId, tableName, warning]);
           }
         } catch (issueErr) {
-          console.error('Error creating import issues for calculated columns:', issueErr);
+          console.error('Error logging calculated column warnings:', issueErr);
         }
       }
 

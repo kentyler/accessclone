@@ -79,6 +79,7 @@
         (:foreColor ctrl)     (assoc :fore-color (access-color->hex (:foreColor ctrl)))
         (:backColor ctrl)     (assoc :back-color (access-color->hex (:backColor ctrl)))
         (:borderColor ctrl)   (assoc :border-color (access-color->hex (:borderColor ctrl)))
+        (some? (:backStyle ctrl)) (assoc :back-style (:backStyle ctrl))
         (:caption ctrl)       (assoc :text (:caption ctrl))
         (:format ctrl)        (assoc :format (:format ctrl))
         (:tooltip ctrl)       (assoc :tooltip (:tooltip ctrl))
@@ -421,7 +422,7 @@
            :import-all-active? false ;; True while Import All is running
            :import-all-status nil    ;; {:phase :tables :current "TableName" :imported 0 :total 0 :failed []}
            :image-status nil         ;; {:total N :imported M} from /api/access-import/image-status
-           :auto-import-phase nil    ;; nil, :importing, :extracting, :resolving-gaps, :generating, :complete
+           :auto-import-phase nil    ;; nil, :importing, :translating, :complete
            }))
 
 ;; ============================================================
@@ -911,10 +912,13 @@
                                                   force? (assoc :force true))}))]
       (if (and (:success response) (get-in response [:body :success]))
         true
-        (let [err (or (get-in response [:body :error]) "Unknown error")]
-          (state/log-event! "error" (str "Failed to import query: " query-name) "import-query"
-                            {:error err})
-          {:error err})))))
+        (let [err (or (get-in response [:body :error]) "Unknown error")
+              category (get-in response [:body :category])]
+          (when-not (= category "missing-dependency")
+            ;; Only log non-dependency errors (dependency errors are expected during retry)
+            (state/log-event! "error" (str "Failed to import query: " query-name) "import-query"
+                              {:error err}))
+          {:error err :category category})))))
 
 ;; ============================================================
 ;; Batch Import Functions (single COM session per type)
@@ -1281,6 +1285,247 @@
           result)
         {:error "No Access database configured. Visit the Import tab first."}))))
 
+;; ============================================================
+;; Import Phase Functions
+;; ============================================================
+
+(defn- collect-phase-items
+  "Collect [obj-type path name] tuples for a phase, optionally filtering empty tables."
+  [types force? empty-tables]
+  (let [raw-items (vec (mapcat (fn [t]
+                                 (map (fn [[p n]] [t p n])
+                                      (if force? (all-source-objects t) (not-yet-imported t))))
+                               types))]
+    (if (and (seq empty-tables) (= types [:tables]))
+      (vec (remove (fn [[_ _ obj-name]] (contains? empty-tables obj-name)) raw-items))
+      raw-items)))
+
+(defn- run-phase-import!
+  "Run batch or individual import for a set of items. Returns channel with {:imported N :failed [...]}.
+   Updates viewer-state progress along the way."
+  [phase-items use-batch? target-database-id force? total-imported]
+  (go
+    (let [items (atom phase-items)
+          phase-failed (atom [])]
+      (if use-batch?
+        ;; Batch mode: group by [obj-type, db-path], one COM session per group
+        (let [groups (group-by (fn [[t p _]] [t p]) @items)]
+          (doseq [[[obj-type db-path] group-items] groups]
+            (let [names (mapv (fn [[_ _ n]] n) group-items)
+                  batch-fn (batch-import-fn-for-type obj-type)]
+              (swap! viewer-state assoc-in [:import-all-status :current]
+                     (str (count names) " " (clojure.core/name obj-type)))
+              (let [result (<! (batch-fn db-path names target-database-id))]
+                (swap! total-imported + (count (:imported result)))
+                (swap! viewer-state assoc-in [:import-all-status :imported] @total-imported)
+                (doseq [{:keys [name error]} (:failed result)]
+                  (swap! phase-failed conj {:type obj-type :name name :error error}))))))
+        ;; Individual mode with retry loop (max 20 passes)
+        (loop [pass 1]
+          (let [remaining @items
+                imported-this-pass (atom 0)
+                still-pending (atom [])
+                permanent-failures (atom [])]
+            (doseq [[obj-type db-path obj-name] remaining]
+              (swap! viewer-state assoc-in [:import-all-status :current] obj-name)
+              (let [import-fn (import-fn-for-type obj-type)
+                    result (<! (import-fn db-path obj-name target-database-id (when force? {:force? true})))]
+                (if (true? result)
+                  (do (swap! imported-this-pass inc)
+                      (swap! total-imported inc)
+                      (swap! viewer-state assoc-in [:import-all-status :imported] @total-imported))
+                  ;; Only retry dependency errors; permanent failures go straight to failed
+                  (let [category (when (map? result) (:category result))
+                        err-msg (if (map? result) (:error result) "Unknown error")]
+                    (if (= category "missing-dependency")
+                      (swap! still-pending conj [obj-type db-path obj-name err-msg])
+                      (swap! permanent-failures conj [obj-type db-path obj-name err-msg]))))))
+            ;; Record permanent failures immediately
+            (doseq [[obj-type _ obj-name err] @permanent-failures]
+              (swap! phase-failed conj {:type obj-type :name obj-name :error err}))
+            (reset! items @still-pending)
+            (when (and (seq @items) (pos? @imported-this-pass) (< pass 20))
+              (recur (inc pass))))))
+      ;; Record any remaining as failed (only applies to individual mode)
+      (doseq [[obj-type _ obj-name err] @items]
+        (swap! phase-failed conj {:type obj-type :name obj-name :error err}))
+      {:imported @total-imported :failed @phase-failed})))
+
+(defn- import-tables-phase!
+  "Import tables, then apply assessment fixes and extract attachments."
+  [{:keys [target-database-id force? total-imported total-failed
+           empty-tables all-relationships has-crosstab? reserved-words]}]
+  (go
+    (let [items (collect-phase-items [:tables] force? empty-tables)]
+      (when (seq items)
+        (swap! viewer-state assoc-in [:import-all-status :phase] :tables)
+        (let [result (<! (run-phase-import! items false target-database-id force? total-imported))]
+          (swap! total-failed into (:failed result)))
+        (<! (load-target-existing-async! target-database-id)))
+      ;; Phase hooks (run regardless of whether items existed)
+      (when (or (seq empty-tables) (seq all-relationships)
+                has-crosstab? (seq reserved-words))
+        (let [resp (<! (http/post (str api-base "/api/access-import/apply-fixes")
+                                  {:headers {"X-Database-ID" target-database-id}
+                                   :json-params
+                                   {:skipEmptyTables (vec empty-tables)
+                                    :relationships all-relationships
+                                    :installTablefunc (boolean has-crosstab?)
+                                    :reservedWords (vec reserved-words)}}))]
+          (when (:success resp)
+            (.log js/console "Apply-fixes results:" (clj->js (:body resp))))))
+      (doseq [p (:selected-paths @viewer-state)]
+        (import-attachments! p target-database-id)))))
+
+(defn- import-ui-phase!
+  "Import forms & reports, then extract and embed images."
+  [{:keys [target-database-id force? total-imported total-failed]}]
+  (go
+    (let [items (collect-phase-items [:forms :reports] force? nil)]
+      (when (seq items)
+        (swap! viewer-state assoc-in [:import-all-status :phase] :ui)
+        (let [result (<! (run-phase-import! items true target-database-id force? total-imported))]
+          (swap! total-failed into (:failed result)))
+        (<! (load-target-existing-async! target-database-id)))
+      ;; Phase hook: extract images (fire-and-forget — cosmetic, must not block)
+      (doseq [p (:selected-paths @viewer-state)]
+        (import-images! p target-database-id)))))
+
+(defn- import-modules-phase!
+  "Import modules, then create PG stub functions."
+  [{:keys [target-database-id force? total-imported total-failed]}]
+  (go
+    (let [items (collect-phase-items [:modules] force? nil)]
+      (when (seq items)
+        (swap! viewer-state assoc-in [:import-all-status :phase] :modules)
+        (let [result (<! (run-phase-import! items true target-database-id force? total-imported))]
+          (swap! total-failed into (:failed result)))
+        (<! (load-target-existing-async! target-database-id)))
+      ;; Phase hook: create stub functions (always, even if no new modules)
+      (<! (create-function-stubs! target-database-id)))))
+
+(defn- import-queries-phase!
+  "Import queries, then translate modules server-side (all deps now available)."
+  [{:keys [target-database-id force? total-imported total-failed]}]
+  (go
+    (let [items (collect-phase-items [:queries] force? nil)]
+      (when (seq items)
+        (swap! viewer-state assoc-in [:import-all-status :phase] :queries)
+        (let [result (<! (run-phase-import! items false target-database-id force? total-imported))]
+          (swap! total-failed into (:failed result)))
+        (<! (load-target-existing-async! target-database-id)))
+      ;; Phase hook: translate modules (always, even if no new queries)
+      (try
+        (swap! viewer-state assoc-in [:import-all-status :phase] :translating)
+        (swap! viewer-state assoc-in [:import-all-status :current] "Translating modules...")
+        (let [resp (<! (http/post (str api-base "/api/access-import/translate-modules")
+                                  {:json-params {:database_id target-database-id}
+                                   :headers {"X-Database-ID" target-database-id}}))]
+          (when (:success resp)
+            (.log js/console "[IMPORT] Module translation:" (clj->js (:body resp)))))
+        (catch js/Error e
+          (.warn js/console "[IMPORT] Module translation failed (non-fatal):" (.-message e)))))))
+
+(defn- import-macros-phase!
+  "Import macros."
+  [{:keys [target-database-id force? total-imported total-failed]}]
+  (go
+    (let [items (collect-phase-items [:macros] force? nil)]
+      (when (seq items)
+        (swap! viewer-state assoc-in [:import-all-status :phase] :macros)
+        (let [result (<! (run-phase-import! items true target-database-id force? total-imported))]
+          (swap! total-failed into (:failed result)))
+        (<! (load-target-existing-async! target-database-id))))))
+
+(defn- run-validation-pipeline!
+  "Run multi-pass validation: repair → validate → autofix → design-check."
+  [{:keys [target-database-id]}]
+  (go
+    (.log js/console "[MULTI-PASS] Phase loop complete, starting multi-pass...")
+    (let [run-resp (<! (http/post (str api-base "/api/access-import/start-run")
+                                   {:json-params {:database_id target-database-id
+                                                  :source_paths (vec (:selected-paths @viewer-state))}}))
+          run-id (when (:success run-resp) (get-in run-resp [:body :run_id]))]
+      (swap! viewer-state assoc :current-run-id run-id)
+
+      ;; Repair
+      (.log js/console "[MULTI-PASS] Run ID:" run-id "- starting repair pass")
+      (swap! viewer-state assoc-in [:import-all-status :phase] :repairing)
+      (swap! viewer-state assoc-in [:import-all-status :current] "Checking bindings & mappings...")
+      (let [repair-resp (<! (http/post (str api-base "/api/access-import/repair-pass")
+                                        {:json-params {:run_id run-id :database_id target-database-id}}))]
+        (when (:success repair-resp)
+          (.log js/console "Repair pass:" (clj->js (:body repair-resp)))))
+
+      ;; Validation
+      (.log js/console "[MULTI-PASS] Starting validation pass")
+      (swap! viewer-state assoc-in [:import-all-status :phase] :validating)
+      (swap! viewer-state assoc-in [:import-all-status :current] "Validating forms & reports...")
+      (let [val-resp (<! (http/post (str api-base "/api/access-import/validation-pass")
+                                     {:json-params {:run_id run-id :database_id target-database-id}}))]
+        (when (:success val-resp)
+          (.log js/console "Validation pass:" (clj->js (:body val-resp)))))
+
+      ;; Auto-fix
+      (.log js/console "[MULTI-PASS] Starting auto-fix pass")
+      (swap! viewer-state assoc-in [:import-all-status :phase] :auto-fixing)
+      (swap! viewer-state assoc-in [:import-all-status :current] "Applying automated fixes...")
+      (let [autofix-resp (<! (http/post (str api-base "/api/access-import/autofix-pass")
+                                         {:json-params {:run_id run-id :database_id target-database-id}}))]
+        (when (:success autofix-resp)
+          (.log js/console "Auto-fix pass:" (clj->js (:body autofix-resp)))))
+
+      ;; Design review
+      (.log js/console "[MULTI-PASS] Starting design review")
+      (swap! viewer-state assoc-in [:import-all-status :phase] :reviewing)
+      (swap! viewer-state assoc-in [:import-all-status :current] "Running design checks...")
+      (let [design-resp (<! (http/post (str api-base "/api/design-check/run")
+                                        {:json-params {:database_id target-database-id
+                                                       :run_id run-id
+                                                       :pass_number 5}}))]
+        (when (:success design-resp)
+          (swap! viewer-state assoc :design-recommendations (get-in design-resp [:body :recommendations]))
+          (.log js/console "Design check:" (clj->js (:body design-resp)))))
+
+      run-id)))
+
+(defn- finalize-import!
+  "Complete the import run and refresh all app state."
+  [{:keys [target-database-id total-imported total-failed]} run-id]
+  (let [all-source (reduce + (map (fn [t] (:total (type-progress t)))
+                                  [:tables :queries :forms :reports :modules :macros]))
+        final-status {:phase :done
+                      :current nil
+                      :imported @total-imported
+                      :total all-source
+                      :failed @total-failed}]
+    ;; Complete the run on server
+    (when run-id
+      (http/post (str api-base "/api/access-import/complete-run")
+                  {:json-params {:run_id run-id
+                                 :summary {:imported @total-imported
+                                           :failed (count @total-failed)
+                                           :total all-source}}}))
+    (swap! viewer-state assoc
+           :import-all-status final-status
+           :importing? false
+           :import-all-active? false
+           :selected #{})
+    ;; Refresh everything
+    (save-source-discovery! target-database-id)
+    (load-target-existing! target-database-id)
+    (when-let [active (:active-path @viewer-state)]
+      (load-import-history! active))
+    (state/load-tables!)
+    (state/load-queries!)
+    (state/load-sql-functions!)
+    (state/load-forms!)
+    (state/load-reports!)
+    (state/load-functions!)
+    (state/load-macros!)
+    ;; Invalidate module viewer cache so it refetches from DB (translation may have been saved)
+    (swap! state/app-state assoc-in [:module-viewer :module-id] nil)))
+
 (defn import-all!
   "Import all objects across all phases from all selected databases.
    Uses batch import for forms/reports/modules/macros (single COM session per type per db).
@@ -1291,143 +1536,39 @@
          :import-all-active? true
          :importing? true
          :import-all-status {:phase nil :current nil :imported 0 :total 0 :failed []}
-         ;; Reset progress counters so UI shows 0/N during re-import
          :target-existing (if force? {} (:target-existing @viewer-state)))
   (go
-    (let [total-imported (atom 0)
-          total-failed (atom [])]
-      ;; Process each phase in order
-      (doseq [{:keys [phase label types]} import-phases]
-        ;; Collect all not-yet-imported objects: [obj-type path name] tuples
-        (let [phase-items (atom (vec (mapcat (fn [t]
-                                               (map (fn [[p n]] [t p n])
-                                                    (if force? (all-source-objects t) (not-yet-imported t))))
-                                             types)))
-              use-batch? (every? batch-eligible-types types)]
-          (when (seq @phase-items)
-            (swap! viewer-state assoc-in [:import-all-status :phase] phase)
-            (if use-batch?
-              ;; Batch mode: group by [obj-type, db-path], one COM session per group
-              (let [groups (group-by (fn [[t p _]] [t p]) @phase-items)]
-                (doseq [[[obj-type db-path] items] groups]
-                  (let [names (mapv (fn [[_ _ n]] n) items)
-                        batch-fn (batch-import-fn-for-type obj-type)]
-                    (swap! viewer-state assoc-in [:import-all-status :current]
-                           (str (count names) " " (clojure.core/name obj-type)))
-                    (let [result (<! (batch-fn db-path names target-database-id))]
-                      (swap! total-imported + (count (:imported result)))
-                      (swap! viewer-state assoc-in [:import-all-status :imported] @total-imported)
-                      (doseq [{:keys [name error]} (:failed result)]
-                        (swap! total-failed conj {:type obj-type :name name :error error})))))
-                ;; Clear phase-items since batch handles all
-                (reset! phase-items []))
-              ;; Individual mode with retry for tables/queries
-              (loop [pass 1]
-                (let [remaining @phase-items
-                      imported-this-pass (atom 0)
-                      still-pending (atom [])]
-                  ;; Try each pending object
-                  (doseq [[obj-type db-path obj-name] remaining]
-                    (swap! viewer-state assoc-in [:import-all-status :current] obj-name)
-                    (let [import-fn (import-fn-for-type obj-type)
-                          result (<! (import-fn db-path obj-name target-database-id (when force? {:force? true})))]
-                      (if (true? result)
-                        (do (swap! imported-this-pass inc)
-                            (swap! total-imported inc)
-                            (swap! viewer-state assoc-in [:import-all-status :imported] @total-imported))
-                        (swap! still-pending conj [obj-type db-path obj-name
-                                                   (if (map? result) (:error result) "Unknown error")]))))
-                  (reset! phase-items @still-pending)
-                  ;; Continue if we made progress and still have pending items (max 20 passes)
-                  (when (and (seq @phase-items) (pos? @imported-this-pass) (< pass 20))
-                    (recur (inc pass))))))
-            ;; Record any remaining as failed (only applies to individual mode)
-            (doseq [[obj-type _ obj-name err] @phase-items]
-              (swap! total-failed conj {:type obj-type :name obj-name :error err}))
-            ;; Refresh target-existing after this phase (await completion)
-            (<! (load-target-existing-async! target-database-id))
-            ;; After modules phase, create PG stub functions then extract intents + resolve gaps
-            (when (= phase :modules)
-              (<! (create-function-stubs! target-database-id))
-              ;; Extract intents + resolve gaps (no deps needed)
-              (swap! viewer-state assoc-in [:import-all-status :phase] :extracting)
-              (swap! viewer-state assoc-in [:import-all-status :current] "Extracting intents...")
-              (let [resp (<! (http/get (str api-base "/api/modules")
-                                        {:headers {"X-Database-ID" target-database-id}}))]
-                (when (:success resp)
-                  (swap! state/app-state assoc-in [:objects :modules] (:body resp))))
-              (<! (app-flows/batch-extract-intents!))
-              (<! (app-flows/auto-resolve-gaps!))
-              (<! (app-flows/submit-all-gap-decisions!)))
-            ;; After tables phase, extract attachment files (fire-and-forget —
-            ;; attachments are data files and must not block form/report import)
-            (when (= phase :tables)
-              (doseq [p (:selected-paths @viewer-state)]
-                (import-attachments! p target-database-id)))
-            ;; After UI phase (forms & reports), extract and embed images (fire-and-forget —
-            ;; images are cosmetic and must not block module/query phases)
-            (when (= phase :ui)
-              (doseq [p (:selected-paths @viewer-state)]
-                (import-images! p target-database-id)))
-            ;; After queries phase, generate code (all deps now available)
-            (when (= phase :queries)
-              (swap! viewer-state assoc-in [:import-all-status :phase] :generating)
-              (swap! viewer-state assoc-in [:import-all-status :current] "Generating code...")
-              (let [resp (<! (http/get (str api-base "/api/modules")
-                                       {:headers {"X-Database-ID" target-database-id}}))]
-                (when (:success resp)
-                  (swap! state/app-state assoc-in [:objects :modules] (:body resp))))
-              (<! (app-flows/batch-generate-code!))))))
-      ;; Compute total — aggregate across all selected databases
-      (let [all-source (reduce + (map (fn [t] (:total (type-progress t)))
-                                      [:tables :queries :forms :reports :modules :macros]))
-            final-status {:phase :done
-                          :current nil
-                          :imported @total-imported
-                          :total all-source
-                          :failed @total-failed}]
-        (swap! viewer-state assoc
-               :import-all-status final-status
-               :importing? false
-               :import-all-active? false
-               :selected #{})
-        ;; Refresh everything
-        (save-source-discovery! target-database-id)
-        (load-target-existing! target-database-id)
-        (when-let [active (:active-path @viewer-state)]
-          (load-import-history! active))
-        (state/load-tables!)
-        (state/load-queries!)
-        (state/load-sql-functions!)
-        (state/load-forms!)
-        (state/load-reports!)
-        (state/load-functions!)
-        (state/load-macros!)))))
+    (let [findings (:assessment-findings @state/app-state)
+          ctx {:target-database-id target-database-id
+               :force? force?
+               :total-imported (atom 0)
+               :total-failed (atom [])
+               :empty-tables (set (map :object (filter #(= (:type %) "empty-table")
+                                                       (:design findings))))
+               :has-crosstab? (some #(= (:type %) "crosstab-query")
+                                    (:complexity findings))
+               :reserved-words (vec (map #(select-keys % [:object :objectType])
+                                         (filter #(= (:type %) "reserved-word")
+                                                 (:structural findings))))
+               :all-relationships (vec (distinct
+                                         (mapcat #(get (get (:access-db-cache @viewer-state) %) :relationships [])
+                                                 (:selected-paths @viewer-state))))}]
+      (<! (import-tables-phase! ctx))
+      (<! (import-ui-phase! ctx))
+      (<! (import-modules-phase! ctx))
+      (<! (import-queries-phase! ctx))
+      (<! (import-macros-phase! ctx))
+      (let [run-id (<! (run-validation-pipeline! ctx))]
+        (finalize-import! ctx run-id)))))
 
 (defn auto-import-all!
-  "Import all objects, then run the full LLM pipeline (extract, resolve, generate)."
+  "Import all objects, then translate modules server-side."
   [target-database-id]
   (swap! viewer-state assoc :auto-import-phase :importing)
   (go
-    ;; Step 1: Import all objects
+    ;; Step 1: Import all objects (import-all! already calls translate-modules after queries phase)
     (<! (import-all! target-database-id {:force? true}))
-    ;; Ensure modules list is populated in app-state after import
-    (let [resp (<! (http/get (str api-base "/api/modules")
-                             {:headers {"X-Database-ID" target-database-id}}))]
-      (when (:success resp)
-        (swap! state/app-state assoc-in [:objects :modules] (:body resp))))
-    ;; Step 2: Extract intents from all modules
-    (swap! viewer-state assoc :auto-import-phase :extracting)
-    (<! (app-flows/batch-extract-intents!))
-    ;; Step 3: Auto-resolve gaps via LLM
-    (swap! viewer-state assoc :auto-import-phase :resolving-gaps)
-    (<! (app-flows/auto-resolve-gaps!))
-    ;; Step 4: Submit gap decisions
-    (<! (app-flows/submit-all-gap-decisions!))
-    ;; Step 5: Generate code for all modules
-    (swap! viewer-state assoc :auto-import-phase :generating)
-    (<! (app-flows/batch-generate-code!))
-    ;; Done
+    ;; Done — translation is handled inside import-all! via POST /api/access-import/translate-modules
     (swap! viewer-state assoc :auto-import-phase :complete)))
 
 (defn object-type-dropdown []
@@ -1623,11 +1764,13 @@
       (str (.toLocaleDateString d) " " (.toLocaleTimeString d)))))
 
 (defn import-log-panel []
-  (let [{:keys [import-log object-type]} @viewer-state
+  (let [{:keys [import-log object-type design-recommendations]} @viewer-state
         filter-type (phase-log-type object-type)
         filtered (if filter-type
                    (filter #(= (:source_object_type %) filter-type) import-log)
-                   import-log)]
+                   import-log)
+        by-pass (group-by #(or (:pass_number %) 1) filtered)
+        pass-label {1 "Pass 1: Import" 2 "Pass 2: Repair" 3 "Pass 3: Validation" 4 "Pass 4: Auto-Fix" 5 "Pass 5: Design Review"}]
     [:div.import-log-panel
      [:div.log-header
       [:h4 "Import Log"]
@@ -1636,17 +1779,53 @@
      [:div.log-entries
       (if (empty? filtered)
         [:div.log-empty "No imports yet"]
-        (for [entry filtered]
-          ^{:key (:id entry)}
-          [:div.log-entry {:class (:status entry)}
-           [:div.log-entry-header
-            [:span.log-object-type (:source_object_type entry)]
-            [:span.log-object-name (:source_object_name entry)]
-            [:span.log-status {:class (:status entry)} (:status entry)]]
-           [:div.log-entry-details
-            [:span.log-time (format-timestamp (:created_at entry))]]
-           (when (:error_message entry)
-             [:div.log-error (:error_message entry)])]))]]))
+        (for [[pass entries] (sort-by key by-pass)]
+          ^{:key (str "pass-" pass)}
+          [:div.log-pass-group
+           [:div {:style {:font-weight "600" :padding "6px 0" :border-bottom "1px solid #eee"
+                          :display "flex" :justify-content "space-between"}}
+            [:span (get pass-label pass (str "Pass " pass))]
+            [:span {:style {:font-size "12px" :color "#888"}}
+             (let [ok (count (filter #(= "success" (:status %)) entries))
+                   warns (count (filter #(= "warning" (:severity %)) entries))
+                   errs (count (filter #(= "error" (:severity %)) entries))]
+               (str ok " ok"
+                    (when (pos? warns) (str ", " warns " warn"))
+                    (when (pos? errs) (str ", " errs " err"))))]]
+           (for [entry entries]
+             ^{:key (:id entry)}
+             [:div.log-entry {:class (:status entry)}
+              [:div.log-entry-header
+               [:span.log-object-type (:source_object_type entry)]
+               [:span.log-object-name (:source_object_name entry)]
+               [:span.log-status {:class (:status entry)} (:status entry)]
+               (when (:severity entry)
+                 [:span {:style {:margin-left "4px" :font-size "11px"
+                                 :color (case (:severity entry)
+                                          "error" "#e74c3c" "warning" "#f39c12" "#888")}}
+                  (:severity entry)])]
+              [:div.log-entry-details
+               [:span.log-time (format-timestamp (:created_at entry))]
+               (when (:category entry)
+                 [:span {:style {:margin-left "6px" :font-size "11px" :color "#aaa"}} (:category entry)])]
+              (when (:error_message entry)
+                [:div.log-error (:error_message entry)])
+              (when (:message entry)
+                [:div {:style {:font-size "12px" :color "#666" :padding "2px 0"}} (:message entry)])
+              (when (:suggestion entry)
+                [:div {:style {:font-size "12px" :color "#3498db" :padding "2px 0"}} (:suggestion entry)])])]))]
+     (when (seq design-recommendations)
+       [:div {:style {:margin-top "12px" :border-top "1px solid #ddd" :padding-top "8px"}}
+        [:h4 "Design Recommendations"]
+        (for [[idx rec] (map-indexed vector design-recommendations)]
+          ^{:key (str "rec-" idx)}
+          [:div {:style {:padding "6px 0" :border-bottom "1px solid #eee"}}
+           [:div {:style {:display "flex" :align-items "center" :gap "8px"}}
+            [:span {:style {:font-weight "500" :color "#2c3e50"}} (:check_id rec)]
+            [:span {:style {:color "#7f8c8d"}} (str (:object_type rec) ": " (:object_name rec))]]
+           [:div {:style {:font-size "12px" :color "#555" :margin-top "2px"}} (:finding rec)]
+           (when (:recommendation rec)
+             [:div {:style {:font-size "12px" :color "#3498db" :margin-top "2px"}} (:recommendation rec)])])])]))
 
 (defn- suggest-name-from-path
   "Derive a suggested database name from the Access file path.
@@ -1781,6 +1960,11 @@
          :extracting "Extracting intents from modules..."
          :resolving-gaps "Resolving gaps via AI..."
          :generating "Generating ClojureScript code..."
+         :translating "Translating VBA modules..."
+         :repairing "Repairing bindings & mappings..."
+         :validating "Validating forms & reports..."
+         :auto-fixing "Applying automated fixes..."
+         :reviewing "Running design checks..."
          :complete [:span {:style {:display "flex" :align-items "center" :gap "8px"}}
                     "Auto-import complete"
                     [:button.btn-link

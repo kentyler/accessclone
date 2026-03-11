@@ -15,10 +15,11 @@ param(
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
 # Types to skip:
-#   OLE (11), Binary (17), Attachment (19/101),
+#   OLE (11), Binary (17), Attachment (19 — legacy),
 #   Complex/multi-valued (102-109) — would need junction table decomposition
 # Note: Calculated (18) is now handled — extracted as PG generated columns
-$skipTypes = @(11, 17, 19, 101, 102, 103, 104, 105, 106, 107, 108, 109)
+# Note: Attachment (101) is now handled — created as text column, populated by import-attachments
+$skipTypes = @(11, 17, 19, 102, 103, 104, 105, 106, 107, 108, 109)
 
 # Use .NET's built-in JSON string escaper — handles all edge cases
 # (embedded quotes, backslashes, control chars, Unicode) correctly.
@@ -137,6 +138,11 @@ try {
             }
         }
 
+        # For attachment columns (type 101), flag so import creates text column
+        if ($typeCode -eq 101) {
+            $fieldInfo.isAttachment = $true
+        }
+
         # For calculated columns (type 18), extract expression and result type
         if ($typeCode -eq 18) {
             $fieldInfo.isCalculated = $true
@@ -154,9 +160,9 @@ try {
         }
 
         $fields += $fieldInfo
-        # Don't add calculated fields to $includedFieldNames — their values are
-        # computed by PG and can't be INSERT'd into a GENERATED column.
-        if ($typeCode -ne 18) {
+        # Don't add calculated or attachment fields to $includedFieldNames —
+        # calculated values are computed by PG, attachment values are populated later.
+        if ($typeCode -ne 18 -and $typeCode -ne 101) {
             $includedFieldNames += $field.Name
         }
     }

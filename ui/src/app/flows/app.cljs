@@ -163,24 +163,24 @@
   (go
     (t/dispatch! :set-auto-resolving-gaps true)
     (let [db-id (:database_id (:current-database @app-state))
-          gap-questions (get-in @app-state [:app-viewer :all-gap-questions] [])
-          ;; Convert to plain maps for JSON
-          gq-payload (mapv (fn [gq]
-                             {:module (:module gq)
-                              :procedure (:procedure gq)
-                              :vba_line (:vba_line gq)
-                              :question (:question gq)
-                              :suggestions (vec (:suggestions gq))})
-                           gap-questions)
-          response (<! (http/post (str api-base "/api/chat/auto-resolve-gaps")
-                                  {:json-params {:gap_questions gq-payload
-                                                 :database_id db-id}
-                                   :headers (db-headers)}))]
-      (if (:success response)
-        (let [selections (get-in response [:body :selections] [])]
-          (t/dispatch! :set-all-gap-selections selections)
-          (<! (save-gap-questions!)))
-        (state/log-error! "Auto-resolve failed" "auto-resolve-gaps")))
+          gap-questions (get-in @app-state [:app-viewer :all-gap-questions] [])]
+      (when (seq gap-questions)
+        (let [gq-payload (mapv (fn [gq]
+                                 {:module (:module gq)
+                                  :procedure (:procedure gq)
+                                  :vba_line (:vba_line gq)
+                                  :question (:question gq)
+                                  :suggestions (vec (:suggestions gq))})
+                               gap-questions)
+              response (<! (http/post (str api-base "/api/chat/auto-resolve-gaps")
+                                      {:json-params {:gap_questions gq-payload
+                                                     :database_id db-id}
+                                       :headers (db-headers)}))]
+          (if (:success response)
+            (let [selections (get-in response [:body :selections] [])]
+              (t/dispatch! :set-all-gap-selections selections)
+              (<! (save-gap-questions!)))
+            (state/log-error! "Auto-resolve failed" "auto-resolve-gaps")))))
     (t/dispatch! :set-auto-resolving-gaps false)))
 
 (def auto-resolve-gaps-flow

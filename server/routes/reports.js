@@ -34,7 +34,7 @@ function createRouter(pool) {
       const result = await pool.query(
         `SELECT name, record_source, description, version, created_at
          FROM shared.reports
-         WHERE database_id = $1 AND is_current = true
+         WHERE database_id = $1 AND is_current = true AND owner = 'standard'
          ORDER BY name`,
         [databaseId]
       );
@@ -55,18 +55,24 @@ function createRouter(pool) {
   router.get('/:name', async (req, res) => {
     try {
       const databaseId = req.databaseId;
+      const userId = req.userId;
 
       const result = await pool.query(
-        `SELECT definition, version FROM shared.reports
-         WHERE database_id = $1 AND name = $2 AND is_current = true`,
-        [databaseId, req.params.name]
+        `SELECT definition, version, owner FROM shared.reports
+         WHERE database_id = $1 AND name = $2 AND is_current = true
+           AND owner IN ($3, 'standard')
+         ORDER BY CASE WHEN owner = 'standard' THEN 1 ELSE 0 END
+         LIMIT 1`,
+        [databaseId, req.params.name, userId || 'standard']
       );
 
       if (result.rows.length === 0) {
         return res.status(404).json({ error: 'Report not found' });
       }
 
-      res.json(result.rows[0].definition);
+      const row = result.rows[0];
+      const personalized = row.owner !== 'standard';
+      res.json({ ...row.definition, _personalized: personalized });
     } catch (err) {
       console.error('Error reading report:', err);
       logError(pool, 'GET /api/reports/:name', 'Failed to read report', err, { databaseId: req.databaseId });
@@ -83,7 +89,7 @@ function createRouter(pool) {
       const databaseId = req.databaseId;
 
       const result = await pool.query(
-        `SELECT version, is_current, created_at
+        `SELECT version, is_current, created_at, owner, modified_by
          FROM shared.reports
          WHERE database_id = $1 AND name = $2
          ORDER BY version DESC`,
@@ -135,14 +141,32 @@ function createRouter(pool) {
     try {
       const databaseId = req.databaseId;
       const reportName = req.params.name;
+      const userId = req.userId;
+      const isStandard = req.query.standard === 'true' || req.query.source === 'import';
 
       const content = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
 
       const recordSource = extractRecordSource(content);
 
+      // Determine owner for this save
+      let owner = 'standard';
+      if (!isStandard && userId) {
+        const personalCheck = await client.query(
+          `SELECT 1 FROM shared.reports
+           WHERE database_id = $1 AND name = $2 AND owner = $3 AND is_current = true`,
+          [databaseId, reportName, userId]
+        );
+        if (personalCheck.rows.length > 0 || content._personalized) {
+          owner = userId;
+        }
+      }
+
+      // Clean internal flags from definition before saving
+      delete content._personalized;
+
       await client.query('BEGIN');
 
-      // Get current max version for this report
+      // Get current max version for this report (across all owners)
       const versionResult = await client.query(
         `SELECT COALESCE(MAX(version), 0) as max_version
          FROM shared.reports
@@ -151,19 +175,19 @@ function createRouter(pool) {
       );
       const newVersion = versionResult.rows[0].max_version + 1;
 
-      // Mark all existing versions as not current
+      // Mark existing current version for same owner as not current
       await client.query(
         `UPDATE shared.reports
          SET is_current = false
-         WHERE database_id = $1 AND name = $2 AND is_current = true`,
-        [databaseId, reportName]
+         WHERE database_id = $1 AND name = $2 AND owner = $3 AND is_current = true`,
+        [databaseId, reportName, owner]
       );
 
       // Insert new version as current
       await client.query(
-        `INSERT INTO shared.reports (database_id, name, definition, record_source, version, is_current)
-         VALUES ($1, $2, $3, $4, $5, true)`,
-        [databaseId, reportName, content, recordSource, newVersion]
+        `INSERT INTO shared.reports (database_id, name, definition, record_source, version, is_current, owner, modified_by)
+         VALUES ($1, $2, $3, $4, $5, true, $6, $7)`,
+        [databaseId, reportName, content, recordSource, newVersion, owner, userId]
       );
 
       await client.query('COMMIT');
@@ -203,13 +227,12 @@ function createRouter(pool) {
             const schemaInfo = await getSchemaInfo(pool, dbResult.rows[0].schema_name);
             issues.push(...validateReportCrossObject(reportDef, schemaInfo));
           }
-          const logId = parseInt(req.query.import_log_id);
           for (const issue of issues) {
             await pool.query(`
-              INSERT INTO shared.import_issues
-                (import_log_id, database_id, object_name, object_type, severity, category, location, message, suggestion)
-              VALUES ($1, $2, $3, 'report', $4, 'lint', $5, $6, $7)
-            `, [logId, databaseId, reportName, issue.severity, issue.location || null, issue.message, issue.suggestion || null]);
+              INSERT INTO shared.import_log
+                (target_database_id, source_object_name, source_object_type, status, severity, category, message, suggestion)
+              VALUES ($1, $2, 'report', 'issue', $3, 'lint', $4, $5)
+            `, [databaseId, reportName, issue.severity, issue.message, issue.suggestion || null]);
           }
         } catch (lintErr) {
           console.error('Error running post-import lint for report:', lintErr.message);
@@ -230,7 +253,7 @@ function createRouter(pool) {
             if (functions.length > 0) {
               await pool.query(
                 `UPDATE shared.reports SET definition = $1
-                 WHERE database_id = $2 AND name = $3 AND is_current = true`,
+                 WHERE database_id = $2 AND name = $3 AND is_current = true AND owner = 'standard'`,
                 [updatedDef, databaseId, reportName]
               );
               console.log(`Created ${functions.length} computed functions for report ${reportName}`);
@@ -303,9 +326,9 @@ function createRouter(pool) {
       const recordSource = extractRecordSource(targetDefinition);
 
       await client.query(
-        `INSERT INTO shared.reports (database_id, name, definition, record_source, version, is_current)
-         VALUES ($1, $2, $3, $4, $5, true)`,
-        [databaseId, reportName, targetDefinition, recordSource, newVersion]
+        `INSERT INTO shared.reports (database_id, name, definition, record_source, version, is_current, modified_by)
+         VALUES ($1, $2, $3, $4, $5, true, $6)`,
+        [databaseId, reportName, targetDefinition, recordSource, newVersion, req.userId]
       );
 
       await client.query('COMMIT');
@@ -324,6 +347,106 @@ function createRouter(pool) {
       res.status(500).json({ error: 'Failed to rollback report' });
     } finally {
       client.release();
+    }
+  });
+
+  /**
+   * POST /api/reports/:name/promote
+   * Copy user's personalized version as the new current standard version
+   */
+  router.post('/:name/promote', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const databaseId = req.databaseId;
+      const userId = req.userId;
+
+      if (!userId) {
+        return res.status(400).json({ error: 'No user identity available' });
+      }
+
+      // Load the user's personalized current version
+      const personalResult = await client.query(
+        `SELECT definition, record_source FROM shared.reports
+         WHERE database_id = $1 AND name = $2 AND owner = $3 AND is_current = true`,
+        [databaseId, req.params.name, userId]
+      );
+
+      if (personalResult.rows.length === 0) {
+        client.release();
+        return res.status(404).json({ error: 'No personalized version found to promote' });
+      }
+
+      const { definition, record_source } = personalResult.rows[0];
+
+      await client.query('BEGIN');
+
+      // Get next version number
+      const versionResult = await client.query(
+        `SELECT COALESCE(MAX(version), 0) as max_version FROM shared.reports
+         WHERE database_id = $1 AND name = $2`,
+        [databaseId, req.params.name]
+      );
+      const newVersion = versionResult.rows[0].max_version + 1;
+
+      // Mark current standard version as not current
+      await client.query(
+        `UPDATE shared.reports SET is_current = false
+         WHERE database_id = $1 AND name = $2 AND owner = 'standard' AND is_current = true`,
+        [databaseId, req.params.name]
+      );
+
+      // Insert copy as new standard version
+      await client.query(
+        `INSERT INTO shared.reports (database_id, name, definition, record_source, version, is_current, owner, modified_by)
+         VALUES ($1, $2, $3, $4, $5, true, 'standard', $6)`,
+        [databaseId, req.params.name, definition, record_source, newVersion, userId]
+      );
+
+      await client.query('COMMIT');
+
+      console.log(`Promoted personalized report to standard: ${req.params.name} v${newVersion} (by: ${userId})`);
+      res.json({ success: true, version: newVersion });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      console.error('Error promoting report:', err);
+      logError(pool, 'POST /api/reports/:name/promote', 'Failed to promote report', err, { databaseId: req.databaseId });
+      res.status(500).json({ error: 'Failed to promote report to standard' });
+    } finally {
+      client.release();
+    }
+  });
+
+  /**
+   * DELETE /api/reports/:name/personalization
+   * Remove user's personalized version (reverts to standard)
+   */
+  router.delete('/:name/personalization', async (req, res) => {
+    try {
+      const databaseId = req.databaseId;
+      const userId = req.userId;
+
+      if (!userId) {
+        return res.status(400).json({ error: 'No user identity available' });
+      }
+
+      const result = await pool.query(
+        `UPDATE shared.reports
+         SET is_current = false
+         WHERE database_id = $1 AND name = $2 AND owner = $3 AND is_current = true
+         RETURNING version`,
+        [databaseId, req.params.name, userId]
+      );
+
+      if (result.rowCount === 0) {
+        return res.status(404).json({ error: 'No personalized version found' });
+      }
+
+      console.log(`Reset personalization for report: ${req.params.name} (user: ${userId})`);
+      res.json({ success: true, reset: true });
+    } catch (err) {
+      console.error('Error resetting report personalization:', err);
+      logError(pool, 'DELETE /api/reports/:name/personalization', 'Failed to reset personalization', err, { databaseId: req.databaseId });
+      res.status(500).json({ error: 'Failed to reset personalization' });
     }
   });
 

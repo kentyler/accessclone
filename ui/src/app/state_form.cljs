@@ -164,7 +164,8 @@
                          (:definition form))]
     (go
       (let [response (<! (http/put (str api-base "/api/forms/" filename)
-                                   {:json-params form-data}))]
+                                   {:json-params form-data
+                                    :headers (db-headers)}))]
         (if (:success response)
           (do
             ;; Update the form's filename in state
@@ -1179,14 +1180,47 @@
         (let [response (<! (http/get (str api-base "/api/forms/" (js/encodeURIComponent fname))
                                       {:headers (db-headers)}))]
           (if (:success response)
-            (let [definition (normalize-form-definition (dissoc (:body response) :id :name))]
+            (let [body (:body response)
+                  personalized? (boolean (:_personalized body))
+                  definition (normalize-form-definition (dissoc body :id :name :_personalized))]
               (swap! app-state update-in [:objects :forms]
                      (fn [forms]
                        (mapv #(if (= (:id %) (:id form))
                                 (assoc % :definition definition) %)
                              forms)))
-              (setup-form-editor! (:id form) definition fname))
+              (setup-form-editor! (:id form) definition fname)
+              (swap! app-state assoc-in [:form-editor :personalized?] personalized?))
             (log-error! (str "Failed to load form: " fname) "load-form-for-editing" {:form fname})))))))
+
+(defn reset-form-personalization!
+  "Reset the current form to the standard version by removing personalization."
+  []
+  (let [form-id (get-in @app-state [:form-editor :form-id])
+        form-obj (first (filter #(= (:id %) form-id)
+                                (get-in @app-state [:objects :forms])))
+        fname (:filename form-obj)]
+    (when fname
+      (go
+        (let [response (<! (http/delete (str api-base "/api/forms/" (js/encodeURIComponent fname) "/personalization")
+                                         {:headers (db-headers)}))]
+          (if (:success response)
+            (load-form-for-editing! (assoc form-obj :definition nil))
+            (log-error! "Failed to reset form personalization" "reset-form-personalization" {:form fname})))))))
+
+(defn promote-form-to-standard!
+  "Copy the current personalized form as the new standard version."
+  []
+  (let [form-id (get-in @app-state [:form-editor :form-id])
+        form-obj (first (filter #(= (:id %) form-id)
+                                (get-in @app-state [:objects :forms])))
+        fname (:filename form-obj)]
+    (when fname
+      (go
+        (let [response (<! (http/post (str api-base "/api/forms/" (js/encodeURIComponent fname) "/promote")
+                                       {:headers (db-headers)}))]
+          (if (:success response)
+            (println (str "[PROMOTE] Promoted personalized form to standard: " fname))
+            (log-error! "Failed to promote form to standard" "promote-form" {:form fname})))))))
 
 (defn select-control! [idx]
   (swap! app-state assoc-in [:form-editor :selected-control] idx))

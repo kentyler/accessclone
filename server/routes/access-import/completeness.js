@@ -67,8 +67,8 @@ module.exports = function(router, pool) {
         pool.query(`SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_type = 'BASE TABLE'`, [schemaName]),
         pool.query(`SELECT table_name FROM information_schema.views WHERE table_schema = $1`, [schemaName]),
         pool.query(`SELECT routine_name FROM information_schema.routines WHERE routine_schema = $1`, [schemaName]),
-        pool.query(`SELECT DISTINCT name FROM shared.forms WHERE database_id = $1 AND is_current = true`, [database_id]),
-        pool.query(`SELECT DISTINCT name FROM shared.reports WHERE database_id = $1 AND is_current = true`, [database_id]),
+        pool.query(`SELECT DISTINCT name FROM shared.forms WHERE database_id = $1 AND is_current = true AND owner = 'standard'`, [database_id]),
+        pool.query(`SELECT DISTINCT name FROM shared.reports WHERE database_id = $1 AND is_current = true AND owner = 'standard'`, [database_id]),
         pool.query(`SELECT DISTINCT name FROM shared.modules WHERE database_id = $1 AND is_current = true`, [database_id]),
         pool.query(`SELECT DISTINCT name FROM shared.macros WHERE database_id = $1 AND is_current = true`, [database_id])
       ]);
@@ -163,8 +163,7 @@ module.exports = function(router, pool) {
       const query = `
         SELECT il.id, il.created_at, il.source_path, il.source_object_name, il.source_object_type,
                il.target_database_id, il.status, il.error_message, il.details,
-               (SELECT COUNT(*) FROM shared.import_issues
-                WHERE import_log_id = il.id AND NOT resolved) AS open_issue_count
+               il.run_id, il.pass_number, il.severity, il.category, il.message
         FROM shared.import_log il
         ${whereClause}
         ORDER BY il.created_at DESC
@@ -172,10 +171,7 @@ module.exports = function(router, pool) {
       `;
 
       const result = await pool.query(query, params);
-      const history = result.rows.map(r => ({
-        ...r,
-        open_issue_count: parseInt(r.open_issue_count)
-      }));
+      const history = result.rows;
       res.json({ history });
     } catch (err) {
       console.error('Error fetching import history:', err);

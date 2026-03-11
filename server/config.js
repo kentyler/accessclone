@@ -21,9 +21,9 @@ module.exports = {
       `postgresql://${process.env.PGUSER || 'postgres'}:${process.env.PGPASSWORD || ''}@${process.env.PGHOST || defaultHost}:${process.env.PGPORT || '5432'}/${process.env.PGDATABASE || 'polyaccess'}`,
 
     // Pool settings
-    max: 10,
+    max: 20,
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 2000,
+    connectionTimeoutMillis: 5000,
   },
 
   // Server settings

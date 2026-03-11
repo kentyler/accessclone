@@ -8,6 +8,8 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { logError } = require('../../lib/events');
+const { sanitizeName } = require('../../lib/query-converter');
+const { quoteIdent } = require('../../lib/access-types');
 const { runPowerShell, parsePowerShellJson } = require('./helpers');
 
 // Simple extension → MIME type map
@@ -113,7 +115,45 @@ module.exports = function(router, pool) {
         upsertCount++;
       }
 
-      // 3. Clean up staging directory
+      // 3. Update the actual table column with file paths
+      // Group files by (pkValue, columnName) — attachment fields can have multiple files per record
+      const byRecord = {};
+      for (const file of manifest.files) {
+        const key = `${file.pkValue}::${file.columnName}`;
+        if (!byRecord[key]) byRecord[key] = { pkValue: file.pkValue, columnName: file.columnName, paths: [] };
+        const safeKey = String(file.pkValue).replace(/[\\/:*?"<>|]/g, '_');
+        byRecord[key].paths.push(`/attachments/${targetDatabaseId}/${safeTable}/${safeKey}/${file.fileName}`);
+      }
+
+      // Look up schema name for the target database
+      const dbResult = await pool.query(
+        'SELECT schema_name FROM shared.databases WHERE database_id = $1',
+        [targetDatabaseId]
+      );
+      if (dbResult.rows.length > 0) {
+        const schemaName = dbResult.rows[0].schema_name;
+        const pgTable = sanitizeName(tableName);
+        const pgPkCol = sanitizeName(manifest.pkColumn);
+
+        for (const rec of Object.values(byRecord)) {
+          const pgColName = sanitizeName(rec.columnName);
+          // Single file → plain path; multiple files → JSON array
+          const value = rec.paths.length === 1 ? rec.paths[0] : JSON.stringify(rec.paths);
+          try {
+            await pool.query(
+              `UPDATE ${quoteIdent(schemaName)}.${quoteIdent(pgTable)}
+               SET ${quoteIdent(pgColName)} = $1
+               WHERE ${quoteIdent(pgPkCol)} = $2`,
+              [value, rec.pkValue]
+            );
+          } catch (updateErr) {
+            // Column may not exist yet (table imported without attachment support) — log and continue
+            console.warn(`[import-attachments] Could not update ${pgTable}.${pgColName}: ${updateErr.message}`);
+          }
+        }
+      }
+
+      // 4. Clean up staging directory
       fs.rmSync(stagingDir, { recursive: true, force: true });
 
       res.json({

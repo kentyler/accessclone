@@ -1,10 +1,13 @@
 (ns app.views.app-viewer
   "App Viewer — application-level dashboard with multiple panes."
   (:require [clojure.string]
+            [reagent.core :as r]
             [app.state :as state]
             [app.transforms.core :as t]
             [app.flows.core :as f]
-            [app.flows.app :as app-flow]))
+            [app.flows.app :as app-flow]
+            [cljs-http.client :as http]
+            [cljs.core.async :refer [go <!]]))
 
 ;; ============================================================
 ;; Overview Pane — Phase 1
@@ -113,7 +116,35 @@
                (str (:missing_count comp) " source object(s) not yet imported."))]))
         [translation-summary
          (:translation_status overview)
-         (:intent_stats overview)]])]))
+         (:intent_stats overview)]
+        ;; Design Check button
+        (let [running? (r/atom false)
+              results (r/atom nil)]
+          [:div {:style {:margin-top "16px" :padding-top "12px" :border-top "1px solid #eee"}}
+           [:div {:style {:display "flex" :align-items "center" :gap "12px"}}
+            [:button.btn-primary
+             {:on-click (fn []
+                          (reset! running? true)
+                          (go
+                            (let [db-id (get-in @state/app-state [:current-database :database_id])
+                                  resp (<! (http/post (str state/api-base "/api/design-check/run")
+                                                      {:json-params {:database_id db-id}}))]
+                              (reset! running? false)
+                              (when (:success resp)
+                                (reset! results (get-in resp [:body :recommendations]))))))
+              :disabled @running?}
+             (if @running? "Running..." "Run Design Check")]
+            (when @results
+              [:span {:style {:font-size "12px" :color "#888"}}
+               (str (count @results) " recommendations")])]
+           (when (seq @results)
+             [:div {:style {:margin-top "8px"}}
+              (for [[idx rec] (map-indexed vector @results)]
+                ^{:key (str "app-rec-" idx)}
+                [:div {:style {:padding "4px 0" :border-bottom "1px solid #f0f0f0" :font-size "13px"}}
+                 [:div {:style {:font-weight "500"}} (str (:check_id rec) ": " (:finding rec))]
+                 (when (:recommendation rec)
+                   [:div {:style {:color "#3498db" :margin-top "2px"}} (:recommendation rec)])])])])])]))
 
 ;; ============================================================
 ;; Gap Decisions Pane — 3-Step Pipeline

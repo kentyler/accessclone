@@ -45,7 +45,6 @@
    :show-context-menu       ui/show-context-menu
    :hide-context-menu       ui/hide-context-menu
    :set-assessment          ui/set-assessment
-   :toggle-assessment-check ui/toggle-assessment-check
    :clear-assessment        ui/clear-assessment
    :toggle-properties-panel ui/toggle-properties-panel
 

@@ -6,6 +6,7 @@
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
+const os = require('os');
 
 // Load helpers
 const { logEvent, logError } = require('./lib/events');
@@ -32,6 +33,7 @@ const formStateRoutes = require('./routes/form-state');
 const appRoutes = require('./routes/app');
 const pipelineRoutes = require('./routes/pipeline');
 const attachmentsRoutes = require('./routes/attachments');
+const designCheckRoutes = require('./routes/design-check');
 
 function createApp({
   pool,
@@ -56,6 +58,13 @@ function createApp({
 
   // Serve UI static files (CSS, JS)
   app.use(express.static(uiPublicDir));
+
+  // ============================================================
+  // USER IDENTITY ENDPOINT (no database context needed)
+  // ============================================================
+  app.get('/api/whoami', (req, res) => {
+    res.json({ username: os.userInfo().username });
+  });
 
   // ============================================================
   // DATABASE SCHEMA ROUTING MIDDLEWARE
@@ -93,6 +102,7 @@ function createApp({
 
       req.databaseId = dbId;
       req.schemaName = schemaName;
+      req.userId = req.headers['x-user-id'] || null;
       next();
     } catch (err) {
       console.error('Error setting search_path:', err.message);
@@ -126,6 +136,9 @@ function createApp({
   app.use('/api/app', appRoutes(pool));
   app.use('/api/pipeline', pipelineRoutes(pool, secrets));
   app.use('/api/attachments', attachmentsRoutes(pool));
+  // Serve attachment files directly by path: /attachments/{dbId}/{table}/{pk}/{filename}
+  app.use('/attachments', express.static(path.join(__dirname, 'uploads', 'attachments')));
+  app.use('/api/design-check', designCheckRoutes(pool, secrets));
   return { app, databasesRouter };
 }
 

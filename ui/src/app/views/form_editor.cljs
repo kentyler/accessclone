@@ -60,7 +60,8 @@
   "Toolbar with form actions"
   []
   (let [dirty? (get-in @state/app-state [:form-editor :dirty?])
-        view-mode (state-form/get-view-mode)]
+        view-mode (state-form/get-view-mode)
+        personalized? (get-in @state/app-state [:form-editor :personalized?])]
     [:div.form-toolbar
      [:div.toolbar-left
       [:button.toolbar-btn
@@ -79,7 +80,10 @@
            {:class (when hdr-visible? "active")
             :title "Toggle Form Header/Footer"
             :on-click #(t/dispatch! :toggle-form-header-footer)}
-           "Header/Footer"]))]
+           "Header/Footer"]))
+      (when personalized?
+        [:span.personalized-badge {:title "You are viewing your personalized version of this form"}
+         "(Personalized)"])]
      [:div.toolbar-right
       [:button.secondary-btn
        {:title "Re-import this form from the Access database"
@@ -100,6 +104,16 @@
                               (state/log-error! (str "Re-import failed: " (:error result "Unknown error"))
                                                 "reimport-form" {:form form-name})))))))}
        "Re-Import"]
+      (when personalized?
+        [:<>
+         [:button.secondary-btn
+          {:title "Copy this version as the new standard for all users"
+           :on-click #(state-form/promote-form-to-standard!)}
+          "Promote to Standard"]
+         [:button.secondary-btn
+          {:title "Reset to the standard shared version"
+           :on-click #(state-form/reset-form-personalization!)}
+          "Reset to Standard"]])
       [:button.secondary-btn
        {:disabled (not dirty?)
         :on-click #(let [original (get-in @state/app-state [:form-editor :original])]

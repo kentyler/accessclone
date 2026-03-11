@@ -192,14 +192,47 @@
       (let [response (<! (http/get (str api-base "/api/reports/" (:filename report))
                                     {:headers (db-headers)}))]
         (if (:success response)
-          (let [definition (parse-report-body (:body response) (:name report))]
+          (let [body (:body response)
+                personalized? (boolean (:_personalized body))
+                definition (parse-report-body (dissoc body :_personalized) (:name report))]
             (swap! app-state update-in [:objects :reports]
                    (fn [reports]
                      (mapv #(if (= (:id %) (:id report))
                               (assoc % :definition definition) %)
                            reports)))
-            (setup-report-editor! (:id report) definition))
+            (setup-report-editor! (:id report) definition)
+            (swap! app-state assoc-in [:report-editor :personalized?] personalized?))
           (log-error! (str "Failed to load report: " (:filename report)) "load-report-for-editing" {:report (:filename report)}))))))
+
+(defn reset-report-personalization!
+  "Reset the current report to the standard version by removing personalization."
+  []
+  (let [report-id (get-in @app-state [:report-editor :report-id])
+        report-obj (first (filter #(= (:id %) report-id)
+                                  (get-in @app-state [:objects :reports])))
+        fname (:filename report-obj)]
+    (when fname
+      (go
+        (let [response (<! (http/delete (str api-base "/api/reports/" (js/encodeURIComponent fname) "/personalization")
+                                         {:headers (db-headers)}))]
+          (if (:success response)
+            (load-report-for-editing! (assoc report-obj :definition nil))
+            (log-error! "Failed to reset report personalization" "reset-report-personalization" {:report fname})))))))
+
+(defn promote-report-to-standard!
+  "Copy the current personalized report as the new standard version."
+  []
+  (let [report-id (get-in @app-state [:report-editor :report-id])
+        report-obj (first (filter #(= (:id %) report-id)
+                                  (get-in @app-state [:objects :reports])))
+        fname (:filename report-obj)]
+    (when fname
+      (go
+        (let [response (<! (http/post (str api-base "/api/reports/" (js/encodeURIComponent fname) "/promote")
+                                       {:headers (db-headers)}))]
+          (if (:success response)
+            (println (str "[PROMOTE] Promoted personalized report to standard: " fname))
+            (log-error! "Failed to promote report to standard" "promote-report" {:report fname})))))))
 
 ;; ============================================================
 ;; REPORT SAVE
@@ -217,7 +250,8 @@
                            (:definition report))]
     (go
       (let [response (<! (http/put (str api-base "/api/reports/" filename)
-                                   {:json-params report-data}))]
+                                   {:json-params report-data
+                                    :headers (db-headers)}))]
         (if (:success response)
           (swap! app-state update-in [:objects :reports]
                  (fn [reports]

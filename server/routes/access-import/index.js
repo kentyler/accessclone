@@ -15,7 +15,13 @@ module.exports = function(pool, secrets) {
   require('./import-attachments')(router, pool);
   require('./completeness')(router, pool);
   require('./assess')(router, pool);
+  require('./apply-fixes')(router, pool);
+  require('./run')(router, pool);
+  require('./repair-pass')(router, pool);
+  require('./validation-pass')(router, pool);
+  require('./autofix-pass')(router, pool, secrets);
   require('./property-catalog')(router, pool);
+  require('./translate-modules')(router, pool, secrets);
 
   return router;
 };

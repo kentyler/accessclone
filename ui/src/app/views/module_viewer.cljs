@@ -314,7 +314,7 @@
 ;; ============================================================
 
 (defn import-completeness-banner
-  "Show amber warning when import is incomplete"
+  "Show amber notice when import is incomplete (informational — does not block translation)"
   []
   (let [completeness (:import-completeness @state/app-state)]
     (when (and (:has_discovery completeness) (not (:complete completeness)))
@@ -325,7 +325,7 @@
           [:span.warning-counts
            (str (:imported_count completeness) " of " (:total_source_count completeness) " objects imported")]]
          [:div.warning-detail
-          "Translation is blocked until all objects are imported. Missing:"
+          "Some objects are not yet imported. Translation can proceed but references to missing objects may produce gaps."
           [:ul.missing-list
            (for [[type-key names] missing]
              ^{:key (name type-key)}

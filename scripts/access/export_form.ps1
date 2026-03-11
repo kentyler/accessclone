@@ -91,6 +91,10 @@ function Export-ControlToObject {
     $borderColor = Safe-GetProperty $ctl "BorderColor"
     if ($null -ne $borderColor -and $borderColor -ge 0) { $obj.borderColor = [long]$borderColor }
 
+    # BackStyle (0=Transparent, 1=Normal)
+    $backStyle = Safe-GetProperty $ctl "BackStyle"
+    if ($null -ne $backStyle) { $obj.backStyle = [int]$backStyle }
+
     # Control source / field binding
     $ctlSource = Safe-GetProperty $ctl "ControlSource"
     if ($ctlSource) { $obj.controlSource = $ctlSource }

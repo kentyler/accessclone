@@ -87,6 +87,32 @@ function repairJson(text) {
 }
 
 /**
+ * Recover a truncated JSON array by finding the last complete element.
+ * Handles LLM responses cut off by max_tokens.
+ */
+function recoverTruncatedArray(text) {
+  // Find positions of all `}` that could close an array element
+  // Work backwards from the end to find the last complete object
+  let lastGoodEnd = -1;
+  for (let i = text.length - 1; i >= 0; i--) {
+    if (text[i] === '}') {
+      // Try parsing from start of array to this position + "]"
+      const candidate = text.substring(0, i + 1).replace(/,\s*$/, '') + ']';
+      try {
+        const parsed = JSON.parse(candidate);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          console.warn(`Recovered truncated gap questions: ${parsed.length} of expected items`);
+          return parsed;
+        }
+      } catch (_) {
+        // keep searching backwards
+      }
+    }
+  }
+  return [];
+}
+
+/**
  * Validate an extracted intent result.
  * Checks structure and flags unknown intent types.
  *
@@ -338,7 +364,7 @@ Example output:
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 2048,
+      max_tokens: 8192,
       system: systemPrompt,
       messages: [{
         role: 'user',
@@ -365,6 +391,11 @@ Example output:
       const questions = JSON.parse(repaired);
       if (Array.isArray(questions)) return questions;
     } catch (e) {
+      // Truncation recovery: find the last complete JSON object in the array
+      try {
+        const truncated = recoverTruncatedArray(text);
+        if (truncated.length > 0) return truncated;
+      } catch (_) { /* fall through */ }
       console.error('Failed to parse gap questions JSON:', e.message);
     }
   }

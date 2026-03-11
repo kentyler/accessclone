@@ -74,14 +74,6 @@
                :assessment-scan-summary scan-summary
                :assessing? false))
 
-(defn toggle-assessment-check [state finding-id]
-  (update state :assessment-checked
-          (fn [checked]
-            (let [checked (or checked #{})]
-              (if (contains? checked finding-id)
-                (disj checked finding-id)
-                (conj checked finding-id))))))
-
 (defn clear-assessment [state]
   (assoc state :assessment-findings nil
                :assessment-checked #{}

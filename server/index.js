@@ -80,7 +80,10 @@ pool.query('SELECT NOW()')
 // START SERVER
 // ============================================================
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
+  // Allow long-running import/translation requests (10 minutes)
+  server.timeout = 600000;
+  server.keepAliveTimeout = 600000;
   console.log(`AccessClone backend running on http://localhost:${PORT}`);
   console.log(`Database: ${config.database.connectionString.replace(/:[^:@]+@/, ':****@')}`);
   console.log(`Forms: stored in shared.forms table`);

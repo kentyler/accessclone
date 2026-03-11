@@ -169,6 +169,22 @@ ALTER TABLE shared.modules ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL 
 ALTER TABLE shared.modules ADD COLUMN IF NOT EXISTS review_notes TEXT;
 ALTER TABLE shared.modules ADD COLUMN IF NOT EXISTS intents JSONB;
 
+-- Add owner/modified_by columns for personalized versions and audit trail
+ALTER TABLE shared.forms ADD COLUMN IF NOT EXISTS owner TEXT DEFAULT 'standard';
+ALTER TABLE shared.forms ADD COLUMN IF NOT EXISTS modified_by TEXT;
+ALTER TABLE shared.reports ADD COLUMN IF NOT EXISTS owner TEXT DEFAULT 'standard';
+ALTER TABLE shared.reports ADD COLUMN IF NOT EXISTS modified_by TEXT;
+
+-- Backfill NULL owners to 'standard' (for existing rows before this migration)
+UPDATE shared.forms SET owner = 'standard' WHERE owner IS NULL;
+UPDATE shared.reports SET owner = 'standard' WHERE owner IS NULL;
+
+-- Unique index: one current version per (database, form/report, owner)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_forms_user_current
+  ON shared.forms(database_id, name, owner) WHERE is_current = true;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_user_current
+  ON shared.reports(database_id, name, owner) WHERE is_current = true;
+
 -- Migrate definition columns from TEXT to JSONB (for existing installs)
 DO $$ BEGIN
   IF EXISTS (
@@ -263,26 +279,33 @@ CREATE TABLE IF NOT EXISTS shared.gap_questions (
 );
 
 -- ============================================================
--- Import Issues - persistent issue registry for imported objects
+-- Import Runs - groups import operations into multi-pass runs
 -- ============================================================
-CREATE TABLE IF NOT EXISTS shared.import_issues (
+CREATE TABLE IF NOT EXISTS shared.import_runs (
     id SERIAL PRIMARY KEY,
-    import_log_id INTEGER REFERENCES shared.import_log(id) ON DELETE CASCADE,
-    database_id VARCHAR(100) NOT NULL,
-    object_name VARCHAR(255) NOT NULL,
-    object_type VARCHAR(50) NOT NULL,
-    severity VARCHAR(20) NOT NULL DEFAULT 'error',
-    category VARCHAR(50),
-    location TEXT,
-    message TEXT NOT NULL,
-    suggestion TEXT,
-    resolved BOOLEAN NOT NULL DEFAULT false,
-    resolved_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    database_id TEXT NOT NULL,
+    source_paths TEXT[],
+    started_at TIMESTAMPTZ DEFAULT NOW(),
+    completed_at TIMESTAMPTZ,
+    status TEXT DEFAULT 'running',
+    summary JSONB
 );
-CREATE INDEX IF NOT EXISTS idx_import_issues_db ON shared.import_issues(database_id);
-CREATE INDEX IF NOT EXISTS idx_import_issues_unresolved ON shared.import_issues(database_id, resolved) WHERE resolved = false;
+CREATE INDEX IF NOT EXISTS idx_import_runs_db ON shared.import_runs(database_id);
+
 CREATE INDEX IF NOT EXISTS idx_import_log_db ON shared.import_log(target_database_id);
+
+-- Add multi-pass columns to import_log (idempotent)
+ALTER TABLE shared.import_log ADD COLUMN IF NOT EXISTS run_id INTEGER;
+ALTER TABLE shared.import_log ADD COLUMN IF NOT EXISTS pass_number INTEGER DEFAULT 1;
+ALTER TABLE shared.import_log ADD COLUMN IF NOT EXISTS phase TEXT;
+ALTER TABLE shared.import_log ADD COLUMN IF NOT EXISTS action TEXT;
+ALTER TABLE shared.import_log ADD COLUMN IF NOT EXISTS severity TEXT DEFAULT 'info';
+ALTER TABLE shared.import_log ADD COLUMN IF NOT EXISTS category TEXT;
+ALTER TABLE shared.import_log ADD COLUMN IF NOT EXISTS message TEXT;
+ALTER TABLE shared.import_log ADD COLUMN IF NOT EXISTS suggestion TEXT;
+ALTER TABLE shared.import_log ADD COLUMN IF NOT EXISTS resolved BOOLEAN DEFAULT false;
+ALTER TABLE shared.import_log ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_import_log_run ON shared.import_log(run_id, pass_number);
 
 -- ============================================================
 -- Chat Transcripts - persistent chat history per object
@@ -1048,6 +1071,35 @@ async function seedPropertyCatalog(pool) {
  * @param {Pool} pool - PostgreSQL connection pool
  * @returns {Promise<boolean>} - True if successful
  */
+/**
+ * Migrate import_issues rows into import_log, then drop import_issues.
+ * Idempotent — skips if import_issues doesn't exist.
+ */
+async function migrateImportIssues(pool) {
+  try {
+    const exists = await pool.query(`
+      SELECT 1 FROM information_schema.tables
+      WHERE table_schema = 'shared' AND table_name = 'import_issues'
+    `);
+    if (exists.rows.length === 0) return; // already migrated
+
+    // Copy import_issues into import_log with mapped columns
+    await pool.query(`
+      INSERT INTO shared.import_log
+        (source_object_name, source_object_type, target_database_id, status,
+         severity, category, message, suggestion, resolved, resolved_at, created_at)
+      SELECT object_name, object_type, database_id, 'issue',
+             severity, category, message, suggestion, resolved, resolved_at, created_at
+      FROM shared.import_issues
+    `);
+
+    await pool.query('DROP TABLE shared.import_issues');
+    console.log('[MIGRATION] import_issues migrated to import_log and table dropped');
+  } catch (err) {
+    console.warn('import_issues migration skipped:', err.message);
+  }
+}
+
 async function initializeSchema(pool) {
   try {
     // Ensure shared schema exists
@@ -1055,6 +1107,9 @@ async function initializeSchema(pool) {
 
     // Create tables and indexes
     await pool.query(SCHEMA_SQL);
+
+    // Migrate import_issues → import_log and drop import_issues (idempotent)
+    await migrateImportIssues(pool);
 
     // Seed property catalog (idempotent)
     await seedPropertyCatalog(pool);

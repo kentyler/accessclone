@@ -261,19 +261,19 @@ module.exports = function(router, pool, secrets) {
         extractedFunctions: result.extractedFunctions.length > 0 ? result.extractedFunctions.map(f => f.name) : undefined
       });
 
-      // 9. Create issues for conversion warnings
-      if (queryLogId && result.warnings.length > 0) {
+      // 9. Log issues for conversion warnings
+      if (result.warnings.length > 0) {
         try {
           for (const warning of result.warnings) {
             const category = warning.includes('LLM-assisted') ? 'llm-assisted' : 'conversion-warning';
             await pool.query(`
-              INSERT INTO shared.import_issues
-                (import_log_id, database_id, object_name, object_type, severity, category, message)
-              VALUES ($1, $2, $3, 'query', 'warning', $4, $5)
-            `, [queryLogId, targetDatabaseId, queryName, category, warning]);
+              INSERT INTO shared.import_log
+                (target_database_id, source_object_name, source_object_type, status, severity, category, message)
+              VALUES ($1, $2, 'query', 'issue', 'warning', $3, $4)
+            `, [targetDatabaseId, queryName, category, warning]);
           }
         } catch (issueErr) {
-          console.error('Error creating import issues for query warnings:', issueErr);
+          console.error('Error logging query warnings:', issueErr);
         }
       }
 
@@ -286,12 +286,17 @@ module.exports = function(router, pool, secrets) {
         llmAssisted
       });
     } catch (err) {
-      console.error(`Error importing query "${queryName}":`, err);
-      logError(pool, 'POST /api/access-import/import-query', 'Failed to import query', err, {
-        details: { databasePath, queryName, targetDatabaseId }
-      });
-      await logImport('error', err.message);
       const isDep = err.code === '42P01' || err.code === '42883';
+      if (isDep) {
+        // Dependency errors are expected during multi-pass import — log quietly
+        console.log(`[QUERY ${queryName}] Deferred (missing dependency): ${err.message}`);
+      } else {
+        console.error(`Error importing query "${queryName}":`, err);
+        logError(pool, 'POST /api/access-import/import-query', 'Failed to import query', err, {
+          details: { databasePath, queryName, targetDatabaseId }
+        });
+      }
+      await logImport('error', err.message);
       res.status(500).json({
         error: err.message || 'Failed to import query',
         category: isDep ? 'missing-dependency' : 'conversion-error'
@@ -385,7 +390,7 @@ module.exports = function(router, pool, secrets) {
         // Load current form definition
         const formResult = await pool.query(
           `SELECT definition FROM shared.forms
-           WHERE database_id = $1 AND name = $2 AND is_current = true`,
+           WHERE database_id = $1 AND name = $2 AND is_current = true AND owner = 'standard'`,
           [targetDatabaseId, formName]
         );
         if (formResult.rows.length === 0) continue;
@@ -410,7 +415,7 @@ module.exports = function(router, pool, secrets) {
         if (modified) {
           await pool.query(
             `UPDATE shared.forms SET definition = $1
-             WHERE database_id = $2 AND name = $3 AND is_current = true`,
+             WHERE database_id = $2 AND name = $3 AND is_current = true AND owner = 'standard'`,
             [definition, targetDatabaseId, formName]
           );
         }

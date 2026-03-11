@@ -897,13 +897,14 @@
             effective-edits? (and allow-edits? ctrl-enabled? (not ctrl-locked?) field-writable?)
             hotkey     (fu/extract-hotkey (or (:text ctrl) (:caption ctrl)))]
         [:div.view-control
-         (cond-> {:style style :on-context-menu show-record-menu}
-           tip (assoc :title tip)
-           hotkey (assoc :data-hotkey hotkey)
-           (= ctrl-type :label) (assoc :data-hotkey-label "true")
-           (not ctrl-enabled?) (assoc :class "disabled")
-           is-lookup? (assoc :class "readonly-lookup")
-           is-lookup? (assoc :title (str (or tip "") (when tip " ") "(lookup field - read only)")))
+         (let [cls (str (name ctrl-type)
+                        (when (not ctrl-enabled?) " disabled")
+                        (when is-lookup? " readonly-lookup"))]
+           (cond-> {:class cls :style style :on-context-menu show-record-menu}
+             tip (assoc :title tip)
+             hotkey (assoc :data-hotkey hotkey)
+             (= ctrl-type :label) (assoc :data-hotkey-label "true")
+             is-lookup? (assoc :title (str (or tip "") (when tip " ") "(lookup field - read only)"))))
          [renderer ctrl field value on-change
           {:auto-focus? auto-focus? :is-new? (:__new__ current-record)
            :allow-edits? effective-edits? :all-controls all-controls
@@ -959,11 +960,13 @@
          :else "\u00A0")])
 
 (defn- section-view-style
-  "Build style map for a section in view mode, including background image if present."
+  "Build style map for a section in view mode, including background color/image."
   [height section-data]
   (let [picture (:picture section-data)
         has-picture? (and picture (not= picture ""))]
     (cond-> {:height height}
+      (:back-color section-data)
+      (assoc :background-color (:back-color section-data))
       has-picture?
       (assoc :background-image (str "url(" picture ")")
              :background-size (case (:picture-size-mode section-data)

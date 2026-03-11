@@ -107,16 +107,16 @@ module.exports = function(router, pool) {
       });
       const moduleLogId = await logImport('success', null, { lineCount: moduleData.lineCount || 0 });
 
-      // Create issue for untranslated VBA
-      if (moduleLogId && targetDatabaseId) {
+      // Log issue for untranslated VBA
+      if (targetDatabaseId) {
         try {
           await pool.query(`
-            INSERT INTO shared.import_issues
-              (import_log_id, database_id, object_name, object_type, severity, category, message)
-            VALUES ($1, $2, $3, 'module', 'warning', 'untranslated-vba', $4)
-          `, [moduleLogId, targetDatabaseId, moduleName, 'VBA module needs translation to ClojureScript']);
+            INSERT INTO shared.import_log
+              (target_database_id, source_object_name, source_object_type, status, severity, category, message)
+            VALUES ($1, $2, 'module', 'issue', 'warning', 'untranslated-vba', $3)
+          `, [targetDatabaseId, moduleName, 'VBA module needs translation to ClojureScript']);
         } catch (issueErr) {
-          console.error('Error creating import issue for module:', issueErr);
+          console.error('Error logging module issue:', issueErr);
         }
       }
 
@@ -156,16 +156,16 @@ module.exports = function(router, pool) {
       });
       const macroLogId = await logImport('success', null, { hasDefinition: !!macroData.definition });
 
-      // Create issue for untranslated macro
-      if (macroLogId && targetDatabaseId) {
+      // Log issue for untranslated macro
+      if (targetDatabaseId) {
         try {
           await pool.query(`
-            INSERT INTO shared.import_issues
-              (import_log_id, database_id, object_name, object_type, severity, category, message)
-            VALUES ($1, $2, $3, 'macro', 'warning', 'untranslated-macro', $4)
-          `, [macroLogId, targetDatabaseId, macroName, 'Access macro needs translation to ClojureScript']);
+            INSERT INTO shared.import_log
+              (target_database_id, source_object_name, source_object_type, status, severity, category, message)
+            VALUES ($1, $2, 'macro', 'issue', 'warning', 'untranslated-macro', $3)
+          `, [targetDatabaseId, macroName, 'Access macro needs translation to ClojureScript']);
         } catch (issueErr) {
-          console.error('Error creating import issue for macro:', issueErr);
+          console.error('Error logging macro issue:', issueErr);
         }
       }
 
@@ -318,7 +318,8 @@ module.exports = function(router, pool) {
         return res.status(400).json({ error: 'databasePath and objectNames[] required' });
       }
 
-      const timeout = Math.max(60000, objectNames.length * 30000);
+      // Macros are small — 10s each is generous; 60s minimum
+      const timeout = Math.max(60000, objectNames.length * 10000);
       const batchData = await withComLock(async () => {
         const scriptsDir = path.join(__dirname, '..', '..', '..', 'scripts', 'access');
         const exportScript = path.join(scriptsDir, 'export_macros_batch.ps1');
@@ -341,11 +342,13 @@ module.exports = function(router, pool) {
         errors: batchData.errors || []
       });
     } catch (err) {
-      console.error('Error in batch macro export:', err);
-      logError(pool, 'POST /api/access-import/export-macros-batch', 'Failed to batch export macros', err, {
-        details: { databasePath, objectNames, targetDatabaseId }
+      console.error('Error in batch macro export:', err.message);
+      // Return empty result instead of 500 — frontend will retry individually
+      res.json({
+        success: true,
+        objects: {},
+        errors: [{ name: '_batch', error: err.message }]
       });
-      res.status(500).json({ error: err.message || 'Failed to batch export macros' });
     }
   });
 

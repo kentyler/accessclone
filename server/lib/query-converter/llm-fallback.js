@@ -124,6 +124,53 @@ async function buildVbaContext(pool, databaseId, pgError) {
 }
 
 /**
+ * Find missing columns in views.
+ * When PG says "column X does not exist" on a table, check if X exists
+ * in any view — the Access query likely intended to use the view.
+ */
+async function buildViewColumnHints(pool, schemaName, pgError) {
+  if (!pgError) return '';
+
+  // Extract "table.column does not exist" patterns
+  const missingCols = [];
+  const colRegex = /column (?:"?)([\w]+)\.([\w]+)"? does not exist/gi;
+  let match;
+  while ((match = colRegex.exec(pgError)) !== null) {
+    missingCols.push({ table: match[1].toLowerCase(), column: match[2].toLowerCase() });
+  }
+  // Also match bare "column X does not exist"
+  const bareRegex = /column (?:"?)([\w]+)"? does not exist/gi;
+  while ((match = bareRegex.exec(pgError)) !== null) {
+    const col = match[1].toLowerCase();
+    if (!missingCols.some(m => m.column === col)) {
+      missingCols.push({ table: null, column: col });
+    }
+  }
+  if (missingCols.length === 0) return '';
+
+  // Find which views contain these columns
+  const viewResult = await pool.query(`
+    SELECT v.table_name AS view_name, c.column_name
+    FROM information_schema.views v
+    JOIN information_schema.columns c
+      ON c.table_schema = v.table_schema AND c.table_name = v.table_name
+    WHERE v.table_schema = $1
+      AND LOWER(c.column_name) = ANY($2)
+  `, [schemaName, missingCols.map(m => m.column)]);
+
+  if (viewResult.rows.length === 0) return '';
+
+  const lines = ['COLUMN RESOLUTION HINTS (missing columns found in views):'];
+  for (const row of viewResult.rows) {
+    const orig = missingCols.find(m => m.column === row.column_name.toLowerCase());
+    const fromTable = orig?.table ? `"${orig.table}" does not have` : 'Missing';
+    lines.push(`${fromTable} "${row.column_name}" → exists in view "${row.view_name}". Use the view instead of the base table, or JOIN the view.`);
+  }
+
+  return lines.join('\n');
+}
+
+/**
  * Format control mapping for LLM context.
  * Format: "formName.controlName → tableName.columnName"
  */
@@ -159,6 +206,7 @@ async function convertQueryWithLLM({
   const schemaContext = await buildSchemaContext(pool, schemaName);
   const mappingContext = formatControlMapping(controlMapping || {});
   const vbaContext = await buildVbaContext(pool, databaseId, pgError);
+  const viewHints = await buildViewColumnHints(pool, schemaName, pgError);
 
   const systemPrompt = `You convert Microsoft Access SQL to PostgreSQL DDL statements.
 
@@ -181,7 +229,7 @@ RULES:
 - Access InStr(s,sub) → POSITION(sub IN s)
 - Access Format(val, fmt) → TO_CHAR(val, fmt) with PG format codes
 - Access Table.FunctionName syntax: Access sometimes references VBA functions as if they were columns (e.g. Employees.FullNameFnLn). If a "column" doesn't exist in the table but a FUNCTION with that name exists in the schema, rewrite it as a function call: schema.functionname(relevant_args). Check the FUNCTIONS list in the schema below.
-- If a referenced column doesn't exist on a table but exists on a VIEW in the schema, the query may need to join that view instead
+- If a referenced column doesn't exist on a table but exists on a VIEW in the schema, replace the table reference with the view (or JOIN the view). Access queries commonly reference calculated/derived columns from other queries as if they were table columns. Check the COLUMN RESOLUTION HINTS section below for specific mappings.
 - Access HAVING without GROUP BY → use WHERE instead
 - Access TOP N → LIMIT N
 - Access DISTINCTROW → DISTINCT
@@ -203,7 +251,7 @@ For unresolved form references, use NULL with a comment explaining what was unre
 
 DATABASE SCHEMA:
 ${schemaContext}
-${vbaContext ? '\n' + vbaContext + '\n' : ''}
+${vbaContext ? '\n' + vbaContext + '\n' : ''}${viewHints ? '\n' + viewHints + '\n' : ''}
 Return ONLY the SQL statement(s). No markdown code fences, no explanations, no comments outside the SQL.
 If multiple statements are needed (e.g. helper function + view), separate them with semicolons.`;
 

@@ -29,17 +29,32 @@
   [def section]
   (or (get-in def [section :controls]) []))
 
+(def ^:private transparent-by-default
+  "Control types that default to BackStyle=0 (Transparent) in Access.
+   Used as fallback when back-style wasn't imported."
+  #{:label :option-button :check-box :toggle-button :image :line})
+
 (defn control-style
-  "Position and size style map for a control (layout + font)"
+  "Position and size style map for a control (layout + font + colors).
+   Uses back-style (0=Transparent, 1=Normal) when available.
+   Falls back to Access defaults per control type for older imports."
   [ctrl]
-  (cond-> {:left (:x ctrl)
-           :top (:y ctrl)
-           :width (:width ctrl)
-           :height (:height ctrl)}
-    (:font-name ctrl)           (assoc :font-family (:font-name ctrl))
-    (:font-size ctrl)           (assoc :font-size (:font-size ctrl))
-    (= 1 (:font-bold ctrl))    (assoc :font-weight "bold")
-    (= 1 (:font-italic ctrl))  (assoc :font-style "italic")))
+  (let [back-style (:back-style ctrl)
+        opaque? (cond
+                  (= 1 back-style) true     ; explicitly Normal
+                  (= 0 back-style) false    ; explicitly Transparent
+                  ;; Fallback for imports without back-style:
+                  :else (not (contains? transparent-by-default (:type ctrl))))]
+    (cond-> {:left (:x ctrl)
+             :top (:y ctrl)
+             :width (:width ctrl)
+             :height (:height ctrl)}
+      (:font-name ctrl)                    (assoc :font-family (:font-name ctrl))
+      (:font-size ctrl)                    (assoc :font-size (:font-size ctrl))
+      (= 1 (:font-bold ctrl))             (assoc :font-weight "bold")
+      (= 1 (:font-italic ctrl))           (assoc :font-style "italic")
+      (:fore-color ctrl)                   (assoc :color (:fore-color ctrl))
+      (and (:back-color ctrl) opaque?)     (assoc :background-color (:back-color ctrl)))))
 
 (defn resolve-control-field
   "Get the bound field name from a control, normalized to lowercase.

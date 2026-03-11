@@ -239,25 +239,21 @@
            (let [remaining (count (filter #(nil? (:selected %)) gap-questions))]
              (str remaining " of " (count gap-questions) " remaining")))]]])))
 
-(defn- assessment-finding-row [finding checked?]
-  (let [fixable? (:fixable finding)]
-    [:div.assessment-finding
-     {:class (case (:type finding)
-               ("reserved-word" "action-query" "missing-pk") "structural"
-               ("wide-table" "empty-table" "missing-relationship" "naming-inconsistency") "design"
-               "complexity")}
-     (when fixable?
-       [:input {:type "checkbox"
-                :checked checked?
-                :on-change #(t/dispatch! :toggle-assessment-check (:id finding))}])
-     [:span.assessment-object (:object finding)]
-     [:span.assessment-message " \u2014 " (:message finding)]
-     (when (:suggestion finding)
-       [:span.assessment-suggestion " (" (:suggestion finding) ")"])]))
+(defn- assessment-finding-row [finding]
+  [:div.assessment-finding
+   {:class (case (:type finding)
+             ("reserved-word" "action-query" "missing-pk") "structural"
+             ("wide-table" "empty-table" "missing-relationship" "naming-inconsistency") "design"
+             "complexity")}
+   [:span.assessment-type-badge (str "[" (:type finding) "]")]
+   [:span.assessment-object " " (:object finding)]
+   [:span.assessment-message " \u2014 " (:message finding)]
+   (when (:suggestion finding)
+     [:span.assessment-suggestion " (" (:suggestion finding) ")"])])
 
-(defn- assessment-section [title findings checked-set & [collapsible?]]
+(defn- assessment-section [title findings]
   (let [expanded? (r/atom true)]
-    (fn [title findings checked-set]
+    (fn [title findings]
       (when (seq findings)
         [:div.assessment-section
          [:div.assessment-section-header
@@ -270,50 +266,34 @@
            [:div.assessment-section-body
             (for [finding findings]
               ^{:key (:id finding)}
-              [assessment-finding-row finding (contains? checked-set (:id finding))])])]))))
+              [assessment-finding-row finding])])]))))
 
 (defn- assessment-widget []
-  (let [import-mode (r/atom :as-is)]
-    (fn []
-      (let [findings (:assessment-findings @state/app-state)
-            checked (or (:assessment-checked @state/app-state) #{})
-            assessing? (:assessing? @state/app-state)
-            app-mode (:app-mode @state/app-state)]
-        (when (and (= app-mode :import)
-                   (or assessing? findings))
-          (if assessing?
+  (fn []
+    (let [findings (:assessment-findings @state/app-state)
+          assessing? (:assessing? @state/app-state)
+          app-mode (:app-mode @state/app-state)]
+      (when (and (= app-mode :import)
+                 (or assessing? findings))
+        (if assessing?
+          [:div.assessment-widget
+           [:div.assessment-header "Analyzing database..."]
+           [:div.assessment-loading "Checking for structural issues..."]]
+          (let [{:keys [structural design complexity summary]} findings]
             [:div.assessment-widget
-             [:div.assessment-header "Analyzing database..."]
-             [:div.assessment-loading "Checking for structural issues..."]]
-            (let [{:keys [structural design complexity summary]} findings
-                  fix-count (count checked)
-                  has-fixable? (pos? (:fixable_count summary))]
-              [:div.assessment-widget
-               [:div.assessment-header "Pre-Import Assessment"]
-               (when (:recommendation summary)
-                 [:div.assessment-summary (:recommendation summary)])
-               [assessment-section "Structural" structural checked]
-               [assessment-section "Design" design checked]
-               [assessment-section "Complexity" complexity checked]
-               [:div.assessment-actions
-                (when has-fixable?
-                  [:div.assessment-mode-choice
-                   [:label.assessment-radio
-                    [:input {:type "radio" :name "import-mode"
-                             :checked (= @import-mode :as-is)
-                             :on-change #(reset! import-mode :as-is)}]
-                    " Import as-is"]
-                   [:label.assessment-radio
-                    [:input {:type "radio" :name "import-mode"
-                             :checked (= @import-mode :fix)
-                             :on-change #(reset! import-mode :fix)}]
-                    " Fix if possible"]])
-                [:div.assessment-buttons
-                 [:button.btn-primary.btn-sm
-                  {:on-click #(t/dispatch! :clear-assessment)}
-                  (if (and has-fixable? (= @import-mode :fix))
-                    (str "Import with Fixes (" fix-count ")")
-                    "Import")]]]])))))))
+             [:div.assessment-header "Pre-Import Assessment"]
+             (when (:recommendation summary)
+               [:div.assessment-summary (:recommendation summary)])
+             [:div.assessment-note
+              "Fixes will be applied automatically during import."]
+             [assessment-section "Structural" structural]
+             [assessment-section "Design" design]
+             [assessment-section "Complexity" complexity]
+             [:div.assessment-actions
+              [:div.assessment-buttons
+               [:button.btn-primary.btn-sm
+                {:on-click #(t/dispatch! :clear-assessment)}
+                "Import"]]]]))))))
 
 (defn- chat-messages-list [messages loading? empty-hint messages-end]
   [:div.chat-messages

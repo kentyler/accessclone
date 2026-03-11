@@ -198,6 +198,54 @@ async function executeTool(toolName, input, ctx) {
     } finally {
       client.release();
     }
+
+  // --- Design check tool ---
+  } else if (toolName === 'run_design_check') {
+    const { scope } = input;
+    try {
+      // Call the design check endpoint internally
+      const fetch = globalThis.fetch || require('node-fetch');
+      const designCheckModule = require('../design-check');
+      const fs = require('fs');
+      const designPath = require('path').join(__dirname, '..', '..', '..', 'settings', 'design-patterns.json');
+      const patterns = JSON.parse(fs.readFileSync(designPath, 'utf8'));
+
+      // Load enabled checks
+      const enabledChecks = [];
+      for (const [cat, checks] of Object.entries(patterns.checks || {})) {
+        for (const [id, check] of Object.entries(checks)) {
+          if (check.enabled) enabledChecks.push({ id: `${cat}.${id}`, description: check.description });
+        }
+      }
+
+      // Load schema info
+      const { getSchemaInfo } = require('../lint');
+      const dbResult = await pool.query(
+        'SELECT schema_name FROM shared.databases WHERE database_id = $1', [database_id]
+      );
+      const schemaName = dbResult.rows[0]?.schema_name;
+      if (!schemaName) {
+        toolResult = { error: 'Database not found' };
+      } else {
+        const schemaInfo = await getSchemaInfo(pool, schemaName);
+        const schemaSummary = [];
+        for (const [t, cols] of schemaInfo) {
+          schemaSummary.push(`${t}: ${cols.join(', ')}`);
+        }
+        toolResult = {
+          database: database_id,
+          schema: schemaName,
+          enabled_checks: enabledChecks.length,
+          tables: schemaSummary.length,
+          checks: enabledChecks.map(c => c.id),
+          message: `Design check ready with ${enabledChecks.length} checks across ${schemaSummary.length} tables. Use POST /api/design-check/run to execute the full analysis.`,
+          note: 'The full design check requires LLM analysis. Summarize the enabled checks and schema for the user.'
+        };
+      }
+    } catch (err) {
+      logEvent(pool, 'warning', 'POST /api/chat/tool', 'Chat tool error: run_design_check', { databaseId: req.databaseId, details: { tool: 'run_design_check', error: err.message } });
+      toolResult = { error: err.message };
+    }
   }
 
   return { toolResult, navigationCommand, updateTranslation: null };

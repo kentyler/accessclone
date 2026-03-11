@@ -35,11 +35,11 @@ module.exports = function(router, pool) {
         // Collect all form and report names from the target database
         const [formsResult, reportsResult] = await Promise.all([
           pool.query(
-            `SELECT DISTINCT name FROM shared.forms WHERE database_id = $1 AND is_current = true`,
+            `SELECT DISTINCT name FROM shared.forms WHERE database_id = $1 AND is_current = true AND owner = 'standard'`,
             [targetDatabaseId]
           ),
           pool.query(
-            `SELECT DISTINCT name FROM shared.reports WHERE database_id = $1 AND is_current = true`,
+            `SELECT DISTINCT name FROM shared.reports WHERE database_id = $1 AND is_current = true AND owner = 'standard'`,
             [targetDatabaseId]
           )
         ]);
@@ -103,7 +103,7 @@ module.exports = function(router, pool) {
         try {
           // Load current definition
           const defResult = await pool.query(
-            `SELECT definition FROM ${table} WHERE database_id = $1 AND name = $2 AND is_current = true`,
+            `SELECT definition FROM ${table} WHERE database_id = $1 AND name = $2 AND is_current = true AND owner = 'standard'`,
             [targetDatabaseId, objectName]
           );
           if (defResult.rows.length === 0) continue;
@@ -160,12 +160,12 @@ module.exports = function(router, pool) {
               const newVersion = versionResult.rows[0].max_version + 1;
 
               await client.query(
-                `UPDATE ${table} SET is_current = false WHERE database_id = $1 AND name = $2 AND is_current = true`,
+                `UPDATE ${table} SET is_current = false WHERE database_id = $1 AND name = $2 AND owner = 'standard' AND is_current = true`,
                 [targetDatabaseId, objectName]
               );
 
               await client.query(
-                `INSERT INTO ${table} (database_id, name, definition, record_source, version, is_current) VALUES ($1, $2, $3, $4, $5, true)`,
+                `INSERT INTO ${table} (database_id, name, definition, record_source, version, is_current, owner, modified_by) VALUES ($1, $2, $3, $4, $5, true, 'standard', 'import-images')`,
                 [targetDatabaseId, objectName, definition, recordSource, newVersion]
               );
 
@@ -211,11 +211,11 @@ module.exports = function(router, pool) {
 
       const [formsResult, reportsResult] = await Promise.all([
         pool.query(
-          `SELECT name, definition FROM shared.forms WHERE database_id = $1 AND is_current = true`,
+          `SELECT name, definition FROM shared.forms WHERE database_id = $1 AND is_current = true AND owner = 'standard'`,
           [targetDatabaseId]
         ),
         pool.query(
-          `SELECT name, definition FROM shared.reports WHERE database_id = $1 AND is_current = true`,
+          `SELECT name, definition FROM shared.reports WHERE database_id = $1 AND is_current = true AND owner = 'standard'`,
           [targetDatabaseId]
         )
       ]);

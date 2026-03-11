@@ -98,7 +98,7 @@
           [:span.warning-counts
            (str (:imported_count completeness) " of " (:total_source_count completeness) " objects imported")]]
          [:div.warning-detail
-          "Translation is blocked until all objects are imported. Missing:"
+          "Some objects are not yet imported. Translation can proceed but references to missing objects may produce gaps."
           [:ul.missing-list
            (for [[type-key names] missing]
              ^{:key (name type-key)}

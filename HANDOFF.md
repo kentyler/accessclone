@@ -6,7 +6,59 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 
 ## Current State
 
-### Just Shipped (2026-03-05)
+### Just Shipped (2026-03-10)
+- **Form View color/layout fidelity overhaul**: Fixed multiple rendering issues where Form View didn't match Access's visual output.
+  - **Rectangle z-index**: Decorative controls (rectangles, lines) were rendering on top of interactive controls (buttons, text boxes) because all use `position: absolute` and DOM order determined stacking. Fix: `z-index: 0` on `.view-control.rectangle, .view-control.line` + `pointer-events: none` on `.view-rectangle`. Control type now added as CSS class on `.view-control` div for targeting.
+  - **Section background colors**: `section-view-style` in `form_view.cljs` now applies `:back-color` as CSS `background-color` on section divs.
+  - **Control fore-color/back-color**: `control-style` in `editor_utils.cljs` now maps `:fore-color` → CSS `color` and `:back-color` → CSS `background-color`, gated by `back-style` (Access BackStyle property: 0=Transparent, 1=Normal).
+  - **BackStyle property import**: Added `BackStyle` export to both `export_form.ps1` and `export_forms_batch.ps1`. Frontend converts `backStyle` → `:back-style` in `control-base` (`access_database_viewer.cljs`). Type-based fallback for older imports without `back-style` — labels, option-buttons, check-boxes, toggle-buttons, images, lines default to transparent; all others default to opaque.
+  - **CSS inherit pattern**: Removed hardcoded colors from `.view-label`, `.view-button`, `.view-input`, `.view-option-group`, `.view-select` — all now use `color: inherit; background: inherit` so Access properties flow through from parent `.view-control` inline styles.
+  - **Section flex layout**: Added `flex: 0 0 auto` to `.view-section.header, .view-section.footer` so they respect their Access-derived heights. Detail section uses `flex: 1`.
+  - **Cache busters**: Bumped `index.html` CSS/JS query params to `?v=8`.
+  - Files modified: `style.css`, `form_view.cljs`, `editor_utils.cljs`, `access_database_viewer.cljs`, `index.html`, `export_form.ps1`, `export_forms_batch.ps1`
+
+### Previously Shipped (2026-03-09)
+- **Server-side module translation during import**: New `POST /api/access-import/translate-modules` endpoint does the full extract→map→resolve→generate pipeline for all modules in one server call. Replaces the old fragile frontend orchestration (`batch-extract-intents!` → `auto-resolve-gaps!` → `batch-generate-code!`) which made N sequential LLM HTTP calls per module and silently failed. The new endpoint handles errors per-module so one failure doesn't abort the chain.
+  - New file: `server/routes/access-import/translate-modules.js`
+  - Extracted `autoResolveGapsLLM()` from inline chat handler into `server/routes/chat/context.js` for reuse
+  - `import-all!` now calls the endpoint after the queries phase (`:translating` phase)
+  - `auto-import-all!` simplified — translation handled inside `import-all!`
+  - Import completeness banners (module_viewer, macro_viewer) changed from "blocked" to informational — translation was never actually gated, just the message was misleading
+- **Personalized form/report versions + audit trail**: Users get their own version of forms/reports that diverges from the shared "standard" version.
+  - `owner` column on `shared.forms` / `shared.reports`: `'standard'` = shared version, Windows username = personalized version. `modified_by` column tracks who created each version (audit trail).
+  - `X-User-ID` header carries Windows username from frontend to server. `GET /api/whoami` returns `os.userInfo().username` for initialization.
+  - **Load resolution**: `GET /api/forms/:name` returns personalized version if it exists for the user, otherwise standard. Response includes `_personalized: true/false`.
+  - **Save semantics**: User edits fork into personalized versions. System processes (import, autofix, repair, validation, design-check) always operate on `owner = 'standard'`.
+  - **Promote to Standard**: `POST /api/forms/:name/promote` copies a personalized definition as the new standard version for all users.
+  - **Reset to Standard**: `DELETE /api/forms/:name/personalization` discards the user's personalized version.
+  - UI: "(Personalized)" badge in form/report toolbars, "Promote to Standard" and "Reset to Standard" buttons visible when viewing a personalized version.
+  - Same endpoints exist for reports (`/api/reports/:name/promote`, `/api/reports/:name/personalization`).
+- **Multi-pass import pipeline**: Import now runs 4 passes automatically:
+  - Pass 1: Faithful import (tables → forms → queries → modules → macros) — unchanged
+  - Pass 2: Repair — validates field bindings (case-insensitive fix), checks record-source existence, reconciles control_column_map
+  - Pass 3: Validation — runs structural + cross-object lint, checks subform references, validates combo-box SQL via EXPLAIN
+  - Pass 4: Design review — LLM-based analysis against user-editable design patterns (`settings/design-patterns.json`)
+- **Unified import log**: `shared.import_issues` migrated into `shared.import_log` (new columns: run_id, pass_number, phase, action, severity, category, message, suggestion, resolved). All 13 INSERT sites across 6 files updated.
+- **Import runs**: New `shared.import_runs` table tracks each import with start/end times, status, and summary. Endpoints: `POST /api/access-import/start-run`, `POST /api/access-import/complete-run`, `GET /api/access-import/run/:runId`.
+- **Design check system**: Standalone capability accessible from import (pass 4), App Viewer ("Run Design Check" button), and chat (LLM tool `run_design_check`). Checks configurable via `settings/design-patterns.json` (12 checks across architecture, UX, LLM-legibility). Endpoints: `GET/PUT /api/design-check/patterns`, `POST /api/design-check/run`.
+- **Enhanced import log panel**: Groups entries by pass number with color-coded severity (info=grey, warning=amber, error=red). Shows design recommendations with accept/dismiss affordance.
+- New files: `repair-pass.js`, `validation-pass.js`, `run.js` (in access-import/), `design-check.js` (in routes/), `design-patterns.json` (in settings/)
+
+### Previously Shipped (2026-03-08)
+- **SaveAsText-based image extraction**: Rewrote `scripts/access/export_images.ps1` to use `Application.SaveAsText` instead of COM `PictureData` property reading (which never worked). Stack-based parser extracts `PictureData` hex blocks from SaveAsText text output. Also handles non-PictureData property blocks (`ObjectPalette`, `NameMap`, etc.) so their `End` doesn't mis-pop the structural stack.
+  - **MSysResources attachment fix**: `Data` column is type 101 (attachment field), not a simple blob. Uses child recordset + `SaveToFile` instead of `GetChunk`.
+  - **DIB format support**: Access stores many embedded images as raw BITMAPINFOHEADER (no BMP file header). `Find-ImageStart` now detects DIB signatures and `Convert-HexToImage` prepends a 14-byte BMP file header so browsers can render them.
+  - **Shared image resolution**: Parser tracks `Picture` property on stack entries. When an entry is popped with a `Picture` ref but no `PictureData`, looks up the name in MSysResources shared images.
+  - **Tested on Northwind**: 15 shared PNGs loaded from MSysResources, 2 shared images resolved in forms (frmStartup, frmLogin), 2 embedded DIB images extracted from rptLearn.
+  - **Ready to test full pipeline**: Run `POST /api/access-import/import-images` with `{"databasePath": "C:\\Users\\Ken\\Desktop\\cloneexamples\\northwinddev.accdb", "targetDatabaseId": "northwind4"}` to import images into form/report definitions in PostgreSQL. Then check forms in the app for visible images.
+- **Auto-apply assessment fixes during import**: Assessment findings are now applied automatically — no user decisions needed. The widget is read-only informational; fixes execute during the import pipeline.
+  - New endpoint: `POST /api/access-import/apply-fixes` in `server/routes/access-import/apply-fixes.js`. Accepts `skipEmptyTables`, `relationships`, `installTablefunc`, `reservedWords`. Each fix attempted individually with try/catch, results logged to `shared.import_log`.
+  - `import-all!` in `access_database_viewer.cljs` now extracts fix data from assessment findings, filters empty tables out of the tables phase, and calls apply-fixes after tables are imported.
+  - Assessment widget in `main.cljs` simplified: removed `import-mode` atom, radio buttons, checkboxes. Now shows findings as read-only list with a note that fixes are auto-applied.
+  - Cleaned up `toggle-assessment-check` transform (removed from `ui.cljs` and `core.cljs`).
+  - Reserved words are informational only — `sanitizeName()` + `quoteIdent()` already handle quoting.
+
+### Previously Shipped (2026-03-05)
 - **Projection Phase 0-3**: Pure data projection in `ui/src/app/projection.cljs` — a complete snapshot of form data concerns extracted from the form definition and kept in sync with live data.
   - Phase 0: `build-projection` extracts bindings, computed fields, row-sources, subforms, events, and field triggers from the form definition.
   - Phase 1: `hydrate-bindings`/`sync-records`/`sync-position` populate bindings with live record data. Wired in `state_form.cljs`.
@@ -26,9 +78,8 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
   - Server: `server/routes/access-import/assess.js` — assessment endpoint with PG reserved word list, naming pattern detection, relationship heuristics.
   - PowerShell: `scripts/access/list_relationships.ps1` — extracts Access relationships via DAO, wired into `GET /api/access-import/database`.
   - Frontend: 3 transforms (`set-assessment`, `toggle-assessment-check`, `clear-assessment`), `run-assessment-flow` in `flows/ui.cljs`. Assessment triggers on target DB selection and after source DB scan loads; guards against re-running.
-  - Widget: collapsible sections (structural/design/complexity), radio buttons ("Import as-is" / "Fix if possible"), single Import button. Button label changes based on mode.
+  - Widget: collapsible sections (structural/design/complexity), read-only informational display. Fixes auto-applied during import (see 2026-03-08).
   - LLM-enhanced: after deterministic assessment, findings + scan summary auto-sent to LLM for domain-aware analysis. Assessment context threaded into chat system prompt via `assessment_context` in `state.cljs` and `chat/index.js`.
-  - "Fix if possible" captures user intent via checkboxes but fixes don't execute yet (follow-up feature).
 - **AI agent import skill**: `skills/ai-import.md` documents two paths — full-pipeline (Claude Code, local machine) and post-extraction (Codex, cloud sandbox) — with complete API reference, PowerShell scripts table, and gotchas.
 - **Unified corpus schema**: `shared.corpus_entries` expanded with `medium` column (default 'note'), plus `author`, `recipients`, `thread_id`, `session_id`, `subject`, `metadata` (JSONB). Partial indexes for zero cost on existing notes. All new columns nullable with defaults.
 - **Multi-model LLM routing**: Secretary model (Claude Opus) routes entries to the most appropriate responder. LLM registry in `settings/config.json` defines 4 models (Claude Opus, Claude Sonnet, GPT-5.2, Gemini 3.1 Pro). `server/lib/llm-router.js` handles multi-provider dispatch. `server/lib/embeddings.js` for pgvector-backed semantic retrieval.
@@ -92,17 +143,28 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 - **Tested against two databases**: Northwind and a second Access database both import fully (tables, forms, reports, queries, modules, macros) without errors.
 
 ### In Progress / Uncommitted
-Working tree is clean as of 2026-02-24. All assessment, corpus, and routing work has been committed and pushed.
+Working tree has uncommitted changes for multi-pass import pipeline, server-side module translation, and Form View color/layout fidelity. Forms imported before the BackStyle PowerShell change will use type-based fallback for transparency. Re-import forms to get full BackStyle data.
 
-### Next Up
-- **Implement "Fix if possible" import actions** — wire checked assessment findings into the import flow (skip empty tables, auto-create FKs, install tablefunc, rename reserved words)
+### Next Up — Re-import Forms for BackStyle
+After the PowerShell scripts were updated to export `BackStyle`, existing form definitions in the database don't have this property. Re-importing forms will populate it. Until then, the type-based fallback applies (labels transparent, text-boxes opaque, etc.).
+
+### Next Up — Image Import Test
+With the server running, test the full image import pipeline for Northwind:
+
+curl -X POST http://localhost:3000/api/access-import/import-images -H "Content-Type: application/json" -d "{\"databasePath\": \"C:\\\\Users\\\\Ken\\\\Desktop\\\\cloneexamples\\\\northwinddev.accdb\", \"targetDatabaseId\": \"northwind4\"}"
+
+This will run export_images.ps1 against all 28 forms and 15 reports, extract shared + embedded images, and patch the form/report definitions in PostgreSQL with data URIs. Then open forms in the app to verify images are visible.
+
+Check results with: `GET /api/access-import/image-status?targetDatabaseId=northwind4`
+
+### Next Up — Other
 - Connect remaining hub sections to real functionality (Meetings, Messaging, Email are still stubs — Notes is now live)
 - Link structural expression nodes to the seeded primitive potentials (e.g., link actual schema tables to "Schema Isolation" potential)
 - Explore reflexivity: can the system reason about which primitives apply to a new migration target?
 - Place `.accdb` source files in `databases/accessclone/source/` and `databases/threehorse/source/`
 - Start importing into the new databases
 - Clean up stale feature branches (22 listed)
-- Test batch pipeline end-to-end: extract all → resolve gaps → generate all code against a real database
+- Test server-side module translation end-to-end: re-run auto-import and verify modules have intents + CLJS translations afterward
 - Test .mdb → .accdb conversion end-to-end with a real .mdb file
 - Test runtime form state sync end-to-end
 - OpenClaw skill prototype: export intent graph + form definitions in a format an OpenClaw agent can consume
@@ -112,6 +174,8 @@ Working tree is clean as of 2026-02-24. All assessment, corpus, and routing work
 ## Known Landmines
 
 ### API Contract Changes
+- `X-User-ID` header now sent with all API requests (from `db-headers`). Server extracts as `req.userId`. Forms/reports load and save are owner-aware.
+- `PUT /api/forms/:name` and `PUT /api/reports/:name` accept `?standard=true` query param to force saving as the standard version (used by system processes like import/autofix).
 - `PUT /api/form-state` now expects `{sessionId, entries: [{tableName, columnName, value}]}`. The old format `{sessionId, formName, controls: {...}}` no longer works. Both server and frontend are updated.
 - `GET /api/data/:table` no longer reads `X-Form-Name` header or sets `app.active_form`. Only `X-Session-ID` and `X-Database-ID` headers matter now.
 - Graph endpoints renamed: `/api/graph/intents` → `/api/graph/potentials`, `/api/graph/intent` → `/api/graph/potential`, etc.
@@ -119,8 +183,10 @@ Working tree is clean as of 2026-02-24. All assessment, corpus, and routing work
 
 ### Schema Migration
 - `server/graph/schema.js` has migration blocks that run on startup:
+  - Adds `owner TEXT DEFAULT 'standard'` and `modified_by TEXT` to `shared.forms` and `shared.reports`. Backfills NULL owners to `'standard'`. Creates unique indexes on `(database_id, name, owner) WHERE is_current = true`.
   - Renames `intent` → `potential` nodes, deletes `application` nodes, updates `valid_scope` constraint
   - Renames `form_name` → `table_name` and `control_name` → `column_name` in `form_control_state` (older migration)
+  - Migrates `shared.import_issues` → `shared.import_log` (copies rows, drops old table). Idempotent.
 
 ### Name Sanitization
 - `sanitizeName()` in `query-converter.js` lowercases and replaces spaces with underscores, strips non-alphanumeric chars. All table names, column names, form names, and control names go through this. If you're comparing names across systems, always sanitize both sides.
@@ -155,7 +221,7 @@ Working tree is clean as of 2026-02-24. All assessment, corpus, and routing work
 
 ### Frontend (ClojureScript)
 - **Error reporting**: `log-error!` for user-visible errors (shows banner + logs to server). `log-event!` for background errors (server log only, no banner).
-- **API calls**: Always use `db-headers` for the headers map. It includes `X-Session-ID` and `X-Database-ID`.
+- **API calls**: Always use `db-headers` for the headers map. It includes `X-Session-ID`, `X-Database-ID`, and `X-User-ID`.
 - **Naming**: ClojureScript uses kebab-case (`record-source`). JSON keys preserve Access-style kebab-case (`record-source`, `control-source`). PostgreSQL uses snake_case.
 
 ### Git

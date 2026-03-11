@@ -103,14 +103,14 @@ function createRouter(pool, secrets) {
       // Load all current forms
       const formsResult = await pool.query(
         `SELECT name, definition FROM shared.forms
-         WHERE database_id = $1 AND is_current = true`,
+         WHERE database_id = $1 AND is_current = true AND owner = 'standard'`,
         [databaseId]
       );
 
       // Load all current reports
       const reportsResult = await pool.query(
         `SELECT name, definition FROM shared.reports
-         WHERE database_id = $1 AND is_current = true`,
+         WHERE database_id = $1 AND is_current = true AND owner = 'standard'`,
         [databaseId]
       );
 

@@ -44,6 +44,12 @@ function translateExpression(expression, schemaName, columnTypes, formName, cont
   expr = translateFormSelfRefs(expr, formName, controlMapping);
   expr = translateFormRefs(expr, controlMapping);
 
+  // Phase 0.5: Collapse subform references [subformCtrl].[Form].[controlName] → single param [subformCtrl_controlName]
+  expr = expr.replace(/\[([^\]]+)\]\.(?:\[Form\]|Form)\.(?:\[([^\]]+)\]|(\w+))/gi, (_, subform, bracketCtrl, bareCtrl) => {
+    const ctrl = bracketCtrl || bareCtrl;
+    return `[${subform}_${ctrl}]`;
+  });
+
   const paramRefs = new Set();
 
   // Phase 1: Find and translate domain function calls
@@ -98,6 +104,25 @@ function translateExpression(expression, schemaName, columnTypes, formName, cont
     const colName = sanitizeName(fieldName);
     let pgType = colTypes.get(colName) || colTypes.get(fieldName) || 'text';
     params.push({ name: fieldName, pgName, pgType });
+  }
+
+  // Phase 5.5: Upgrade text-typed params to numeric when used in arithmetic context
+  for (const param of params) {
+    if (param.pgType === 'text') {
+      // If this param appears next to *, /, +, - operators, it's likely numeric
+      const arithRe = new RegExp(`(?:[*\\/+\\-]\\s*${param.pgName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b|\\b${param.pgName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*[*\\/+\\-])`);
+      if (arithRe.test(sql)) {
+        param.pgType = 'numeric';
+      }
+    }
+  }
+
+  // Phase 5.6: Fix COALESCE defaults for numeric params (Nz without 2nd arg defaults to '')
+  for (const param of params) {
+    if (/^(numeric|integer|bigint|smallint|real|double precision|decimal|money)$/.test(param.pgType)) {
+      // Replace COALESCE(p_xxx, '') with COALESCE(p_xxx, 0) for numeric params
+      sql = sql.replace(new RegExp(`COALESCE\\(${param.pgName},\\s*''\\)`, 'g'), `COALESCE(${param.pgName}, 0)`);
+    }
   }
 
   // Phase 6: Determine return type heuristic
@@ -156,8 +181,14 @@ async function processDefinitionExpressions(pool, definition, objectName, schema
   const recordSource = definition['record-source'] || definition['record_source'];
   let columnTypes = new Map();
   if (recordSource) {
+    // Extract base table/view name — may be a simple name or SQL like "SELECT ... FROM (tableName) sub"
+    let baseTable = sanitizeName(recordSource);
+    if (/^\s*SELECT\b/i.test(recordSource)) {
+      const fromMatch = recordSource.match(/\bFROM\s+\(?(\w+)\)?/i);
+      if (fromMatch) baseTable = sanitizeName(fromMatch[1]);
+    }
     try {
-      columnTypes = await getColumnTypes(pool, schemaName, sanitizeName(recordSource));
+      columnTypes = await getColumnTypes(pool, schemaName, baseTable);
     } catch (e) {
       warnings.push(`Could not load column types for ${recordSource}: ${e.message}`);
     }

@@ -485,6 +485,7 @@ Rules:
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
+    signal: AbortSignal.timeout(120000), // 2 minute timeout per LLM call
     headers: {
       'Content-Type': 'application/json',
       'x-api-key': apiKey,

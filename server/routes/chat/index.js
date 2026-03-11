@@ -6,8 +6,8 @@ const express = require('express');
 const router = express.Router();
 const path = require('path');
 const { logError } = require('../../lib/events');
-const { dataTools, graphTools, moduleTools, queryTools } = require('./tools');
-const { summarizeDefinition, checkImportCompleteness, formatMissingList, buildAppInventory, buildGraphContext, formatGraphContext, checkIntentDependencies, autoResolveGaps } = require('./context');
+const { dataTools, graphTools, moduleTools, queryTools, designCheckTools } = require('./tools');
+const { summarizeDefinition, checkImportCompleteness, formatMissingList, buildAppInventory, buildGraphContext, formatGraphContext, checkIntentDependencies, autoResolveGaps, autoResolveGapsLLM } = require('./context');
 const { executeTool } = require('./tool-handlers');
 const { deriveCapabilities } = require('../../lib/capability-deriver');
 const { upsertNode, upsertEdge, findNode } = require('../../graph/query');
@@ -288,7 +288,8 @@ You can see all objects in this application. Help the user understand cross-obje
         ...(form_context?.record_source ? dataTools : []),
         ...(module_context?.module_name ? moduleTools : []),
         ...((query_context?.query_name || sql_function_context?.function_name) ? queryTools : []),
-        ...graphTools
+        ...graphTools,
+        ...designCheckTools
       ];
 
       // Call Anthropic API with tools
@@ -304,6 +305,8 @@ You can see all objects in this application. Help the user understand cross-obje
           max_tokens: (module_context?.module_name || macro_context?.macro_name || sql_function_context?.function_name || query_context?.query_name || assessment_context?.findings) ? 4096 : 1024,
           tools: availableTools,
           system: `You are a helpful assistant for a database application called AccessClone. You help users understand their data, create forms, write queries, and work with their databases. ${dbContext}${tableContext}${queryContext}${formContext}${reportContext}${moduleContext}${macroContext}${sqlFunctionContext}${appContextStr}${issueContextStr}${assessmentContextStr}${graphContext}${completenessWarning}
+
+When you encounter naming confusion, structural problems, or UX issues, you can use the run_design_check tool to analyze the database against configurable design patterns.
 
 Keep responses concise and helpful. When discussing code or SQL, use markdown code blocks.`,
           messages: [
@@ -962,98 +965,10 @@ Return ONLY the ClojureScript code, no markdown code fences, no explanations. In
     }
 
     try {
-      // Build database context for the LLM
-      let inventoryText = '';
       const databaseId = database_id || req.headers['x-database-id'];
-      if (databaseId) {
-        const graphCtx = await buildGraphContext(pool, databaseId);
-        if (graphCtx) {
-          inventoryText = formatGraphContext(graphCtx);
-        }
-      }
+      const graphCtx = databaseId ? await buildGraphContext(pool, databaseId) : null;
 
-      // Chunk into batches of 80 to stay within output token limits
-      const BATCH_SIZE = 80;
-      const allSelections = [];
-
-      for (let batchStart = 0; batchStart < gap_questions.length; batchStart += BATCH_SIZE) {
-        const batch = gap_questions.slice(batchStart, batchStart + BATCH_SIZE);
-
-        // Format each gap for the user message
-        const gapLines = batch.map((gq, i) => {
-          const globalIdx = batchStart + i;
-          const opts = (gq.suggestions || []).map((s, j) => `  ${j + 1}. ${s}`).join('\n');
-          return `[Gap ${globalIdx}] Module: ${gq.module || '?'}, Procedure: ${gq.procedure || '?'}
-VBA: ${gq.vba_line || '(unknown)'}
-Question: ${gq.question}
-Options:
-${opts}`;
-        }).join('\n\n');
-
-        const response = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': apiKey,
-            'anthropic-version': '2023-06-01'
-          },
-          body: JSON.stringify({
-            model: 'claude-sonnet-4-20250514',
-            max_tokens: 4096,
-            system: `You are an expert at converting Microsoft Access applications to modern web applications.
-
-You are given a list of "gap questions" — decisions that need to be made during the conversion from VBA to a web app. For each gap, you must pick the best option from the numbered suggestions.
-
-${inventoryText ? `Database inventory:\n${inventoryText}\n\n` : ''}Consider the database context and pick the option that best preserves the original Access application's behavior in a web environment. Prefer options that use existing framework functions, API endpoints, or table data over options that skip functionality.
-
-Respond with ONLY a JSON array of objects, each with "index" (the gap number) and "selected" (the exact text of the chosen option). Example:
-[{"index": 0, "selected": "Use API call to fetch data"}, {"index": 1, "selected": "Skip this functionality"}]
-
-No explanation, no markdown fences — just the JSON array.`,
-            messages: [{
-              role: 'user',
-              content: `Pick the best option for each gap question:\n\n${gapLines}`
-            }]
-          })
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          console.error('Anthropic API error in auto-resolve:', errorData);
-          return res.status(500).json({ error: errorData.error?.message || 'Auto-resolve API request failed' });
-        }
-
-        const data = await response.json();
-        const text = data.content?.find(c => c.type === 'text')?.text || '[]';
-
-        // Parse JSON — strip markdown fences if present
-        const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
-        try {
-          const parsed = JSON.parse(cleaned);
-          if (Array.isArray(parsed)) {
-            // Validate each selection matches an actual suggestion
-            for (const sel of parsed) {
-              const gq = gap_questions[sel.index];
-              if (gq && gq.suggestions?.includes(sel.selected)) {
-                allSelections.push(sel);
-              } else if (gq) {
-                // LLM returned text that doesn't exactly match — find closest suggestion
-                const match = gq.suggestions?.find(s =>
-                  s.toLowerCase().trim() === (sel.selected || '').toLowerCase().trim()
-                );
-                if (match) {
-                  allSelections.push({ index: sel.index, selected: match });
-                }
-                // else skip this gap — no valid match
-              }
-            }
-          }
-        } catch (parseErr) {
-          console.error('Failed to parse auto-resolve response:', parseErr.message, text.substring(0, 200));
-          // Continue with partial results rather than failing entirely
-        }
-      }
-
+      const allSelections = await autoResolveGapsLLM(gap_questions, graphCtx, apiKey);
       res.json({ selections: allSelections });
     } catch (err) {
       console.error('Error in auto-resolve-gaps:', err);

@@ -1,0 +1,58 @@
+{
+  "checks": {
+    "architecture": {
+      "normalize-type-columns": {
+        "enabled": true,
+        "description": "Replace free-text 'type' or 'status' columns with lookup tables and foreign keys"
+      },
+      "consolidate-workaround-queries": {
+        "enabled": true,
+        "description": "Merge redundant queries that exist only to work around Access SQL limitations"
+      },
+      "remove-denormalized-fields": {
+        "enabled": true,
+        "description": "Flag columns that duplicate data already reachable via a join"
+      },
+      "add-missing-foreign-keys": {
+        "enabled": true,
+        "description": "Suggest foreign keys for columns that look like references but have no constraint"
+      },
+      "simplify-access-workarounds": {
+        "enabled": true,
+        "description": "Identify patterns that exist only because of Access limitations (e.g. DLookup in queries, self-join workarounds)"
+      }
+    },
+    "ux": {
+      "split-dense-forms": {
+        "enabled": true,
+        "description": "Flag forms with more than 30 controls and suggest splitting into tabs or subforms"
+      },
+      "search-over-dropdown": {
+        "enabled": true,
+        "description": "Suggest replacing combo boxes with 50+ items with searchable controls"
+      },
+      "modernize-navigation": {
+        "enabled": true,
+        "description": "Suggest replacing switchboard-style navigation with direct sidebar links"
+      },
+      "interactive-reports": {
+        "enabled": false,
+        "description": "Suggest adding sort/filter/drill-down to static print-style reports"
+      }
+    },
+    "llm-legibility": {
+      "descriptive-names": {
+        "enabled": true,
+        "description": "Flag cryptic table/column/form names (e.g. 'tbl1', 'qryX', 'fld3') and suggest descriptive alternatives"
+      },
+      "add-column-descriptions": {
+        "enabled": true,
+        "description": "Suggest adding PostgreSQL COMMENT descriptions to columns that lack them"
+      },
+      "document-relationships": {
+        "enabled": true,
+        "description": "Suggest documenting implicit relationships that aren't captured by foreign keys"
+      }
+    }
+  }
+}

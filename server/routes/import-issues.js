@@ -1,17 +1,19 @@
 /**
- * Import Issues routes
- * CRUD for persistent import issue tracking
+ * Import Issues routes — queries import_log for issue-severity entries.
+ * Backwards-compatible API: same endpoints, reads from unified import_log.
  */
 
 const express = require('express');
 const router = express.Router();
 const { logError } = require('../lib/events');
 
+const ISSUE_FILTER = `severity IN ('warning', 'error') AND status = 'issue'`;
+
 module.exports = function(pool) {
 
   /**
    * GET /api/import-issues/summary
-   * Issue counts for a database (must be before /:id)
+   * Issue counts for a database
    */
   router.get('/summary', async (req, res) => {
     try {
@@ -22,19 +24,19 @@ module.exports = function(pool) {
 
       const [totalRes, unresolvedRes, byTypeRes, bySevRes] = await Promise.all([
         pool.query(
-          'SELECT COUNT(*) AS total FROM shared.import_issues WHERE database_id = $1',
+          `SELECT COUNT(*) AS total FROM shared.import_log WHERE target_database_id = $1 AND ${ISSUE_FILTER}`,
           [database_id]
         ),
         pool.query(
-          'SELECT COUNT(*) AS unresolved FROM shared.import_issues WHERE database_id = $1 AND NOT resolved',
+          `SELECT COUNT(*) AS unresolved FROM shared.import_log WHERE target_database_id = $1 AND ${ISSUE_FILTER} AND NOT COALESCE(resolved, false)`,
           [database_id]
         ),
         pool.query(
-          'SELECT object_type, COUNT(*) AS count FROM shared.import_issues WHERE database_id = $1 AND NOT resolved GROUP BY object_type',
+          `SELECT source_object_type AS object_type, COUNT(*) AS count FROM shared.import_log WHERE target_database_id = $1 AND ${ISSUE_FILTER} AND NOT COALESCE(resolved, false) GROUP BY source_object_type`,
           [database_id]
         ),
         pool.query(
-          'SELECT severity, COUNT(*) AS count FROM shared.import_issues WHERE database_id = $1 AND NOT resolved GROUP BY severity',
+          `SELECT severity, COUNT(*) AS count FROM shared.import_log WHERE target_database_id = $1 AND ${ISSUE_FILTER} AND NOT COALESCE(resolved, false) GROUP BY severity`,
           [database_id]
         )
       ]);
@@ -63,33 +65,30 @@ module.exports = function(pool) {
    */
   router.get('/', async (req, res) => {
     try {
-      const { database_id, object_type, resolved, import_log_id } = req.query;
+      const { database_id, object_type, resolved } = req.query;
       if (!database_id) {
         return res.status(400).json({ error: 'database_id is required' });
       }
 
-      const conditions = ['database_id = $1'];
+      const conditions = [`target_database_id = $1`, ISSUE_FILTER];
       const params = [database_id];
       let idx = 2;
 
       if (object_type) {
-        conditions.push(`object_type = $${idx++}`);
+        conditions.push(`source_object_type = $${idx++}`);
         params.push(object_type);
       }
       if (resolved !== undefined) {
-        conditions.push(`resolved = $${idx++}`);
+        conditions.push(`COALESCE(resolved, false) = $${idx++}`);
         params.push(resolved === 'true');
-      }
-      if (import_log_id) {
-        conditions.push(`import_log_id = $${idx++}`);
-        params.push(parseInt(import_log_id));
       }
 
       const result = await pool.query(`
-        SELECT id, import_log_id, database_id, object_name, object_type,
-               severity, category, location, message, suggestion,
-               resolved, resolved_at, created_at
-        FROM shared.import_issues
+        SELECT id, target_database_id AS database_id,
+               source_object_name AS object_name, source_object_type AS object_type,
+               severity, category, message, suggestion,
+               COALESCE(resolved, false) AS resolved, resolved_at, created_at
+        FROM shared.import_log
         WHERE ${conditions.join(' AND ')}
         ORDER BY created_at DESC
       `, params);
@@ -104,7 +103,7 @@ module.exports = function(pool) {
 
   /**
    * PATCH /api/import-issues/:id
-   * Toggle resolved status
+   * Toggle resolved status on an import_log entry
    */
   router.patch('/:id', async (req, res) => {
     try {
@@ -114,10 +113,13 @@ module.exports = function(pool) {
       }
 
       const result = await pool.query(`
-        UPDATE shared.import_issues
+        UPDATE shared.import_log
         SET resolved = $1, resolved_at = CASE WHEN $1 THEN NOW() ELSE NULL END
         WHERE id = $2
-        RETURNING *
+        RETURNING id, target_database_id AS database_id,
+                  source_object_name AS object_name, source_object_type AS object_type,
+                  severity, category, message, suggestion,
+                  resolved, resolved_at, created_at
       `, [resolved, parseInt(req.params.id)]);
 
       if (result.rows.length === 0) {

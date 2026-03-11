@@ -52,7 +52,8 @@
   "Toolbar with report actions"
   []
   (let [dirty? (get-in @state/app-state [:report-editor :dirty?])
-        view-mode (state-report/get-report-view-mode)]
+        view-mode (state-report/get-report-view-mode)
+        personalized? (get-in @state/app-state [:report-editor :personalized?])]
     [:div.form-toolbar
      [:div.toolbar-left
       [:button.toolbar-btn
@@ -75,7 +76,10 @@
           {:title "Remove Group Level"
            :disabled (empty? (get-in @state/app-state [:report-editor :current :grouping]))
            :on-click #(t/dispatch! :remove-group-level)}
-          "- Group"]])]
+          "- Group"]])
+      (when personalized?
+        [:span.personalized-badge {:title "You are viewing your personalized version of this report"}
+         "(Personalized)"])]
      [:div.toolbar-right
       [:button.secondary-btn
        {:title "Re-import this report from the Access database"
@@ -95,6 +99,16 @@
                               (state/log-error! (str "Re-import failed: " (:error result "Unknown error"))
                                                 "reimport-report" {:report report-name})))))))}
        "Re-Import"]
+      (when personalized?
+        [:<>
+         [:button.secondary-btn
+          {:title "Copy this version as the new standard for all users"
+           :on-click #(state-report/promote-report-to-standard!)}
+          "Promote to Standard"]
+         [:button.secondary-btn
+          {:title "Reset to the standard shared version"
+           :on-click #(state-report/reset-report-personalization!)}
+          "Reset to Standard"]])
       [:button.secondary-btn
        {:disabled (not dirty?)
         :on-click #(let [original (get-in @state/app-state [:report-editor :original])]

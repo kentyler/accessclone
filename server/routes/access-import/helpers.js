@@ -8,22 +8,50 @@ const fs = require('fs').promises;
 
 /**
  * Create an import logger closure for a specific import operation.
+ * @param {object} opts - Optional: { runId, passNumber }
  */
-function makeLogImport(pool, sourcePath, objectName, objectType, targetDatabaseId) {
+function makeLogImport(pool, sourcePath, objectName, objectType, targetDatabaseId, opts = {}) {
+  const { runId = null, passNumber = 1 } = opts;
   return async function logImport(status, errorMessage = null, details = null) {
     try {
       const result = await pool.query(`
         INSERT INTO shared.import_log
-          (source_path, source_object_name, source_object_type, target_database_id, status, error_message, details)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+          (source_path, source_object_name, source_object_type, target_database_id,
+           status, error_message, details, run_id, pass_number)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING id
-      `, [sourcePath, objectName, objectType, targetDatabaseId || '_none', status, errorMessage, details ? JSON.stringify(details) : null]);
+      `, [sourcePath, objectName, objectType, targetDatabaseId || '_none',
+          status, errorMessage, details ? JSON.stringify(details) : null,
+          runId, passNumber]);
       return result.rows[0]?.id || null;
     } catch (logErr) {
       console.error('Error writing to import_log:', logErr);
       return null;
     }
   };
+}
+
+/**
+ * Create a new import run.
+ */
+async function createImportRun(pool, databaseId, sourcePaths) {
+  const result = await pool.query(`
+    INSERT INTO shared.import_runs (database_id, source_paths)
+    VALUES ($1, $2)
+    RETURNING id
+  `, [databaseId, sourcePaths || []]);
+  return result.rows[0].id;
+}
+
+/**
+ * Complete an import run.
+ */
+async function completeImportRun(pool, runId, summary) {
+  await pool.query(`
+    UPDATE shared.import_runs
+    SET completed_at = NOW(), status = 'completed', summary = $2
+    WHERE id = $1
+  `, [runId, JSON.stringify(summary)]);
 }
 
 // Default scan locations — use the current user's Desktop and Documents
@@ -158,5 +186,6 @@ function parsePowerShellJson(output) {
 }
 
 module.exports = {
-  makeLogImport, DEFAULT_SCAN_LOCATIONS, runPowerShell, scanDirectory, parsePowerShellJson, withComLock
+  makeLogImport, DEFAULT_SCAN_LOCATIONS, runPowerShell, scanDirectory, parsePowerShellJson, withComLock,
+  createImportRun, completeImportRun
 };

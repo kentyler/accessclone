@@ -38,8 +38,8 @@ module.exports = function(pool) {
         pool.query(`SELECT count(*) FROM information_schema.tables WHERE table_schema = $1 AND table_type = 'BASE TABLE'`, [schemaName]),
         pool.query(`SELECT count(*) FROM information_schema.views WHERE table_schema = $1`, [schemaName]),
         pool.query(`SELECT count(*) FROM information_schema.routines WHERE routine_schema = $1`, [schemaName]),
-        pool.query(`SELECT count(DISTINCT name) FROM shared.forms WHERE database_id = $1 AND is_current = true`, [databaseId]),
-        pool.query(`SELECT count(DISTINCT name) FROM shared.reports WHERE database_id = $1 AND is_current = true`, [databaseId]),
+        pool.query(`SELECT count(DISTINCT name) FROM shared.forms WHERE database_id = $1 AND is_current = true AND owner = 'standard'`, [databaseId]),
+        pool.query(`SELECT count(DISTINCT name) FROM shared.reports WHERE database_id = $1 AND is_current = true AND owner = 'standard'`, [databaseId]),
         pool.query(`SELECT count(DISTINCT name) FROM shared.modules WHERE database_id = $1 AND is_current = true`, [databaseId]),
         pool.query(`SELECT count(DISTINCT name) FROM shared.macros WHERE database_id = $1 AND is_current = true`, [databaseId])
       ]);

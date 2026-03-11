@@ -5,6 +5,7 @@
  */
 
 const { normalizeType, isReportBand } = require('./structural');
+const { translateFormRefs, translateTempVars } = require('../../lib/query-converter');
 
 /**
  * Fetch schema info: Map<tableName, columnName[]> (all lowercased)
@@ -121,9 +122,16 @@ async function validateComboBoxSql(form, pool, schemaName) {
       const rowSource = ctrl['row-source'] || ctrl.row_source;
 
       // Only validate SQL row-sources (strings that look like queries)
-      if (type === 'combo-box' && typeof rowSource === 'string' && /^\s*SELECT/i.test(rowSource)) {
+      if ((type === 'combo-box' || type === 'list-box') && typeof rowSource === 'string' && /^\s*SELECT/i.test(rowSource)) {
         try {
-          await pool.query(`EXPLAIN ${rowSource}`);
+          // Translate Access-style references before EXPLAIN
+          let sql = translateTempVars(rowSource);
+          sql = translateFormRefs(sql);
+          // Strip Access bracket syntax [Table].[Column] → Table.Column
+          sql = sql.replace(/\[([^\]]+)\]/g, '$1');
+          // Schema-prefix bare table names handled by search_path
+          await pool.query(`SET search_path TO "${schemaName}", shared, public`);
+          await pool.query(`EXPLAIN ${sql.replace(/;$/, '')}`);
         } catch (err) {
           issues.push({
             severity: 'error',

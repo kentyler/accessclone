@@ -49,7 +49,8 @@ function resolveType(field) {
  * DAO codes: 1=Boolean, 2=Byte, 3=Integer, 4=Long, 5=Currency, 6=Single, 7=Double,
  * 8=Date/Time, 10=Text, 12=Memo, 15=GUID, 16=BigInt, 18=Calculated, 20=Decimal,
  * 26=DateTimeExtended.
- * Skipped by export_table.ps1: 11=OLE, 17=Binary, 19/101=Attachment, 102-109=MultiValue.
+ * Skipped by export_table.ps1: 11=OLE, 17=Binary, 19=Attachment(legacy), 102-109=MultiValue.
+ * Handled specially: 101=Attachment → text (file path populated by import-attachments).
  * @param {Object} field - { type (DAO code), size, isAutoNumber, resultType, precision, scale }
  * @returns {Object} descriptor for resolveType
  */
@@ -78,6 +79,7 @@ function mapAccessType(field) {
     case 20: return { type: 'Number', fieldSize: 'Decimal',
                       precision: field.precision || 18, scale: field.scale || 0 };
     case 26: return { type: 'Date/Time Extended' };
+    case 101: return { type: 'Long Text' }; // Attachment → text (file path)
     default: return { type: 'Short Text', maxLength: 255 };
   }
 }

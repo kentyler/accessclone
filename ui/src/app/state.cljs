@@ -119,11 +119,16 @@
 ;; Stable session ID for form state sync (generated once on app init)
 (defonce session-id (str (random-uuid)))
 
+;; Current user identity (populated from /api/whoami on init)
+(defonce user-id (atom nil))
+
 ;; Helper to get current database headers for API calls
 (defn db-headers []
   (cond-> {"X-Session-ID" session-id}
     (some? (:database_id (:current-database @app-state)))
-    (assoc "X-Database-ID" (:database_id (:current-database @app-state)))))
+    (assoc "X-Database-ID" (:database_id (:current-database @app-state)))
+    (some? @user-id)
+    (assoc "X-User-ID" @user-id)))
 
 ;; ============================================================
 ;; SHARED HELPERS (used by form/report modules)
@@ -1454,6 +1459,11 @@
 ;; Initialize - load objects from files and database
 (defn init! []
   (go
+    ;; Fetch current user identity
+    (let [resp (<! (http/get (str api-base "/api/whoami")))]
+      (when (:success resp)
+        (reset! user-id (get-in resp [:body :username]))))
+
     ;; First, load saved UI state
     (let [saved-ui-state (<! (load-ui-state!))]
       (when saved-ui-state

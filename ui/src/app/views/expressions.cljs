@@ -237,8 +237,36 @@
         [{:type :binary-op :op op :left left :right right} next-p])
       [left new-pos])))
 
+(defn- parse-not [tokens pos]
+  (let [tok (peek-token tokens pos)]
+    (if (and tok (= (:type tok) :identifier)
+             (= "not" (str/lower-case (:value tok))))
+      (let [[expr new-pos] (parse-not tokens (inc pos))]
+        [{:type :not-op :operand expr} new-pos])
+      (parse-comparison tokens pos))))
+
+(defn- parse-and [tokens pos]
+  (let [[left new-pos] (parse-not tokens pos)]
+    (loop [left left, p new-pos]
+      (let [tok (peek-token tokens p)]
+        (if (and tok (= (:type tok) :identifier)
+                 (= "and" (str/lower-case (:value tok))))
+          (let [[right next-p] (parse-not tokens (inc p))]
+            (recur {:type :and-op :left left :right right} next-p))
+          [left p])))))
+
+(defn- parse-or [tokens pos]
+  (let [[left new-pos] (parse-and tokens pos)]
+    (loop [left left, p new-pos]
+      (let [tok (peek-token tokens p)]
+        (if (and tok (= (:type tok) :identifier)
+                 (= "or" (str/lower-case (:value tok))))
+          (let [[right next-p] (parse-and tokens (inc p))]
+            (recur {:type :or-op :left left :right right} next-p))
+          [left p])))))
+
 (defn parse-expression [tokens pos]
-  (parse-comparison tokens pos))
+  (parse-or tokens pos))
 
 (defn parse [tokens]
   (when (seq tokens)
@@ -256,7 +284,7 @@
 (defn- to-string [v]
   (if (nil? v) "" (str v)))
 
-(defn- truthy? [v]
+(defn truthy? [v]
   (cond (nil? v) false, (boolean? v) v, (number? v) (not (zero? v))
         (string? v) (not (str/blank? v)), :else true))
 
@@ -357,11 +385,15 @@
                (to-string (evaluate (second args) ctx))
                (to-string (evaluate (nth args 2) ctx))))
 
+(defn- fn-isnull [args ctx]
+  (if (nil? (evaluate (first args) ctx)) -1 0))
+
 (def ^:private builtin-fns
   {"iif" fn-iif, "nz" fn-nz, "now" fn-now, "date" fn-date, "format" fn-format
    "left" fn-left, "right" fn-right, "mid" fn-mid, "len" fn-len, "trim" fn-trim
    "ucase" fn-ucase, "lcase" fn-lcase, "int" fn-int, "round" fn-round
-   "val" fn-val, "instr" fn-instr, "replace" fn-replace, "abs" fn-abs})
+   "val" fn-val, "instr" fn-instr, "replace" fn-replace, "abs" fn-abs
+   "isnull" fn-isnull})
 
 ;; --- Aggregates ---
 
@@ -417,6 +449,11 @@
       :binary-op (eval-binary-op ast ctx)
       :concat    (str (to-string (evaluate (:left ast) ctx))
                       (to-string (evaluate (:right ast) ctx)))
+      :not-op    (if (truthy? (evaluate (:operand ast) ctx)) 0 -1)
+      :and-op    (if (and (truthy? (evaluate (:left ast) ctx))
+                          (truthy? (evaluate (:right ast) ctx))) -1 0)
+      :or-op     (if (or (truthy? (evaluate (:left ast) ctx))
+                         (truthy? (evaluate (:right ast) ctx))) -1 0)
       :call      (when-let [handler (get builtin-fns (:fn ast))]
                    (handler (:args ast) ctx))
       :aggregate (evaluate-aggregate (:fn ast) (:arg ast) ctx)

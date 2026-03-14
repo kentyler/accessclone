@@ -413,6 +413,48 @@ module.exports = function(pool) {
   });
 
   /**
+   * POST /api/queries/execute
+   * Execute INSERT, UPDATE, or DELETE SQL (no SELECT/DDL).
+   * Returns { rowCount }.
+   */
+  router.post('/queries/execute', async (req, res) => {
+    try {
+      const { sql } = req.body;
+      if (!sql) {
+        return res.status(400).json({ error: 'SQL is required' });
+      }
+
+      let cleanSql = sql.trim();
+      if (cleanSql.endsWith(';')) {
+        cleanSql = cleanSql.slice(0, -1).trim();
+      }
+      if (cleanSql.includes(';')) {
+        return res.status(400).json({ error: 'Multiple statements are not allowed' });
+      }
+
+      const firstWord = cleanSql.split(/\s+/)[0].toUpperCase();
+      const allowed = new Set(['INSERT', 'UPDATE', 'DELETE']);
+      if (!allowed.has(firstWord)) {
+        return res.status(400).json({ error: 'Only INSERT, UPDATE, and DELETE are allowed' });
+      }
+
+      const schemaName = req.schemaName || 'public';
+      const client = await pool.connect();
+      try {
+        await client.query(`SET search_path TO ${client.escapeIdentifier(schemaName)}, shared, public`);
+        const result = await client.query(cleanSql);
+        res.json({ rowCount: result.rowCount });
+      } finally {
+        client.release();
+      }
+    } catch (err) {
+      console.error('Error executing SQL:', err);
+      logError(pool, 'POST /api/queries/execute', 'Failed to execute SQL', err, { databaseId: req.databaseId });
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  /**
    * GET /api/functions
    * List all stored functions (excluding system functions)
    */

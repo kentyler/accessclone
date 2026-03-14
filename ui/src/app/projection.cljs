@@ -329,6 +329,25 @@
   [projection ctrl-kw prop-kw value]
   (assoc-in projection [:control-state ctrl-kw prop-kw] value))
 
+(defn register-event-handlers
+  "Merge a seq of handler descriptors into the projection's :event-handlers map.
+   Each handler is {:key \"ctrl.event\" :control \"ctrl\" :event \"on-click\" :intents [...]}.
+   Keyed by :key for O(1) lookup."
+  [projection handlers]
+  (update projection :event-handlers
+          (fn [m]
+            (reduce (fn [acc h]
+                      (assoc acc (:key h) h))
+                    m
+                    handlers))))
+
+(defn get-event-handler
+  "Look up an event handler by control name and event key.
+   Returns the handler map or nil."
+  [projection control-name event]
+  (let [key (str (ctrl->kw control-name) "." event)]
+    (get (:event-handlers projection) key)))
+
 (defn build-projection
   "Build a projection map from a normalized form definition.
    The projection captures all data concerns: bindings, computed fields,
@@ -346,6 +365,7 @@
      :field-triggers (extract-field-triggers controls)
      :control-state (extract-control-state controls)
      :reactions {}
+     :event-handlers {}
      :records []
      :position 0
      :total 0

@@ -10,6 +10,7 @@
             [app.views.form-utils :as fu]
             [app.views.expressions :as expr]
             [app.projection :as projection]
+            [app.intent-interpreter :as intent]
             [clojure.string :as str]))
 
 (declare show-record-menu form-view-control)
@@ -27,19 +28,26 @@
 (defn render-label [ctrl _field _value _on-change _opts]
   [:span.view-label (fu/display-text ctrl)])
 
+(defn- html-content? [s]
+  (and (string? s) (re-find #"<[a-zA-Z][^>]*>" s)))
+
 (defn render-textbox [ctrl field value on-change {:keys [auto-focus? is-new? allow-edits? tab-idx]}]
   (let [mask (fu/parse-input-mask (:input-mask ctrl))
         password? (= "password" (some-> (:input-mask ctrl) str/lower-case str/trim))
         placeholder (when mask (fu/mask-placeholder (:pattern mask) (:placeholder-char mask)))
-        max-len (when placeholder (count placeholder))]
-    [:input.view-input
-     (cond-> {:type (if password? "password" "text")
-              :value value :read-only (not allow-edits?)
-              :auto-focus (and is-new? auto-focus?)
-              :on-change #(when (and field allow-edits?) (on-change field (.. % -target -value)))}
-       tab-idx (assoc :tab-index tab-idx)
-       placeholder (assoc :placeholder placeholder)
-       max-len (assoc :max-length max-len))]))
+        max-len (when placeholder (count placeholder))
+        rich? (or (= 1 (:text-format ctrl)) (html-content? (str value)))]
+    (if rich?
+      [:div.view-input.view-rich-text
+       {:dangerouslySetInnerHTML {:__html (str value)}}]
+      [:input.view-input
+       (cond-> {:type (if password? "password" "text")
+                :value value :read-only (not allow-edits?)
+                :auto-focus (and is-new? auto-focus?)
+                :on-change #(when (and field allow-edits?) (on-change field (.. % -target -value)))}
+         tab-idx (assoc :tab-index tab-idx)
+         placeholder (assoc :placeholder placeholder)
+         max-len (assoc :max-length max-len))])))
 
 ;; --- Button action resolution ---
 
@@ -82,8 +90,16 @@
     #(js/alert (str "Button clicked: " button-text))))
 
 (defn- resolve-button-action [ctrl]
-  (let [button-text (fu/strip-access-hotkey (or (:text ctrl) (:caption ctrl) "Button"))]
-    (or (resolve-action-from-prop (:on-click ctrl))
+  (let [ctrl-name (or (:name ctrl) "")
+        button-text (fu/strip-access-hotkey (or (:text ctrl) (:caption ctrl) "Button"))
+        ;; Check for registered intent handler
+        projection (get-in @state/app-state [:form-editor :projection])
+        handler (projection/get-event-handler projection ctrl-name "on-click")]
+    (or (when (seq (:intents handler))
+          #(try (intent/execute-intents (:intents handler))
+                (catch :default e
+                  (js/console.warn "Error in button handler:" (.-message e)))))
+        (resolve-action-from-prop (:on-click ctrl))
         (resolve-action-from-caption (str/lower-case button-text) button-text))))
 
 (defn render-button [ctrl _field _value _on-change {:keys [tab-idx]}]
@@ -868,7 +884,7 @@
         ;; Named controls: cs is always non-nil (extract-control-state seeds all named controls).
         ;; Unnamed controls (decorative labels etc.): cs is nil, use static definition as fallback.
         cs            (when ctrl-kw (get-in @state/app-state [:form-editor :projection :control-state ctrl-kw]))
-        ctrl-visible? (if ctrl-kw (:visible cs) (not= 0 (get ctrl :visible 1)))]
+        ctrl-visible? (if cs (:visible cs) (not= 0 (get ctrl :visible 1)))]
     (when ctrl-visible?
       (let [ctrl-type  (:type ctrl)
             ;; Overlay mutable caption/text from control-state onto ctrl
@@ -892,10 +908,37 @@
             style      (if cf-style (merge base-style cf-style) base-style)
             tab-idx    (if (= 0 (:tab-stop ctrl)) -1 (:tab-index ctrl))
             tip        (:control-tip-text ctrl)
-            ctrl-enabled? (if ctrl-kw (:enabled cs) (not= 0 (get ctrl :enabled 1)))
-            ctrl-locked?  (if ctrl-kw (:locked cs)  (= 1 (:locked ctrl)))
+            ctrl-enabled? (if cs (:enabled cs) (not= 0 (get ctrl :enabled 1)))
+            ctrl-locked?  (if cs (:locked cs)  (= 1 (:locked ctrl)))
             effective-edits? (and allow-edits? ctrl-enabled? (not ctrl-locked?) field-writable?)
-            hotkey     (fu/extract-hotkey (or (:text ctrl) (:caption ctrl)))]
+            hotkey     (fu/extract-hotkey (or (:text ctrl) (:caption ctrl)))
+            ;; Focus events — check field-triggers for this control
+            triggers  (when ctrl-kw
+                        (get-in @state/app-state [:form-editor :projection :field-triggers ctrl-kw]))
+            has-focus-events? (and triggers
+                                   (or (:has-enter-event triggers) (:has-exit-event triggers)
+                                       (:has-gotfocus-event triggers) (:has-lostfocus-event triggers)))
+            fire-focus-event!
+            (fn [event-key]
+              (let [projection (get-in @state/app-state [:form-editor :projection])
+                    handler (projection/get-event-handler projection (str ctrl-name) (name event-key))]
+                (when (seq (:intents handler))
+                  (try (intent/execute-intents (:intents handler))
+                       (catch :default e
+                         (js/console.warn "Error in focus handler:" (.-message e)))))))
+            focus-props
+            (when has-focus-events?
+              (cond-> {}
+                ;; Access semantics: Enter fires before GotFocus
+                (or (:has-enter-event triggers) (:has-gotfocus-event triggers))
+                (assoc :on-focus (fn [_]
+                                   (when (:has-enter-event triggers) (fire-focus-event! :on-enter))
+                                   (when (:has-gotfocus-event triggers) (fire-focus-event! :on-gotfocus))))
+                ;; Access semantics: Exit fires before LostFocus
+                (or (:has-exit-event triggers) (:has-lostfocus-event triggers))
+                (assoc :on-blur (fn [_]
+                                  (when (:has-exit-event triggers) (fire-focus-event! :on-exit))
+                                  (when (:has-lostfocus-event triggers) (fire-focus-event! :on-lostfocus))))))]
         [:div.view-control
          (let [cls (str (name ctrl-type)
                         (when (not ctrl-enabled?) " disabled")
@@ -904,7 +947,8 @@
              tip (assoc :title tip)
              hotkey (assoc :data-hotkey hotkey)
              (= ctrl-type :label) (assoc :data-hotkey-label "true")
-             is-lookup? (assoc :title (str (or tip "") (when tip " ") "(lookup field - read only)"))))
+             is-lookup? (assoc :title (str (or tip "") (when tip " ") "(lookup field - read only)"))
+             focus-props (merge focus-props)))
          [renderer ctrl field value on-change
           {:auto-focus? auto-focus? :is-new? (:__new__ current-record)
            :allow-edits? effective-edits? :all-controls all-controls
@@ -963,10 +1007,14 @@
   "Build style map for a section in view mode, including background color/image."
   [height section-data]
   (let [picture (:picture section-data)
-        has-picture? (and picture (not= picture ""))]
+        has-picture? (and picture (not= picture ""))
+        back-color (when (:back-color section-data)
+                     (fu/apply-shade-tint (:back-color section-data)
+                                          (get section-data :back-shade 100)
+                                          (get section-data :back-tint 100)))]
     (cond-> {:height height}
-      (:back-color section-data)
-      (assoc :background-color (:back-color section-data))
+      back-color
+      (assoc :background-color back-color)
       has-picture?
       (assoc :background-image (str "url(" picture ")")
              :background-size (case (:picture-size-mode section-data)
@@ -976,7 +1024,7 @@
 
 (defn form-view-section
   "Render a section in view mode"
-  [section form-def current-record on-field-change & [{:keys [show-selectors? allow-edits?]}]]
+  [section form-def current-record on-field-change & [{:keys [show-selectors? allow-edits? form-width]}]]
   (let [height (fu/get-section-height form-def section)
         section-data (get form-def section)
         style (section-view-style height section-data)
@@ -985,8 +1033,10 @@
     (when (seq all-controls)
       (if (and show-selectors? (= section :detail))
         [:div.single-form-row
+         {:style (cond-> {:padding-left 20 :box-sizing "border-box"}
+                   form-width (assoc :width (+ form-width 20)))}
          [record-selector true false]
-         [:div.view-section {:class (name section) :style (assoc style :flex 1)}
+         [:div.view-section {:class (name section) :style style}
           [:div.view-controls-container
            (for [[idx ctrl] (map-indexed vector controls)]
              ^{:key idx}
@@ -1001,13 +1051,18 @@
 
 (defn form-view-detail-row
   "Render a single detail row for continuous forms"
-  [idx record form-def selected? on-select on-field-change & [{:keys [show-selectors? allow-edits?]}]]
+  [idx record form-def selected? on-select on-field-change & [{:keys [show-selectors? allow-edits? form-width]}]]
   (let [height (fu/get-section-height form-def :detail)
         all-controls (fu/get-section-controls form-def :detail)
         controls (vec (sort-by-tab-index (remove #(or (:parent-page %) (= :page (:type %))) all-controls)))
-        first-tb (first (keep-indexed (fn [i c] (when (= (:type c) :text-box) i)) controls))]
+        first-tb (first (keep-indexed (fn [i c] (when (= (:type c) :text-box) i)) controls))
+        selector-w (if show-selectors? 20 0)]
     [:div.view-section.detail.continuous-row
-     {:class (when selected? "selected") :style {:height height} :on-click #(on-select idx)}
+     {:class (when selected? "selected")
+      :style (cond-> {:height height :box-sizing "border-box"}
+               show-selectors? (assoc :padding-left selector-w)
+               form-width (assoc :width (+ form-width selector-w)))
+      :on-click #(on-select idx)}
      (when show-selectors? [record-selector selected? (:__new__ record)])
      [:div.view-controls-container
       (for [[ci ctrl] (map-indexed vector controls)]
@@ -1016,12 +1071,16 @@
          {:auto-focus? (and selected? (= ci first-tb))
           :allow-edits? allow-edits? :all-controls all-controls}])]]))
 
-(defn tentative-new-row [form-def show-selectors?]
-  [:div.view-section.detail.continuous-row.tentative-row
-   {:style {:height (fu/get-section-height form-def :detail)}
-    :on-click #(t/dispatch! :new-record)}
-   (when show-selectors? [record-selector false true])
-   [:div.view-controls-container]])
+(defn tentative-new-row [form-def show-selectors? form-width]
+  (let [height (fu/get-section-height form-def :detail)
+        selector-w (if show-selectors? 20 0)]
+    [:div.view-section.detail.continuous-row.tentative-row
+     {:style (cond-> {:height height :box-sizing "border-box"}
+               show-selectors? (assoc :padding-left selector-w)
+               form-width (assoc :width (+ form-width selector-w)))
+      :on-click #(t/dispatch! :new-record)}
+     (when show-selectors? [record-selector false true])
+     [:div.view-controls-container]]))
 
 ;; ============================================================
 ;; FORM VIEW — MAIN COMPONENT (broken into sub-components)
@@ -1086,27 +1145,40 @@
            :on-click (dismiss-and #(f/run-fire-and-forget! form-flow/set-view-mode-flow {:mode :design}))} "Design View"]]))))
 
 (defn- continuous-form-body
-  "Render the continuous form body with header, scrolling detail rows, and footer."
+  "Render the continuous form body with header, scrolling detail rows, and footer.
+   Uses pure absolute positioning: header at top, records fill middle, footer at bottom."
   [current current-record all-records record-pos on-field-change on-select-record opts]
   (let [{:keys [show-selectors? allow-edits? allow-additions? dividing-lines? form-width]} opts
         show-header? (and (:header current) (not= 0 (get-in current [:header :visible] 1)))
-        show-footer? (and (:footer current) (not= 0 (get-in current [:footer :visible] 1)))]
+        show-footer? (and (:footer current) (not= 0 (get-in current [:footer :visible] 1)))
+        header-h (if show-header? (fu/get-section-height current :header) 0)
+        footer-h (if show-footer? (fu/get-section-height current :footer) 0)
+        selector-w (if show-selectors? 20 0)
+        total-w (when form-width (+ form-width selector-w))]
     [:div.view-sections-container.continuous
      {:class (when-not dividing-lines? "no-dividing-lines")
-      :style (when form-width {:max-width form-width})}
+      :style (cond-> {:position "absolute" :top 0 :left 0 :bottom 0 :overflow "hidden"}
+               total-w (assoc :width total-w))}
      (when show-header?
-       [form-view-section :header current current-record on-field-change {:allow-edits? allow-edits?}])
+       [:div {:style (cond-> {:position "absolute" :top 0 :left 0 :height header-h}
+                       total-w (assoc :width total-w)
+                       show-selectors? (assoc :padding-left selector-w :box-sizing "border-box"))}
+        [form-view-section :header current current-record on-field-change {:allow-edits? allow-edits?}]])
      [:div.continuous-records-container
+      {:style {:position "absolute" :top header-h :left 0 :right 0 :bottom footer-h :overflow-y "auto"}}
       (for [[idx record] (map-indexed vector all-records)]
         (let [sel? (= (inc idx) (:current record-pos))
               disp (if sel? current-record record)]
           ^{:key (or (:id record) idx)}
           [form-view-detail-row idx disp current sel? on-select-record on-field-change
-           {:show-selectors? show-selectors? :allow-edits? allow-edits?}]))
+           {:show-selectors? show-selectors? :allow-edits? allow-edits? :form-width form-width}]))
       (when (and allow-additions? (not (some :__new__ all-records)))
-        [tentative-new-row current show-selectors?])]
+        [tentative-new-row current show-selectors? form-width])]
      (when show-footer?
-       [form-view-section :footer current current-record on-field-change {:allow-edits? allow-edits?}])]))
+       [:div {:style (cond-> {:position "absolute" :bottom 0 :left 0 :height footer-h}
+                       total-w (assoc :width total-w)
+                       show-selectors? (assoc :padding-left selector-w :box-sizing "border-box"))}
+        [form-view-section :footer current current-record on-field-change {:allow-edits? allow-edits?}]])]))
 
 (defn- single-form-body
   "Render the single-form body with header, detail, and footer."
@@ -1115,11 +1187,11 @@
         show-header? (and (:header current) (not= 0 (get-in current [:header :visible] 1)))
         show-footer? (and (:footer current) (not= 0 (get-in current [:footer :visible] 1)))]
     [:div.view-sections-container
-     {:style (when form-width {:max-width form-width})}
+     {:style (when form-width {:width form-width})}
      (when show-header?
        [form-view-section :header current current-record on-field-change {:allow-edits? allow-edits?}])
      [form-view-section :detail current current-record on-field-change
-      {:show-selectors? show-selectors? :allow-edits? allow-edits?}]
+      {:show-selectors? show-selectors? :allow-edits? allow-edits? :form-width form-width}]
      (when show-footer?
        [form-view-section :footer current current-record on-field-change {:allow-edits? allow-edits?}])]))
 
@@ -1187,7 +1259,6 @@
       :tab-index -1
       :on-key-down (fn [e] (handle-hotkey e (.. e -currentTarget)))
       :on-click #(do (t/dispatch! :hide-form-context-menu) (t/dispatch! :hide-context-menu))}
-     [form-canvas-header continuous? record-source]
      [:div.canvas-body.view-mode-body
       {:style (cond-> {}
                 (#{:neither :vertical} scroll-bars) (assoc :overflow-x "hidden")

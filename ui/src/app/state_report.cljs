@@ -8,7 +8,8 @@
                                          update-object! filename->display-name
                                          coerce-yes-no coerce-to-number coerce-to-keyword
                                          yes-no-control-props yes-no-control-defaults number-control-props
-                                         maybe-auto-analyze!]]))
+                                         maybe-auto-analyze!]]
+            [app.intent-interpreter :as intent]))
 
 ;; Forward declarations
 (declare save-report! save-report-to-file!)
@@ -110,21 +111,28 @@
 (defn set-report-view-mode!
   "Set report view mode - :design or :preview"
   [mode]
-  (swap! app-state assoc-in [:report-editor :view-mode] mode)
-  (when (= mode :preview)
-    (let [record-source (get-in @app-state [:report-editor :current :record-source])]
-      (when record-source
-        (go
-          (let [query-params (build-data-query-params
-                               (get-in @app-state [:report-editor :current :order-by])
-                               (get-in @app-state [:report-editor :current :filter]))
-                response (<! (http/get (str api-base "/api/data/" record-source)
-                                       {:query-params query-params
-                                        :headers (db-headers)}))]
-            (if (:success response)
-              (let [data (get-in response [:body :data])]
-                (swap! app-state assoc-in [:report-editor :records] (vec data)))
-              (log-error! "Failed to load report preview data" "set-report-view-mode" {:response (:body response)}))))))))
+  (let [prev-mode (get-in @app-state [:report-editor :view-mode])]
+    ;; Fire on-close when leaving preview
+    (when (and (= prev-mode :preview) (not= mode :preview))
+      (fire-report-event! :on-close))
+    (swap! app-state assoc-in [:report-editor :view-mode] mode)
+    (when (= mode :preview)
+      (let [record-source (get-in @app-state [:report-editor :current :record-source])]
+        (when record-source
+          (go
+            (let [query-params (build-data-query-params
+                                 (get-in @app-state [:report-editor :current :order-by])
+                                 (get-in @app-state [:report-editor :current :filter]))
+                  response (<! (http/get (str api-base "/api/data/" record-source)
+                                         {:query-params query-params
+                                          :headers (db-headers)}))]
+              (if (:success response)
+                (let [data (get-in response [:body :data])]
+                  (swap! app-state assoc-in [:report-editor :records] (vec data))
+                  (if (empty? data)
+                    (fire-report-event! :on-no-data)
+                    (fire-report-event! :on-open)))
+                (log-error! "Failed to load report preview data" "set-report-view-mode" {:response (:body response)})))))))))
 
 (defn get-report-view-mode []
   (get-in @app-state [:report-editor :view-mode] :design))
@@ -170,8 +178,37 @@
           :selected-control nil
           :properties-tab :format
           :view-mode :design
-          :records []})
+          :records []
+          :event-handlers {}})
   (maybe-auto-analyze!))
+
+(defn load-event-handlers-for-report!
+  "Load event handlers for Report_{name} class module.
+   Stores as a flat {key handler} map in [:report-editor :event-handlers]."
+  [report-name]
+  (let [module-name (str "Report_" report-name)]
+    (go
+      (let [response (<! (http/get (str api-base "/api/modules/" (js/encodeURIComponent module-name) "/handlers")
+                                    {:headers (db-headers)}))]
+        (when (:success response)
+          (let [handlers (or (:body response) [])
+                handler-map (into {} (map (fn [h] [(:key h) h]) handlers))]
+            (swap! app-state assoc-in [:report-editor :event-handlers] handler-map)))))))
+
+(defn fire-report-event!
+  "Fire a report-level event by looking up the handler in event-handlers.
+   event-key is a keyword like :on-open, :on-close."
+  [event-key]
+  (let [event-str (name event-key)
+        ;; Report-level events use 'report' as control name
+        ;; Handler key format from server: "report.on-open"
+        key (str "report." event-str)
+        handler (get-in @app-state [:report-editor :event-handlers key])]
+    (when (seq (:intents handler))
+      (try
+        (intent/execute-intents (:intents handler))
+        (catch :default e
+          (js/console.warn "Error in report event handler" event-str ":" (.-message e)))))))
 
 (defn- parse-report-body
   "Parse API response body into a normalized report definition."
@@ -187,6 +224,7 @@
     (save-report!))
   (if (:definition report)
     (do (setup-report-editor! (:id report) (normalize-report-definition (:definition report)))
+        (load-event-handlers-for-report! (:name report))
         (set-report-view-mode! :design))
     (go
       (let [response (<! (http/get (str api-base "/api/reports/" (:filename report))
@@ -201,6 +239,7 @@
                               (assoc % :definition definition) %)
                            reports)))
             (setup-report-editor! (:id report) definition)
+            (load-event-handlers-for-report! (:name report))
             (swap! app-state assoc-in [:report-editor :personalized?] personalized?))
           (log-error! (str "Failed to load report: " (:filename report)) "load-report-for-editing" {:report (:filename report)}))))))
 

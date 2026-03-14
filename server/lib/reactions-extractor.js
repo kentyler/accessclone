@@ -104,4 +104,4 @@ function extractReactions(procedures) {
   return reactions;
 }
 
-module.exports = { extractReactions };
+module.exports = { extractReactions, toKw };

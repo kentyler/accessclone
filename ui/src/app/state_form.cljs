@@ -13,7 +13,8 @@
                                          yes-no-control-props yes-no-control-defaults number-control-props
                                          normalize-control
                                          maybe-auto-analyze!]]
-            [app.projection :as projection]))
+            [app.projection :as projection]
+            [app.intent-interpreter :as intent]))
 
 ;; Forward declarations for functions used before definition
 (declare save-current-record! save-form! save-form-to-file!
@@ -334,13 +335,25 @@
           (<! (http/delete (str api-base "/api/session/" session-id))))))))
 
 (defn fire-form-event!
-  "Check if the current form has a function mapped to the given event key,
-   and if so, call it via call-session-function!. Returns a channel."
+  "Fire a form-level event. Checks client-side intent handlers first,
+   then falls back to server-side session function."
   [event-key & [{:keys [on-complete]}]]
-  (let [form-def (get-in @app-state [:form-editor :current])
-        function-name (get form-def event-key)]
-    (when (and function-name (string? function-name) (not (str/blank? function-name)))
-      (call-session-function! function-name {:on-complete on-complete}))))
+  (let [projection (get-in @app-state [:form-editor :projection])
+        ;; Map event-key (:on-load) to handler event string ("on-load")
+        event-str (name event-key)
+        handler (projection/get-event-handler projection "Form" event-str)]
+    (if (seq (:intents handler))
+      ;; Client-side: execute intents directly
+      (try
+        (intent/execute-intents (:intents handler))
+        (when on-complete (on-complete))
+        (catch :default e
+          (js/console.warn "Error in form event handler" event-str ":" (.-message e))))
+      ;; Server-side fallback: existing behavior
+      (let [form-def (get-in @app-state [:form-editor :current])
+            function-name (get form-def event-key)]
+        (when (and function-name (string? function-name) (not (str/blank? function-name)))
+          (call-session-function! function-name {:on-complete on-complete}))))))
 
 ;; ============================================================
 ;; FORM STATE SYNC (shared.form_control_state)
@@ -513,7 +526,15 @@
       (when-let [mapping (and (seq synced) (get synced (name field-kw)))]
         (sync-form-state! [{:tableName (:table-name mapping)
                             :columnName (:column-name mapping)
-                            :value (when (some? value) (str value))}])))))
+                            :value (when (some? value) (str value))}])))
+    ;; Fire AfterUpdate intent handler if registered
+    (let [projection (get-in @app-state [:form-editor :projection])
+          handler (projection/get-event-handler projection (name field-kw) "after-update")]
+      (when (seq (:intents handler))
+        (try
+          (intent/execute-intents (:intents handler))
+          (catch :default e
+            (js/console.warn "Error in after-update handler for" (name field-kw) ":" (.-message e))))))))
 
 (defn navigate-to-record!
   "Navigate to a specific record by position (1-indexed)"
@@ -1152,12 +1173,27 @@
                                proj
                                specs))))))))))
 
+(defn load-event-handlers-for-form!
+  "Fetch event handler descriptors for a form's class module and register them
+   into the projection's :event-handlers map."
+  [form-name]
+  (let [module-name (str "Form_" form-name)]
+    (go
+      (let [response (<! (http/get (str api-base "/api/modules/" (js/encodeURIComponent module-name) "/handlers")
+                                    {:headers (db-headers)}))]
+        (when (:success response)
+          (let [handlers (:body response)]
+            (when (seq handlers)
+              (swap! app-state update-in [:form-editor :projection]
+                     projection/register-event-handlers handlers))))))))
+
 (defn- setup-form-editor!
   "Initialize the form editor state with a normalized definition."
   [form-id definition & [form-name]]
   (swap! app-state assoc :form-editor (build-form-editor-state form-id definition))
   (when (seq form-name)
-    (load-reactions-for-form! form-name))
+    (load-reactions-for-form! form-name)
+    (load-event-handlers-for-form! form-name))
   (maybe-auto-analyze!)
   (set-view-mode! :view))
 

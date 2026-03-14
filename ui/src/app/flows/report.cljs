@@ -56,8 +56,11 @@
                             :selected-control nil
                             :properties-tab :format
                             :view-mode :design
-                            :records []})
+                            :records []
+                            :event-handlers {}})
                     (state/maybe-auto-analyze!)
+                    (app.state-report/load-event-handlers-for-report!
+                      (get-in ctx [:report :name]))
                     ctx))}]}])
 
 ;; ============================================================
@@ -138,8 +141,11 @@
                                              :headers (db-headers)
                                              :query-params query-params))]
                           (if (:ok? response)
-                            (swap! app-state assoc-in [:report-editor :records]
-                                   (vec (get-in response [:data :data])))
+                            (let [data (vec (get-in response [:data :data]))]
+                              (swap! app-state assoc-in [:report-editor :records] data)
+                              (if (empty? data)
+                                (app.state-report/fire-report-event! :on-no-data)
+                                (app.state-report/fire-report-event! :on-open)))
                             (state/log-error! "Failed to load report preview data"
                                               "set-report-view-mode")))))
                     ctx))}]}])

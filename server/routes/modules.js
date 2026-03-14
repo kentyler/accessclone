@@ -7,7 +7,7 @@
 const express = require('express');
 const router = express.Router();
 const { logEvent, logError } = require('../lib/events');
-const { extractReactions } = require('../lib/reactions-extractor');
+const { extractReactions, toKw } = require('../lib/reactions-extractor');
 
 function createRouter(pool) {
   /**
@@ -68,6 +68,91 @@ function createRouter(pool) {
     } catch (err) {
       logError(pool, 'GET /api/modules/:name/reactions', 'Failed to extract reactions', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to extract reactions' });
+    }
+  });
+
+  /**
+   * GET /api/modules/:name/handlers
+   * Extract event handler descriptors from a form module's intents.
+   * Returns [{key, control, event, procedure, intents}] for procedures
+   * that have a trigger and are NOT already fully covered by reactions.
+   */
+  router.get('/:name/handlers', async (req, res) => {
+    try {
+      const databaseId = req.databaseId;
+      const result = await pool.query(
+        `SELECT intents FROM shared.modules
+         WHERE database_id = $1 AND name = $2 AND is_current = true`,
+        [databaseId, req.params.name]
+      );
+
+      if (result.rows.length === 0 || !result.rows[0].intents) {
+        return res.json([]);
+      }
+
+      const intents = result.rows[0].intents;
+      const procedures = (intents?.mapped?.procedures) || [];
+
+      // Get the set of triggers already handled by reactions so we can exclude them
+      const reactionTriggers = new Set(
+        extractReactions(procedures).map(r => r.trigger)
+      );
+
+      const handlers = [];
+      for (const proc of procedures) {
+        if (!proc.trigger || !proc.name) continue;
+
+        // Parse control name and event from procedure name
+        // e.g. "btnOrders_Click" → control="btnOrders", event="on-click"
+        // e.g. "Form_Load" → control="Form", event="on-load"
+        // e.g. "cboStatus_AfterUpdate" → control="cboStatus", event="after-update"
+        const match = proc.name.match(/^(.+?)_(\w+)$/);
+        if (!match) continue;
+
+        const rawControl = match[1];
+        const rawEvent = match[2];
+
+        // Map VBA event names to kebab-case event keys
+        const eventMap = {
+          'click': 'on-click',
+          'dblclick': 'on-dblclick',
+          'load': 'on-load',
+          'open': 'on-open',
+          'close': 'on-close',
+          'current': 'on-current',
+          'afterupdate': 'after-update',
+          'beforeupdate': 'before-update',
+          'change': 'on-change',
+          'enter': 'on-enter',
+          'exit': 'on-exit',
+          'gotfocus': 'on-gotfocus',
+          'lostfocus': 'on-lostfocus',
+          'nodata': 'on-no-data',
+        };
+
+        const eventKey = eventMap[rawEvent.toLowerCase()];
+        if (!eventKey) continue;
+
+        // Skip AfterUpdate procedures already fully covered by reactions
+        if (eventKey === 'after-update') {
+          const triggerKw = toKw(rawControl);
+          if (reactionTriggers.has(triggerKw)) continue;
+        }
+
+        const key = `${toKw(rawControl)}.${eventKey}`;
+        handlers.push({
+          key,
+          control: toKw(rawControl),
+          event: eventKey,
+          procedure: proc.name,
+          intents: proc.intents || []
+        });
+      }
+
+      res.json(handlers);
+    } catch (err) {
+      logError(pool, 'GET /api/modules/:name/handlers', 'Failed to extract handlers', err, { databaseId: req.databaseId });
+      res.status(500).json({ error: 'Failed to extract handlers' });
     }
   });
 

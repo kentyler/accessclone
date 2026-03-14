@@ -50,9 +50,15 @@
 
 (def close-current-tab-flow
   "Close the currently active tab (auto-saves dirty record/form).
+   Fires report on-close event if closing a report in preview mode.
    Original: state_form.cljs/close-current-tab!"
   [{:step :do
     :fn (fn [ctx]
+          ;; Fire on-close for reports in preview mode before closing
+          (let [active (:active-tab @app-state)]
+            (when (and (= (:type active) :reports)
+                       (= (get-in @app-state [:report-editor :view-mode]) :preview))
+              (state-report/fire-report-event! :on-close)))
           (state-form/close-current-tab!)
           ctx)}])
 

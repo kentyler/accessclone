@@ -54,7 +54,8 @@
                     (swap! app-state assoc :form-editor
                            (state-form/build-form-editor-state (:id form) definition))
                     (when-let [fname (:filename form)]
-                      (state-form/load-reactions-for-form! fname))
+                      (state-form/load-reactions-for-form! fname)
+                      (state-form/load-event-handlers-for-form! fname))
                     (state/maybe-auto-analyze!)
                     ctx))}]}])
 

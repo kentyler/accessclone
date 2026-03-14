@@ -103,31 +103,36 @@ module.exports = function(router, pool, secrets) {
 
       async function executeStatements(client, statements) {
         await client.query('BEGIN');
-        for (const stmt of statements) {
-          if (stmt.trim().startsWith('--')) {
-            result.warnings.push('Skipped comment-only statement');
-            continue;
-          }
-          try {
-            await client.query(stmt);
-          } catch (stmtErr) {
-            // CREATE OR REPLACE VIEW fails if column list changed (42P01 handled elsewhere).
-            // Detect this and retry with DROP + CREATE.
-            const isColumnChange = stmtErr.code === '42601' || // syntax
-              (stmtErr.message && /cannot.*(?:change|drop|rename).*(?:column|view)/i.test(stmtErr.message));
-            if (isColumnChange && /CREATE\s+OR\s+REPLACE\s+VIEW/i.test(stmt)) {
-              const viewMatch = stmt.match(/VIEW\s+(\S+)\s+AS/i);
-              if (viewMatch) {
-                await client.query(`DROP VIEW IF EXISTS ${viewMatch[1]} CASCADE`);
-                await client.query(stmt);
-                result.warnings.push(`Dropped and recreated view (column list changed)`);
-                continue;
-              }
+        try {
+          for (const stmt of statements) {
+            if (stmt.trim().startsWith('--')) {
+              result.warnings.push('Skipped comment-only statement');
+              continue;
             }
-            throw stmtErr;
+            try {
+              await client.query(stmt);
+            } catch (stmtErr) {
+              // CREATE OR REPLACE VIEW fails if column list changed (42P01 handled elsewhere).
+              // Detect this and retry with DROP + CREATE.
+              const isColumnChange = stmtErr.code === '42601' || // syntax
+                (stmtErr.message && /cannot.*(?:change|drop|rename).*(?:column|view)/i.test(stmtErr.message));
+              if (isColumnChange && /CREATE\s+OR\s+REPLACE\s+VIEW/i.test(stmt)) {
+                const viewMatch = stmt.match(/VIEW\s+(\S+)\s+AS/i);
+                if (viewMatch) {
+                  await client.query(`DROP VIEW IF EXISTS ${viewMatch[1]} CASCADE`);
+                  await client.query(stmt);
+                  result.warnings.push(`Dropped and recreated view (column list changed)`);
+                  continue;
+                }
+              }
+              throw stmtErr;
+            }
           }
+          await client.query('COMMIT');
+        } catch (err) {
+          await client.query('ROLLBACK').catch(() => {});
+          throw err;
         }
-        await client.query('COMMIT');
       }
 
       const client = await pool.connect();
@@ -179,7 +184,11 @@ module.exports = function(router, pool, secrets) {
               await client.query('ROLLBACK').catch(() => {});
               console.error(`[QUERY ${queryName}] LLM fallback also failed: ${llmErr.message}`);
               console.error(`[QUERY ${queryName}] Original regex error: ${regexErr.message}`);
-              // Throw the LLM error with context about both failures
+              // Preserve PG error code so dependency errors are retryable
+              const isDep = llmErr.code === '42P01' || llmErr.code === '42883';
+              if (isDep) {
+                throw llmErr;
+              }
               const combinedErr = new Error(
                 `Regex conversion failed: ${regexErr.message}\nLLM fallback also failed: ${llmErr.message}`
               );

@@ -17,6 +17,7 @@
 (def strip-access-hotkey eu/strip-access-hotkey)
 (def render-hotkey-text eu/render-hotkey-text)
 (def extract-hotkey eu/extract-hotkey)
+(def apply-shade-tint eu/apply-shade-tint)
 
 ;; --- Form-specific functions ---
 

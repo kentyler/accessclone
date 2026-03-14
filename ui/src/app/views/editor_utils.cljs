@@ -29,6 +29,29 @@
   [def section]
   (or (get-in def [section :controls]) []))
 
+(defn apply-shade-tint
+  "Apply Access shade/tint modifiers to a hex color string.
+   shade < 100 darkens (0=black), tint < 100 lightens (0=white)."
+  [hex-color shade tint]
+  (if (and (= shade 100) (= tint 100))
+    hex-color
+    (let [hex (if (str/starts-with? hex-color "#") (subs hex-color 1) hex-color)
+          r (js/parseInt (subs hex 0 2) 16)
+          g (js/parseInt (subs hex 2 4) 16)
+          b (js/parseInt (subs hex 4 6) 16)
+          [r g b] (if (< shade 100)
+                    [(* r (/ shade 100)) (* g (/ shade 100)) (* b (/ shade 100))]
+                    [r g b])
+          [r g b] (if (< tint 100)
+                    [(+ r (* (- 255 r) (/ (- 100 tint) 100)))
+                     (+ g (* (- 255 g) (/ (- 100 tint) 100)))
+                     (+ b (* (- 255 b) (/ (- 100 tint) 100)))]
+                    [r g b])
+          clamp (fn [v] (max 0 (min 255 (js/Math.round v))))]
+      (str "#" (.padStart (.toString (clamp r) 16) 2 "0")
+               (.padStart (.toString (clamp g) 16) 2 "0")
+               (.padStart (.toString (clamp b) 16) 2 "0")))))
+
 (def ^:private transparent-by-default
   "Control types that default to BackStyle=0 (Transparent) in Access.
    Used as fallback when back-style wasn't imported."

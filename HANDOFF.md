@@ -6,7 +6,22 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 
 ## Current State
 
-### Just Shipped (2026-03-10)
+### Just Shipped (2026-03-13)
+- **Event Runtime — Forms & Reports**: Full intent interpreter for executing translated VBA event handlers client-side.
+  - **Expression evaluator**: Added `And`, `Or`, `Not` logical operators and `IsNull()` function to `expressions.cljs`. Precedence: comparison → NOT → AND → OR. Access convention: -1 = True, 0 = False.
+  - **Async intent interpreter**: Rewrote `intent_interpreter.cljs` from sync `doseq` to async `go` loop. `execute-single-intent` returns nil (sync) or channel (async). Context map (`ctx`) threads `:last-result` and named `result_var` through the loop.
+  - **Domain functions**: `dlookup`, `dcount`, `dsum` via `POST /api/queries/run`; `run-sql` via new `POST /api/queries/execute` (INSERT/UPDATE/DELETE only, rejects SELECT/DROP/ALTER/TRUNCATE).
+  - **Criteria resolution**: Two-stage — `resolve-criteria-placeholders` replaces `{FieldName}` with actual values (numbers inline, strings single-quoted), then `convert-criteria` converts `[field]` → `"field"`, `#date#` → `'date'`, `True`/`False` → `true`/`false`.
+  - **Report events**: `on-open` (after preview data loads with data), `on-close` (leaving preview or closing tab), `on-no-data` (0 rows). `load-event-handlers-for-report!` fetches `Report_{name}` handlers; `fire-report-event!` dispatches.
+  - **Focus events**: `on-enter`, `on-gotfocus`, `on-exit`, `on-lostfocus` wired to `.view-control` wrapper div via React `onFocus`/`onBlur` bubbling. Only controls with focus event flags in `field-triggers` get handlers attached.
+  - **New endpoint**: `POST /api/queries/execute` in `metadata.js` — executes DML SQL with schema search_path.
+  - **New doc**: `skills/event-runtime.md` — comprehensive reference for the event runtime system.
+  - **Server**: Added `'nodata': 'on-no-data'` to event map in `modules.js`.
+  - Cache buster bumped to `?v=14`.
+  - Files modified: `expressions.cljs`, `intent_interpreter.cljs`, `state_report.cljs`, `form_view.cljs`, `flows/report.cljs`, `flows/navigation.cljs`, `modules.js`, `metadata.js`, `index.html`, `CLAUDE.md`
+- **Three Horse business concept**: Preliminary business plan in `THREE-HORSE-PRELIMINARY.md`. Three entry points (legacy migration, spreadsheet extraction, app builder), flat-fee revenue model, qualifying analysis, LLM-powered self-service modification. Next platform targets: FoxPro, then Paradox. Domain: three.horse.
+
+### Previously Shipped (2026-03-10)
 - **Form View color/layout fidelity overhaul**: Fixed multiple rendering issues where Form View didn't match Access's visual output.
   - **Rectangle z-index**: Decorative controls (rectangles, lines) were rendering on top of interactive controls (buttons, text boxes) because all use `position: absolute` and DOM order determined stacking. Fix: `z-index: 0` on `.view-control.rectangle, .view-control.line` + `pointer-events: none` on `.view-rectangle`. Control type now added as CSS class on `.view-control` div for targeting.
   - **Section background colors**: `section-view-style` in `form_view.cljs` now applies `:back-color` as CSS `background-color` on section divs.
@@ -143,7 +158,7 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 - **Tested against two databases**: Northwind and a second Access database both import fully (tables, forms, reports, queries, modules, macros) without errors.
 
 ### In Progress / Uncommitted
-Working tree has uncommitted changes for multi-pass import pipeline, server-side module translation, and Form View color/layout fidelity. Forms imported before the BackStyle PowerShell change will use type-based fallback for transparency. Re-import forms to get full BackStyle data.
+Working tree has uncommitted changes for multi-pass import pipeline, server-side module translation, Form View color/layout fidelity, and event runtime (intent interpreter, report events, focus events, expression evaluator). Forms imported before the BackStyle PowerShell change will use type-based fallback for transparency. Re-import forms to get full BackStyle data.
 
 ### Next Up — Re-import Forms for BackStyle
 After the PowerShell scripts were updated to export `BackStyle`, existing form definitions in the database don't have this property. Re-importing forms will populate it. Until then, the type-based fallback applies (labels transparent, text-boxes opaque, etc.).

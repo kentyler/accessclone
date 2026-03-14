@@ -9,10 +9,16 @@
 - [ ] **Test runtime form state sync end-to-end** — Open a form, navigate records, verify `form_control_state` is populated and dependent views filter correctly.
 - [ ] **OpenClaw skill prototype** — Export intent graph + form definitions in a format an OpenClaw agent can consume.
 - [ ] **Upload social preview image** — Set `docs/social-preview.png` as the repo social preview in GitHub Settings → Social preview (manual step).
+- [ ] **Debug event runtime on Northwind** — Test intent handlers in Northwind forms, fix runtime issues as they surface.
+- [ ] **Test with second Access database** — Import a different Access database to stress-test pipeline generality.
+- [ ] **Three Horse business plan** — Expand `THREE-HORSE-PRELIMINARY.md` into a full business plan with pricing, market sizing, and timeline.
+- [ ] **FoxPro extraction prototype** — Read .scx/.vcx (DBF-based) file formats, extract form definitions and FoxPro code. Start with VFPX sample apps.
 
 ## In Progress
 
 ## Completed
+
+- [x] **Event runtime — forms & reports** — Async intent interpreter, expression evaluator (And/Or/Not/IsNull), domain functions (dlookup/dcount/dsum/run-sql), report events (on-open/on-close/on-no-data), focus events (on-enter/on-exit/on-gotfocus/on-lostfocus), POST /api/queries/execute endpoint. Full docs in `skills/event-runtime.md`. (2026-03-13)
 
 - [x] **Form View color/layout fidelity** — Fixed rectangle z-index covering buttons, added section background colors, control fore-color/back-color with BackStyle transparency, CSS inherit pattern for inner elements, flex layout for header/footer sections. Updated PowerShell scripts to export BackStyle. (2026-03-10)
 

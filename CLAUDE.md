@@ -87,6 +87,18 @@ This is AccessClone, a platform for converting MS Access databases to web applic
 - Server libs: `vba-intent-mapper.js` (30 intent types, deterministic mapping), `vba-intent-extractor.js` (LLM extraction), `vba-wiring-generator.js` (22 mechanical CLJS templates)
 - Transforms: `set-module-intents`, `set-extracting-intents`; Flows: `extract-intents-flow`, `generate-wiring-flow`
 
+### Intent Interpreter (ui/src/app/intent_interpreter.cljs)
+Client-side runtime that walks structured intent trees (from VBA module translation) and dispatches to framework functions. Intents fire from button clicks, form events (OnLoad, OnCurrent), AfterUpdate handlers, and focus events.
+
+- **Async execution**: `execute-intents` returns a `core.async` channel (`go` block). Sync intents execute immediately; async intents (`dlookup`, `dcount`, `dsum`, `run-sql`) await HTTP responses before continuing.
+- **Context threading**: A `ctx` map passes through the intent loop. Async intents store results in `:last-result`; subsequent intents can read it via `"{last-result}"` in `resolve-intent-value`.
+- **Branch conditions**: `:branch` intents evaluate conditions as Access expressions via `expressions.cljs`. Supports `And`, `Or`, `Not` operators and `IsNull()` function. Precedence: comparison → NOT → AND → OR.
+- **Domain functions**: `dlookup`/`dcount`/`dsum` build SQL and call `POST /api/queries/run`. `run-sql` (INSERT/UPDATE/DELETE) calls `POST /api/queries/execute`.
+- **convert-criteria helper**: Transforms Access criteria to PG WHERE — `[field]` → `"field"`, `#date#` → `'date'`, `True`/`False` → `true`/`false`.
+- **Report events**: `state_report.cljs` loads handlers from `GET /api/modules/Report_{name}/handlers`. Fires `:on-open` when entering preview with data, `:on-no-data` when preview query returns 0 rows, `:on-close` when leaving preview or closing the report tab. Handler map stored in `[:report-editor :event-handlers]`.
+- **Focus events**: `form_view.cljs` attaches `:on-focus`/`:on-blur` to the `.view-control` wrapper div when `field-triggers` has `:has-enter-event`, `:has-exit-event`, `:has-gotfocus-event`, or `:has-lostfocus-event`. Access semantics: Enter before GotFocus, Exit before LostFocus.
+- **Expression evaluator** (`expressions.cljs`): Recursive descent parser with tokenizer. Supports field refs `[Name]`, math, string concat `&`, comparisons, `And`/`Or`/`Not`, built-in functions (IIf, Nz, IsNull, Format, Left/Right/Mid, Len, Trim, etc.), aggregates, conditional formatting. `truthy?` is public.
+
 ### Macro Viewer (ui/src/app/views/macro_viewer.cljs)
 - Left panel: Raw macro definition (SaveAsText format, read-only)
 - Right panel: ClojureScript translation (initially empty, populated via chat)
@@ -176,6 +188,7 @@ All errors are logged to the `shared.events` table for persistent diagnostics.
 - `/api/graph/*` - Dependency/intent graph queries
 - `/api/session/ui-state` - Save/load UI state (open tabs, active database)
 - `/api/queries/run` - Execute SQL queries (SELECT only)
+- `/api/queries/execute` - Execute INSERT/UPDATE/DELETE SQL (no SELECT/DDL, single-statement)
 - Schema routing via X-Database-ID header
 
 ### Lint / Cross-Object Validation (server/routes/lint.js)

@@ -56,6 +56,7 @@ Read in order for the full import workflow.
 |------|---------|
 | `skills/intent-extraction.md` | VBA intent extraction LLM prompt — 30 intent types, trigger mapping, JSON output schema, gap questions, decomposition examples. |
 | `skills/ai-import.md` | AI agent import skill — two paths: full-pipeline (Claude Code, local machine) vs post-extraction (Codex, cloud sandbox). |
+| `skills/event-runtime.md` | Event runtime for forms & reports — intent interpreter async model, supported events, intent types, branch conditions, criteria resolution, server endpoints, file map. |
 
 ## Skills — Development Guides
 
@@ -76,3 +77,9 @@ Read in order for the full import workflow.
 | `.github/ISSUE_TEMPLATE/bug_report.md` | GitHub bug report template. |
 | `.github/ISSUE_TEMPLATE/feature_request.md` | GitHub feature request template. |
 | `.github/PULL_REQUEST_TEMPLATE.md` | GitHub PR template. |
+
+## Business
+
+| File | Summary |
+|------|---------|
+| `THREE-HORSE-PRELIMINARY.md` | Preliminary business concept — multi-platform legacy migration + spreadsheet extraction + app builder. Revenue model, market analysis, competitive advantage, technical architecture. Domain: three.horse. |

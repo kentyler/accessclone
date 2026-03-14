@@ -17,7 +17,10 @@
       "Bash(grep:*)",
       "Bash(node:*)",
       "Bash(\"C:\\\\Program Files\\\\PostgreSQL\\\\18\\\\bin\\\\psql.exe\":*)",
-      "Bash(tasklist:*)"
+      "Bash(tasklist:*)",
+      "Bash(\"C:\\\\Program Files\\\\PostgreSQL\\\\18\\\\bin\\\\psql\":*)",
+      "WebSearch",
+      "mcp__claude-corpus__corpus-search"
     ]
   }
 }

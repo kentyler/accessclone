@@ -13,8 +13,7 @@
                                          yes-no-control-props yes-no-control-defaults number-control-props
                                          normalize-control
                                          maybe-auto-analyze!]]
-            [app.projection :as projection]
-            [app.intent-interpreter :as intent]))
+            [app.projection :as projection]))
 
 ;; Forward declarations for functions used before definition
 (declare save-current-record! save-form! save-form-to-file!
@@ -345,7 +344,7 @@
     (if (seq (:intents handler))
       ;; Client-side: execute intents directly
       (try
-        (intent/execute-intents (:intents handler))
+        (state/invoke-callback :execute-intents (:intents handler))
         (when on-complete (on-complete))
         (catch :default e
           (js/console.warn "Error in form event handler" event-str ":" (.-message e))))
@@ -532,7 +531,7 @@
           handler (projection/get-event-handler projection (name field-kw) "after-update")]
       (when (seq (:intents handler))
         (try
-          (intent/execute-intents (:intents handler))
+          (state/invoke-callback :execute-intents (:intents handler))
           (catch :default e
             (js/console.warn "Error in after-update handler for" (name field-kw) ":" (.-message e))))))))
 
@@ -553,6 +552,10 @@
       (sync-current-record-state!)
       ;; Fire on-current event after navigating to new record
       (fire-form-event! :on-current))))
+
+;; Register callbacks for intent_interpreter (breaks circular dep)
+(state/register-callback! :navigate-to-record navigate-to-record!)
+(state/register-callback! :update-record-field update-record-field!)
 
 (defn- run-before-update-hook!
   "Run before-update function if mapped. Returns channel yielding true to abort."

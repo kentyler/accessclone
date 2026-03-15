@@ -152,3 +152,7 @@
     :fn (fn [ctx]
           (state/switch-database! (:database-id ctx))
           ctx)}])
+
+;; Register callbacks for intent_interpreter (breaks circular dep)
+(state/register-callback! :close-current-tab
+  #(f/run-fire-and-forget! close-current-tab-flow))

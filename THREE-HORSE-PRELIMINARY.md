@@ -126,7 +126,14 @@ Delivered as short video walkthroughs of the migrated app — where everything l
 
 ### Future Revenue Options
 
-- **Hosted apps**: Run the PostgreSQL backend as a managed service, charge monthly per app. Small businesses don't want to manage databases.
+- **Cloud-hosted migration (upload & convert)**: Instead of download-and-run-locally, users upload their `.accdb`/`.mdb` file to a web portal. The file is queued for a Windows worker VM (Access installed) that runs the existing PowerShell extraction scripts unchanged. Results land in Cloud SQL (PostgreSQL), and the migrated app is immediately accessible via browser. No local install needed.
+  - **Architecture**: Upload endpoint → Cloud Storage bucket → job queue (Cloud Tasks / Pub/Sub) → Windows worker VM → Cloud SQL. Everything after the worker is the standard Node.js API + frontend, unchanged. The worker runs the battle-tested PowerShell scripts — no rewrite needed.
+  - **Hosting stack**: Static frontend on Cloud Storage + CDN (or Firebase Hosting). Node.js API on Cloud Run (scales to zero). PostgreSQL on Cloud SQL (managed, multi-schema works as-is). Windows worker VM for extraction (Access licensing is per-machine).
+  - **Why Windows VM, not a rewrite**: The extraction layer uses PowerShell COM/DAO automation to read `.accdb` files. Form and report definitions are stored as proprietary binary blobs — `SaveAsText` (COM) is the only reliable way to extract them. Open-source tools (mdbtools, jackcess) can read table data and schema but cannot extract forms, reports, or VBA reliably. A JVM or Linux rewrite of the extraction layer is a dead end until someone reverse-engineers the Access binary format.
+  - **Scaling**: Start with a single always-on Windows VM for early customers, then auto-scaling VM instances as demand grows. Access licensing is per-machine, so costs are predictable.
+  - **Deployment simplicity**: Cloud Run supports source-based deploys (`gcloud run deploy --source .`) — auto-detects Node.js, no Docker expertise required. The Windows worker VM is just a Windows machine with Access and PowerShell, no containerization needed. If Docker is eventually wanted, a Node.js Dockerfile is ~5 lines. This is operational work that can be contracted out when the time comes.
+  - **Not for launch**: The initial offering is download-and-run-local. Cloud hosting is a future add-on for customers who don't want to install anything or who want their app permanently hosted.
+- **Hosted apps**: Run the PostgreSQL backend as a managed service, charge monthly per app. Small businesses don't want to manage databases. (Natural companion to cloud-hosted migration — the app stays where it was converted.)
 - **Spreadsheet extraction**: Lower price point, higher volume, much larger market than legacy database migration.
 - **Builder seats**: Free to import and view, pay to create and edit.
 
@@ -218,11 +225,22 @@ This keeps the community open and welcoming while creating a professional channe
 - **Premium patch sales** — revenue share on paid patches (platform takes a percentage)
 - **Hosted apps** (optional) — monthly per-app for managed PostgreSQL hosting
 
+## Website Infrastructure (three.horse)
+
+Even for the local-first model, the public website needs its own infrastructure:
+
+- **Authorization**: User accounts, login/signup, password reset, session management. Required for: delivering qualifying analysis results, gating downloads after payment, tracking customer engagements, support access. Using **Clerk** (clerk.com) — managed auth with drop-in UI components, good DX, built-in Stripe/billing hooks. 10k free MAU. JWT verification middleware on Express. Hosting on Google Cloud (Cloud Run + Cloud SQL) — Clerk is infrastructure-agnostic.
+- **Payments**: Stripe or similar for flat-fee migration charges. Payment flow: qualifying analysis (free) → review → accept quote → pay → receive download/access. Need invoicing, receipts, refund handling.
+- **Qualifying analysis delivery**: User uploads `.accdb` or runs the local tool, results need to be stored and accessible from their account.
+- **Download distribution**: Gated download of the local installer/package after payment.
+
+These are standard SaaS problems with well-trodden solutions (Stripe, Auth0/Clerk, S3 for downloads), but they're still significant implementation work that's separate from the product itself.
+
 ## Open Questions
 
 - Pricing: exact tier boundaries and price points need market testing
 - Open source vs. proprietary: open source builds trust and community contributions, but complicates monetization
-- Hosting: self-host only, managed hosting, or both?
+- Hosting: self-host only, managed hosting, or both? (Cloud-hosted migration option documented above — deferred to post-launch.)
 - FoxPro extraction: need to prototype file format reading — .scx/.vcx are DBF-based, which helps
 - Spreadsheet extraction: scope and fidelity — how much structure can reliably be inferred?
 - Patch marketplace: curation, quality control, versioning, dependency management between patches

@@ -176,7 +176,10 @@
 
 (defn render-image [ctrl _field _value _on-change _opts]
   (if-let [src (:picture ctrl)]
-    [:img.view-image {:src src :alt (or (:text ctrl) "Image")}]
+    [:img {:class (str "view-image"
+                       (when (= (:size-mode ctrl) "cover") " cover")
+                       (when (:picture-alignment ctrl) (str " " (:picture-alignment ctrl))))
+           :src src :alt (or (:text ctrl) "Image")}]
     [:div.view-image-placeholder "\uD83D\uDDBC No Image"]))
 
 (defn render-attachment [ctrl field _value _on-change opts]

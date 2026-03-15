@@ -6,7 +6,14 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 
 ## Current State
 
-### Just Shipped (2026-03-13)
+### Just Shipped (2026-03-14)
+- **Three Horse website initial build**: The threehorse database now functions as a public-facing website using the platform's own form rendering.
+  - `skills/three-horse-chat.md`: System prompt for the Three Horse chat — distilled from `THREE-HORSE-PRELIMINARY.md` and `scripts/qualifying-guide.md`. Covers what TH does, platforms, migration process, AI partner, pricing, qualifying analysis tool, tone guidelines.
+  - `server/routes/chat/index.js`: When `database_id === 'threehorse'`, uses the Three Horse skills file as the base system prompt instead of the generic AccessClone prompt. Page-specific context added based on which form is open (About, Qualifying Analysis, How It Works). Uses `claude-haiku-4-5` (cheap model) with no tools (pure conversation).
+  - Three unbound forms (no record source) inserted into `shared.forms` as website pages: **About** (problem, solution, AI partner, platforms), **Qualifying Analysis** (what it does, safety, report contents, how to start), **How It Works** (6-step migration walkthrough). SQL seed script at `databases/threehorse/seed-pages.sql`.
+  - Pages render in the center pane via standard form rendering. Chat pane has Three Horse context. Left nav shows the three pages.
+
+### Previously Shipped (2026-03-13)
 - **Event Runtime — Forms & Reports**: Full intent interpreter for executing translated VBA event handlers client-side.
   - **Expression evaluator**: Added `And`, `Or`, `Not` logical operators and `IsNull()` function to `expressions.cljs`. Precedence: comparison → NOT → AND → OR. Access convention: -1 = True, 0 = False.
   - **Async intent interpreter**: Rewrote `intent_interpreter.cljs` from sync `doseq` to async `go` loop. `execute-single-intent` returns nil (sync) or channel (async). Context map (`ctx`) threads `:last-result` and named `result_var` through the loop.

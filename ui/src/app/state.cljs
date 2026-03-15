@@ -7,6 +7,11 @@
 
 (def api-base (str (.-protocol js/location) "//" (.-host js/location)))
 
+;; Late-bound function registry — breaks circular deps between state_form and intent_interpreter
+(defonce ^:private -callbacks (atom {}))
+(defn register-callback! [k f] (swap! -callbacks assoc k f))
+(defn invoke-callback [k & args] (when-let [f (get @-callbacks k)] (apply f args)))
+
 ;; Forward declarations for functions used before definition
 (declare load-tables! load-queries! load-functions! load-sql-functions! load-macros! load-access-databases!
          save-ui-state! load-forms! load-reports! filename->display-name

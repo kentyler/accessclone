@@ -67,6 +67,12 @@ Read in order for the full import workflow.
 | `skills/install.md` | Installation assistant skill — auto-detect environment, PostgreSQL setup, troubleshooting steps. |
 | `skills/writing-skills.md` | Meta-guide for writing new skill files — cross-platform patterns, structure checklist, examples. |
 
+## Skills — Three Horse Website
+
+| File | Summary |
+|------|---------|
+| `skills/three-horse-chat.md` | System prompt for the Three Horse chat — loaded when `database_id = 'threehorse'`. Covers what TH does, platforms, migration process, AI partner, pricing, qualifying analysis. |
+
 ## Other Docs
 
 | File | Summary |
@@ -74,6 +80,7 @@ Read in order for the full import workflow.
 | `docs/northwind-openclaw.md` | Northwind automation analysis (70% mechanical / 20% LLM-assisted / 10% gap), OpenClaw integration vision. |
 | `databases/accessclone/notes.md` | Per-database notes (AccessClone DB). Empty template. |
 | `databases/threehorse/notes.md` | Per-database notes (ThreeHorse DB). Empty template. |
+| `databases/threehorse/seed-pages.sql` | SQL to insert the three website page forms (About, Qualifying Analysis, How It Works) into shared.forms. |
 | `.github/ISSUE_TEMPLATE/bug_report.md` | GitHub bug report template. |
 | `.github/ISSUE_TEMPLATE/feature_request.md` | GitHub feature request template. |
 | `.github/PULL_REQUEST_TEMPLATE.md` | GitHub PR template. |

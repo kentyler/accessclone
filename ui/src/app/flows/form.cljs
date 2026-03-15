@@ -11,6 +11,7 @@
             [app.effects.http :as http]
             [app.transforms.core :as t]
             [clojure.string :as str]
+            [app.flows.core :as f]
             [cljs.core.async :refer [go <!]]))
 
 ;; ============================================================
@@ -425,3 +426,11 @@
     :fn (fn [ctx]
           (state-form/call-session-function! (:function-name ctx))
           ctx)}])
+
+;; Register callbacks for intent_interpreter (breaks circular dep)
+(state/register-callback! :save-current-record
+  #(f/run-fire-and-forget! save-current-record-flow))
+(state/register-callback! :delete-current-record
+  #(f/run-fire-and-forget! delete-current-record-flow))
+(state/register-callback! :refresh-form
+  #(f/run-fire-and-forget! set-view-mode-flow {:mode :view}))

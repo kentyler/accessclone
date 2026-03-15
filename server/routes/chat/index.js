@@ -5,6 +5,7 @@
 const express = require('express');
 const router = express.Router();
 const path = require('path');
+const fs = require('fs');
 const { logError } = require('../../lib/events');
 const { dataTools, graphTools, moduleTools, queryTools, designCheckTools } = require('./tools');
 const { summarizeDefinition, checkImportCompleteness, formatMissingList, buildAppInventory, buildGraphContext, formatGraphContext, checkIntentDependencies, autoResolveGaps, autoResolveGapsLLM } = require('./context');
@@ -292,6 +293,32 @@ You can see all objects in this application. Help the user understand cross-obje
         ...designCheckTools
       ];
 
+      // Build system prompt — Three Horse gets its own context
+      let systemPrompt;
+      if (database_id === 'threehorse' && threeHorseContext) {
+        // Page-specific context based on which form is open
+        let pageContext = '';
+        if (form_context?.definition?.name) {
+          const pageName = form_context.definition.name;
+          if (pageName === 'Qualifying Analysis') {
+            pageContext = '\n\nThe user is currently on the Qualifying Analysis page. Focus answers on the diagnostic tool, how to get it, what the report contains, and what to do with results.';
+          } else if (pageName === 'How It Works') {
+            pageContext = '\n\nThe user is currently on the How It Works page. Focus answers on the migration process, what each step involves, and what the output looks like.';
+          } else if (pageName === 'About') {
+            pageContext = '\n\nThe user is currently on the About page. Focus answers on what Three Horse is, the problem it solves, and the AI partner concept.';
+          }
+        }
+        systemPrompt = `${threeHorseContext}${pageContext}
+
+Keep responses concise. Use concrete details rather than marketing language.`;
+      } else {
+        systemPrompt = `You are a helpful assistant for a database application called AccessClone. You help users understand their data, create forms, write queries, and work with their databases. ${dbContext}${tableContext}${queryContext}${formContext}${reportContext}${moduleContext}${macroContext}${sqlFunctionContext}${appContextStr}${issueContextStr}${assessmentContextStr}${graphContext}${completenessWarning}
+
+When you encounter naming confusion, structural problems, or UX issues, you can use the run_design_check tool to analyze the database against configurable design patterns.
+
+Keep responses concise and helpful. When discussing code or SQL, use markdown code blocks.`;
+      }
+
       // Call Anthropic API with tools
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -301,14 +328,10 @@ You can see all objects in this application. Help the user understand cross-obje
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
+          model: database_id === 'threehorse' ? 'claude-haiku-4-5-20251001' : 'claude-sonnet-4-20250514',
           max_tokens: (module_context?.module_name || macro_context?.macro_name || sql_function_context?.function_name || query_context?.query_name || assessment_context?.findings) ? 4096 : 1024,
-          tools: availableTools,
-          system: `You are a helpful assistant for a database application called AccessClone. You help users understand their data, create forms, write queries, and work with their databases. ${dbContext}${tableContext}${queryContext}${formContext}${reportContext}${moduleContext}${macroContext}${sqlFunctionContext}${appContextStr}${issueContextStr}${assessmentContextStr}${graphContext}${completenessWarning}
-
-When you encounter naming confusion, structural problems, or UX issues, you can use the run_design_check tool to analyze the database against configurable design patterns.
-
-Keep responses concise and helpful. When discussing code or SQL, use markdown code blocks.`,
+          tools: database_id === 'threehorse' ? [] : availableTools,
+          system: systemPrompt,
           messages: [
             ...(history || []).map(m => ({ role: m.role, content: m.content })),
             { role: 'user', content: message }
@@ -469,9 +492,18 @@ Keep responses concise and helpful. When discussing code or SQL, use markdown co
   let translationGuide = '';
   try {
     const guidePath = path.join(__dirname, '..', '..', '..', 'skills', 'conversion-vba-cljs.md');
-    translationGuide = require('fs').readFileSync(guidePath, 'utf8');
+    translationGuide = fs.readFileSync(guidePath, 'utf8');
   } catch (err) {
     console.log('Could not load conversion-vba-cljs.md skill file');
+  }
+
+  // Load Three Horse chat context for the threehorse database
+  let threeHorseContext = '';
+  try {
+    const thPath = path.join(__dirname, '..', '..', '..', 'skills', 'three-horse-chat.md');
+    threeHorseContext = fs.readFileSync(thPath, 'utf8');
+  } catch (err) {
+    console.log('Could not load three-horse-chat.md skill file');
   }
 
   /**

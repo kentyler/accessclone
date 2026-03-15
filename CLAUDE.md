@@ -217,6 +217,7 @@ The chat system prompt includes context based on the active tab:
 - **Reports**: `report_context` with `report_name`, `record_source` + full definition → same `summarizeDefinition()` helper
 - **Modules**: `module_context` with VBA source, CLJS translation, app object inventory. Also: `POST /api/chat/extract-intents` for structured intent extraction, `POST /api/chat/generate-wiring` for CLJS generation from intents
 - **Graph tools**: Always available for dependency/intent queries
+- **Three Horse**: When `database_id === 'threehorse'`, the entire system prompt is replaced with `skills/three-horse-chat.md` (loaded at startup). Page-specific context appended based on which form is open. Uses `claude-haiku-4-5` (cheap model) with no tools (pure conversation).
 
 Auto-analyze: When a report or form is opened with no existing chat transcript, `maybe-auto-analyze!` in state.cljs automatically sends a prompt asking the LLM to describe the object's structure/purpose and flag potential issues. Uses a pending-flag pattern to handle the race between transcript loading and definition loading — whichever async operation completes second triggers the analysis. The generated analysis is saved as the transcript so it won't re-fire on subsequent opens.
 

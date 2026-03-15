@@ -10,12 +10,8 @@
    immediately; async intents (dlookup, dcount, dsum, run-sql) await HTTP responses.
    A ctx map threads through the loop for result passing (:last-result)."
   (:require [app.state :as state :refer [app-state api-base db-headers]]
-            [app.state-form :as state-form]
             [app.projection :as projection]
             [app.views.expressions :as expr]
-            [app.flows.core :as f]
-            [app.flows.form :as form-flow]
-            [app.flows.navigation :as nav]
             [app.transforms.core :as t]
             [clojure.string :as str]
             [cljs-http.client :as http]
@@ -220,7 +216,7 @@
         nil)
 
       :close-current
-      (do (f/run-fire-and-forget! nav/close-current-tab-flow) nil)
+      (do (state/invoke-callback :close-current-tab) nil)
 
       ;; --- Record operations ---
       :goto-record
@@ -236,22 +232,22 @@
                   (if (number? target) target 1))]
         (if (= (keyword (str target)) :new-record)
           (t/dispatch! :new-record)
-          (state-form/navigate-to-record! pos))
+          (state/invoke-callback :navigate-to-record pos))
         nil)
 
       :new-record
       (do (t/dispatch! :new-record) nil)
 
       :save-record
-      (do (f/run-fire-and-forget! form-flow/save-current-record-flow) nil)
+      (do (state/invoke-callback :save-current-record) nil)
 
       :delete-record
       (do (when (js/confirm "Delete this record?")
-            (f/run-fire-and-forget! form-flow/delete-current-record-flow))
+            (state/invoke-callback :delete-current-record))
           nil)
 
       :requery
-      (do (f/run-fire-and-forget! form-flow/set-view-mode-flow {:mode :view}) nil)
+      (do (state/invoke-callback :refresh-form) nil)
 
       ;; --- Messages ---
       :show-message
@@ -306,7 +302,7 @@
       (let [field (or (:field intent) (:target intent))
             val (resolve-intent-value (:value intent) ctx)]
         (when field
-          (state-form/update-record-field! field val))
+          (state/invoke-callback :update-record-field field val))
         nil)
 
       :validate-required
@@ -388,3 +384,6 @@
                       (if (map? new-ctx) new-ctx ctx)))
              ;; sync intent, ctx unchanged
              (recur (next remaining) ctx))))))))
+
+;; Register callback for state_form (breaks circular dep)
+(state/register-callback! :execute-intents execute-intents)

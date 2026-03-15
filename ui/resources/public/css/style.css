@@ -1372,6 +1372,12 @@ header.header {
   height: 100%;
   object-fit: contain;
 }
+.view-image.cover {
+  object-fit: cover;
+}
+.view-image.right {
+  object-position: right;
+}
 
 .view-image-placeholder {
   width: 100%;

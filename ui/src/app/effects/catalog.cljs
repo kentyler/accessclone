@@ -525,7 +525,7 @@
    ;; ----------------------------------------------------------
    :fetch-import-completeness
    {:method   :get
-    :url      "/api/access-import/import-completeness"
+    :url      "/api/database-import/import-completeness"
     :domain   :logs
     :headers  :none
     :params   {:database_id "target database ID"}
@@ -535,7 +535,7 @@
 
    :fetch-import-history
    {:method   :get
-    :url      "/api/access-import/history"
+    :url      "/api/database-import/history"
     :domain   :logs
     :headers  :db
     :params   {:target_database_id "string" :limit "number"}
@@ -568,7 +568,7 @@
    ;; ----------------------------------------------------------
    :scan-access-databases
    {:method   :get
-    :url      "/api/access-import/scan"
+    :url      "/api/database-import/scan"
     :domain   :database
     :headers  :none
     :params   {:locations "optional path to scan"}

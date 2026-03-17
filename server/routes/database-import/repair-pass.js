@@ -193,7 +193,7 @@ module.exports = function(router, pool) {
       });
     } catch (err) {
       console.error('Error in repair pass:', err);
-      logError(pool, 'POST /api/access-import/repair-pass', 'Failed to run repair pass', err);
+      logError(pool, 'POST /api/database-import/repair-pass', 'Failed to run repair pass', err);
       res.status(500).json({ error: err.message || 'Failed to run repair pass' });
     }
   });

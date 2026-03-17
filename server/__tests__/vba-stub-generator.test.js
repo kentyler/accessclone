@@ -131,7 +131,7 @@ describe('buildStubDDL', () => {
     };
     const sql = buildStubDDL('db_northwind', decl);
     expect(sql).toContain('"db_northwind"."productallocated"');
-    expect(sql).toContain('productid bigint');
+    expect(sql).toContain('"productid" bigint');
     expect(sql).toContain('RETURNS double precision');
     expect(sql).toContain('RETURN NULL');
     expect(sql).toContain('LANGUAGE plpgsql');
@@ -146,10 +146,10 @@ describe('buildStubDDL', () => {
     };
     const sql = buildStubDDL('db_northwind', decl);
     expect(sql).toContain('RETURNS void');
-    expect(sql).toContain('no-op');
+    expect(sql).toContain('LANGUAGE plpgsql');
   });
 
-  test('uses text type for untyped params', () => {
+  test('uses anyelement type for untyped/Variant params', () => {
     const decl = {
       name: 'Untyped',
       params: [{ name: 'x', type: null }],
@@ -157,7 +157,8 @@ describe('buildStubDDL', () => {
       isSub: false
     };
     const sql = buildStubDDL('db_northwind', decl);
-    expect(sql).toContain('x text');
+    expect(sql).toContain('"x" anyelement');
     expect(sql).toContain('RETURNS text');
+    expect(sql).toContain('LANGUAGE sql');
   });
 });

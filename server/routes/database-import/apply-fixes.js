@@ -108,7 +108,7 @@ module.exports = function(router, pool) {
       res.json({ results });
     } catch (err) {
       console.error('Error applying fixes:', err);
-      logError(pool, 'POST /api/access-import/apply-fixes', 'Failed to apply fixes', err);
+      logError(pool, 'POST /api/database-import/apply-fixes', 'Failed to apply fixes', err);
       res.status(500).json({ error: 'Failed to apply fixes' });
     }
   });

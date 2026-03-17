@@ -2,8 +2,11 @@
   "Shared utility functions for both form and report editors.
    Consolidates duplicate functions from form-utils and report-utils."
   (:require [clojure.string :as str]
+            [reagent.core :as r]
             [app.state :as state]
-            [app.views.expressions :as expr]))
+            [app.views.expressions :as expr]
+            [cljs-http.client :as http]
+            [cljs.core.async :refer [go <!]]))
 
 (defn snap-to-grid
   "Snap a coordinate to the nearest grid point.
@@ -277,3 +280,84 @@
         (coerce-display-hiccup (:label ctrl))
         (coerce-display-hiccup (:caption ctrl))
         "")))
+
+;; ============================================================
+;; Business Intent Panel — shared by form/report/query viewers
+;; ============================================================
+
+(defn intent-panel
+  "Collapsible panel showing extracted business intents for a form, report, or query.
+   `intents` is the _intents map from the definition response.
+   `object-type` is :form, :report, or :query.
+   `object-name` is the name string."
+  [intents object-type object-name]
+  (let [collapsed? (r/atom true)
+        extracting? (r/atom false)]
+    (fn [intents object-type object-name]
+      [:div.intent-panel
+       {:style {:border-top "1px solid #e0e0e0" :margin-top "8px" :padding-top "6px"}}
+       [:div {:style {:display "flex" :align-items "center" :gap "8px" :cursor "pointer"}
+              :on-click #(swap! collapsed? not)}
+        [:span {:style {:font-size "11px" :color "#888"}}
+         (if @collapsed? "\u25B6" "\u25BC")]
+        [:span {:style {:font-size "12px" :font-weight "500" :color "#555"}}
+         "Business Intent"]
+        (when-not intents
+          [:button.btn-link
+           {:style {:font-size "11px" :padding "0 4px"}
+            :on-click (fn [e]
+                        (.stopPropagation e)
+                        (reset! extracting? true)
+                        (go
+                          (let [db-id (get-in @state/app-state [:current-database :database_id])
+                                resp (<! (http/post (str state/api-base "/api/database-import/extract-object-intents")
+                                                    {:json-params {:database_id db-id}
+                                                     :headers (state/db-headers)
+                                                     :timeout 300000}))]
+                            (reset! extracting? false)
+                            (when (:success resp)
+                              ;; Reload the object to get the intents
+                              (case object-type
+                                :form (state/load-forms!)
+                                :report (state/load-reports!)
+                                nil)))))}
+           (if @extracting? "Extracting..." "Extract")])]
+       (when (and intents (not @collapsed?))
+         [:div {:style {:padding "6px 0 4px 16px" :font-size "12px" :color "#555" :line-height "1.6"}}
+          (when (:purpose intents)
+            [:div {:style {:margin-bottom "4px"}}
+             [:strong "Purpose: "] (:purpose intents)])
+          (when (:category intents)
+            [:div {:style {:margin-bottom "4px"}}
+             [:span.intent-category
+              {:style {:background "#e8f0fe" :color "#1a73e8" :padding "1px 6px"
+                       :border-radius "8px" :font-size "11px"}}
+              (:category intents)]])
+          (when (seq (:entities intents))
+            [:div {:style {:margin-bottom "4px"}}
+             [:strong "Entities: "] (str/join ", " (:entities intents))])
+          (when (seq (:data_flows intents))
+            [:div {:style {:margin-bottom "4px"}}
+             [:strong "Data flows:"]
+             [:ul {:style {:margin "2px 0 0 16px" :padding 0}}
+              (for [[idx f] (map-indexed vector (:data_flows intents))]
+                ^{:key (str "flow-" idx)}
+                [:li (str (:direction f) " " (:target f) " \u2014 " (:via f))])]])
+          (when (seq (:workflows intents))
+            [:div {:style {:margin-bottom "4px"}}
+             [:strong "Workflows:"]
+             [:ol {:style {:margin "2px 0 0 16px" :padding 0}}
+              (for [[idx w] (map-indexed vector (:workflows intents))]
+                ^{:key (str "wf-" idx)}
+                [:li w])]])
+          (when (:grouping_purpose intents)
+            [:div {:style {:margin-bottom "4px"}}
+             [:strong "Grouping: "] (:grouping_purpose intents)])
+          (when (seq (:gaps intents))
+            [:div {:style {:margin-bottom "4px"}}
+             [:strong "Gaps:"]
+             (for [[idx g] (map-indexed vector (:gaps intents))]
+               ^{:key (str "gap-" idx)}
+               [:div {:style {:padding "2px 0" :color (if (= "warning" (:severity g)) "#e67e22" "#888")}}
+                (str "[" (:severity g) "] " (:finding g))])])])])))
+

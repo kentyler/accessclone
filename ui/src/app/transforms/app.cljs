@@ -111,3 +111,19 @@
   "Set whether a pipeline operation is currently running."
   [state running?]
   (assoc-in state [:app-viewer :pipeline-running?] running?))
+
+;; Business intent extraction state
+(defn set-extracting-object-intents
+  "Set whether batch object intent extraction is in progress."
+  [state extracting?]
+  (assoc-in state [:app-viewer :extracting-object-intents?] extracting?))
+
+(defn set-object-intent-progress
+  "Update object intent extraction progress."
+  [state progress]
+  (assoc-in state [:app-viewer :object-intent-progress] progress))
+
+(defn set-object-intent-results
+  "Store object intent extraction results."
+  [state results]
+  (assoc-in state [:app-viewer :object-intent-results] results))

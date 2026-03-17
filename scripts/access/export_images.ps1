@@ -23,6 +23,8 @@ param(
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
+. "$PSScriptRoot\com_helpers.ps1"
+
 # Diagnostic output goes to stderr so it doesn't pollute JSON on stdout
 function Log-Info([string]$msg) { [Console]::Error.WriteLine($msg) }
 function Log-Warn([string]$msg) { [Console]::Error.WriteLine("WARNING: $msg") }
@@ -501,15 +503,18 @@ function Parse-SaveAsText {
 function Kill-Access {
     Get-Process MSACCESS -ErrorAction SilentlyContinue | Stop-Process -Force
     Start-Sleep -Seconds 3
-    $lf = $DatabasePath -replace '\.accdb$', '.laccdb'
-    Remove-Item $lf -Force -ErrorAction SilentlyContinue
+    if ($DatabasePath -match '\.accdb$') {
+        Remove-Item ($DatabasePath -replace '\.accdb$', '.laccdb') -Force -ErrorAction SilentlyContinue
+    } elseif ($DatabasePath -match '\.mdb$') {
+        Remove-Item ($DatabasePath -replace '\.mdb$', '.ldb') -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Open-AccessSession {
     $app = New-Object -ComObject Access.Application
     $app.AutomationSecurity = 3  # msoAutomationSecurityForceDisable
     $app.Visible = $true
-    $app.OpenCurrentDatabase($DatabasePath)
+    Open-AccessDatabase -AccessApp $app -DatabasePath $DatabasePath
     return $app
 }
 

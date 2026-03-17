@@ -20,6 +20,8 @@ function Escape-JsonStr([string]$s) {
     return $s.Replace('\', '\\').Replace('"', '\"')
 }
 
+. "$PSScriptRoot\com_helpers.ps1"
+
 $app = $null
 $autoExecDisabled = $false
 $autoExecRestored = $false
@@ -79,7 +81,7 @@ try {
     try {
         $app = New-Object -ComObject Access.Application
         $app.AutomationSecurity = 3  # msoAutomationSecurityForceDisable
-        $app.OpenCurrentDatabase($fullInput, $false)  # not exclusive (DAO released it)
+        Open-AccessDatabase -AccessApp $app -DatabasePath $fullInput
 
         # acFileFormatAccess2007 = 12
         $app.SaveAsNewDatabase($OutputPath, 12)

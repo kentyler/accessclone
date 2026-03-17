@@ -6,7 +6,17 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 
 ## Current State
 
-### Just Shipped (2026-03-14)
+### Just Shipped (2026-03-16)
+- **Import pipeline folder rename**: `server/routes/access-import/` renamed to `server/routes/database-import/` to make the import pipeline platform-agnostic for upcoming FoxPro support. All references updated across frontend and backend. API prefix is `/api/database-import`.
+- **Qualifying analysis: Import Difficulty Assessment**: New section in `scripts/qualifying-analysis.ps1` that scores databases on import difficulty (0-10+ weighted score) and recommends auto-import vs individual import.
+  - Scoring based on: tables without PKs, action/crosstab/passthrough queries, form-referencing queries, complex forms (10+ events), subforms, VBA external deps, large modules, problematic column types.
+  - Three levels: Low (0-2) = auto-import, Moderate (3-5) = auto with attention, High (6+) = individual import with suggested order (tables -> forms -> queries -> modules -> macros).
+  - Report includes **Risk Factors** (what drives the score) and **Objects to Watch** (specific items needing attention with reasons).
+- **Qualifying analysis: Timeout protection**: Access.Application phase now runs in a PowerShell background job with 120s timeout. If Access hangs (common with .mdb files that have VBA compile errors like missing PtrSafe, or startup forms), the script degrades gracefully and reports what DAO captured (tables, queries, relationships).
+- **Qualifying analysis: AutoExec handling**: Calls `scripts/access/disable_autoexec.ps1` before opening with Access.Application, restores after. Prevents AutoExec macros from blocking the analysis.
+- **Tested on ms-cranbrook.mdb**: Vehicle maintenance tracker (20 tables, 36 queries, 33 forms, 38 VBA modules/3,203 lines, 24 macros). Scored 9/High — correctly recommended individual import. Hit the PtrSafe compile error (32-bit API Declares in 64-bit Access), timeout caught it gracefully.
+
+### Previously Shipped (2026-03-14)
 - **Three Horse website initial build**: The threehorse database now functions as a public-facing website using the platform's own form rendering.
   - `skills/three-horse-chat.md`: System prompt for the Three Horse chat — distilled from `THREE-HORSE-PRELIMINARY.md` and `scripts/qualifying-guide.md`. Covers what TH does, platforms, migration process, AI partner, pricing, qualifying analysis tool, tone guidelines.
   - `server/routes/chat/index.js`: When `database_id === 'threehorse'`, uses the Three Horse skills file as the base system prompt instead of the generic AccessClone prompt. Page-specific context added based on which form is open (About, Qualifying Analysis, How It Works). Uses `claude-haiku-4-5` (cheap model) with no tools (pure conversation).
@@ -40,8 +50,8 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
   - Files modified: `style.css`, `form_view.cljs`, `editor_utils.cljs`, `access_database_viewer.cljs`, `index.html`, `export_form.ps1`, `export_forms_batch.ps1`
 
 ### Previously Shipped (2026-03-09)
-- **Server-side module translation during import**: New `POST /api/access-import/translate-modules` endpoint does the full extract→map→resolve→generate pipeline for all modules in one server call. Replaces the old fragile frontend orchestration (`batch-extract-intents!` → `auto-resolve-gaps!` → `batch-generate-code!`) which made N sequential LLM HTTP calls per module and silently failed. The new endpoint handles errors per-module so one failure doesn't abort the chain.
-  - New file: `server/routes/access-import/translate-modules.js`
+- **Server-side module translation during import**: New `POST /api/database-import/translate-modules` endpoint does the full extract→map→resolve→generate pipeline for all modules in one server call. Replaces the old fragile frontend orchestration (`batch-extract-intents!` → `auto-resolve-gaps!` → `batch-generate-code!`) which made N sequential LLM HTTP calls per module and silently failed. The new endpoint handles errors per-module so one failure doesn't abort the chain.
+  - New file: `server/routes/database-import/translate-modules.js`
   - Extracted `autoResolveGapsLLM()` from inline chat handler into `server/routes/chat/context.js` for reuse
   - `import-all!` now calls the endpoint after the queries phase (`:translating` phase)
   - `auto-import-all!` simplified — translation handled inside `import-all!`
@@ -61,10 +71,10 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
   - Pass 3: Validation — runs structural + cross-object lint, checks subform references, validates combo-box SQL via EXPLAIN
   - Pass 4: Design review — LLM-based analysis against user-editable design patterns (`settings/design-patterns.json`)
 - **Unified import log**: `shared.import_issues` migrated into `shared.import_log` (new columns: run_id, pass_number, phase, action, severity, category, message, suggestion, resolved). All 13 INSERT sites across 6 files updated.
-- **Import runs**: New `shared.import_runs` table tracks each import with start/end times, status, and summary. Endpoints: `POST /api/access-import/start-run`, `POST /api/access-import/complete-run`, `GET /api/access-import/run/:runId`.
+- **Import runs**: New `shared.import_runs` table tracks each import with start/end times, status, and summary. Endpoints: `POST /api/database-import/start-run`, `POST /api/database-import/complete-run`, `GET /api/database-import/run/:runId`.
 - **Design check system**: Standalone capability accessible from import (pass 4), App Viewer ("Run Design Check" button), and chat (LLM tool `run_design_check`). Checks configurable via `settings/design-patterns.json` (12 checks across architecture, UX, LLM-legibility). Endpoints: `GET/PUT /api/design-check/patterns`, `POST /api/design-check/run`.
 - **Enhanced import log panel**: Groups entries by pass number with color-coded severity (info=grey, warning=amber, error=red). Shows design recommendations with accept/dismiss affordance.
-- New files: `repair-pass.js`, `validation-pass.js`, `run.js` (in access-import/), `design-check.js` (in routes/), `design-patterns.json` (in settings/)
+- New files: `repair-pass.js`, `validation-pass.js`, `run.js` (in database-import/), `design-check.js` (in routes/), `design-patterns.json` (in settings/)
 
 ### Previously Shipped (2026-03-08)
 - **SaveAsText-based image extraction**: Rewrote `scripts/access/export_images.ps1` to use `Application.SaveAsText` instead of COM `PictureData` property reading (which never worked). Stack-based parser extracts `PictureData` hex blocks from SaveAsText text output. Also handles non-PictureData property blocks (`ObjectPalette`, `NameMap`, etc.) so their `End` doesn't mis-pop the structural stack.
@@ -72,9 +82,9 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
   - **DIB format support**: Access stores many embedded images as raw BITMAPINFOHEADER (no BMP file header). `Find-ImageStart` now detects DIB signatures and `Convert-HexToImage` prepends a 14-byte BMP file header so browsers can render them.
   - **Shared image resolution**: Parser tracks `Picture` property on stack entries. When an entry is popped with a `Picture` ref but no `PictureData`, looks up the name in MSysResources shared images.
   - **Tested on Northwind**: 15 shared PNGs loaded from MSysResources, 2 shared images resolved in forms (frmStartup, frmLogin), 2 embedded DIB images extracted from rptLearn.
-  - **Ready to test full pipeline**: Run `POST /api/access-import/import-images` with `{"databasePath": "C:\\Users\\Ken\\Desktop\\cloneexamples\\northwinddev.accdb", "targetDatabaseId": "northwind4"}` to import images into form/report definitions in PostgreSQL. Then check forms in the app for visible images.
+  - **Ready to test full pipeline**: Run `POST /api/database-import/import-images` with `{"databasePath": "C:\\Users\\Ken\\Desktop\\cloneexamples\\northwinddev.accdb", "targetDatabaseId": "northwind4"}` to import images into form/report definitions in PostgreSQL. Then check forms in the app for visible images.
 - **Auto-apply assessment fixes during import**: Assessment findings are now applied automatically — no user decisions needed. The widget is read-only informational; fixes execute during the import pipeline.
-  - New endpoint: `POST /api/access-import/apply-fixes` in `server/routes/access-import/apply-fixes.js`. Accepts `skipEmptyTables`, `relationships`, `installTablefunc`, `reservedWords`. Each fix attempted individually with try/catch, results logged to `shared.import_log`.
+  - New endpoint: `POST /api/database-import/apply-fixes` in `server/routes/database-import/apply-fixes.js`. Accepts `skipEmptyTables`, `relationships`, `installTablefunc`, `reservedWords`. Each fix attempted individually with try/catch, results logged to `shared.import_log`.
   - `import-all!` in `access_database_viewer.cljs` now extracts fix data from assessment findings, filters empty tables out of the tables phase, and calls apply-fixes after tables are imported.
   - Assessment widget in `main.cljs` simplified: removed `import-mode` atom, radio buttons, checkboxes. Now shows findings as read-only list with a note that fixes are auto-applied.
   - Cleaned up `toggle-assessment-check` transform (removed from `ui.cljs` and `core.cljs`).
@@ -96,9 +106,9 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 - **Stripped Notes/Hub/Corpus code**: Removed hub.cljs, notes.cljs, llm_registry.cljs, meetings.cljs, messaging.cljs, email.cljs, flows/notes.cljs, transforms/notes.cljs, server/routes/notes.js, server/lib/llm-router.js, server/lib/embeddings.js, skills/notes-corpus.md, docs/corpus-medium-plans.md. Removed corpus_entries/corpus_retrievals tables and pgvector from schema.js. Removed llm-registry from config.json. Cleaned CSS (~750 lines), CLAUDE.md, codebase-guide.md. AccessClone is now purely the Access→PostgreSQL conversion tool. Historical references in sessions below are for context only.
 
 ### Previously Shipped (2026-02-24)
-- **Pre-import database assessment**: Deterministic analysis of Access databases before import. `POST /api/access-import/assess` checks scan data for structural issues (reserved words, missing PKs), design issues (wide tables, empty unreferenced tables, missing relationships), and complexity issues (large VBA modules, crosstab queries, naming inconsistency). Results appear as an interactive widget in the chat panel.
-  - Server: `server/routes/access-import/assess.js` — assessment endpoint with PG reserved word list, naming pattern detection, relationship heuristics.
-  - PowerShell: `scripts/access/list_relationships.ps1` — extracts Access relationships via DAO, wired into `GET /api/access-import/database`.
+- **Pre-import database assessment**: Deterministic analysis of Access databases before import. `POST /api/database-import/assess` checks scan data for structural issues (reserved words, missing PKs), design issues (wide tables, empty unreferenced tables, missing relationships), and complexity issues (large VBA modules, crosstab queries, naming inconsistency). Results appear as an interactive widget in the chat panel.
+  - Server: `server/routes/database-import/assess.js` — assessment endpoint with PG reserved word list, naming pattern detection, relationship heuristics.
+  - PowerShell: `scripts/access/list_relationships.ps1` — extracts Access relationships via DAO, wired into `GET /api/database-import/database`.
   - Frontend: 3 transforms (`set-assessment`, `toggle-assessment-check`, `clear-assessment`), `run-assessment-flow` in `flows/ui.cljs`. Assessment triggers on target DB selection and after source DB scan loads; guards against re-running.
   - Widget: collapsible sections (structural/design/complexity), read-only informational display. Fixes auto-applied during import (see 2026-03-08).
   - LLM-enhanced: after deterministic assessment, findings + scan summary auto-sent to LLM for domain-aware analysis. Assessment context threaded into chat system prompt via `assessment_context` in `state.cljs` and `chat/index.js`.
@@ -148,7 +158,7 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 - **`batch-generate-code-flow`** in `flows/app.cljs` — loads all modules with intents, multi-pass generation with dependency retry, saves CLJS back to each module.
 - **Pipeline UI**: `app_viewer.cljs` gap-decisions-pane now shows numbered step headers (Extract Intents → Resolve Gaps → Generate Code) with progress bars and color-coded results summary.
 - **PRODUCT.md**: Full product description covering import pipeline, intent extraction, transform architecture as prelude to AI automation, three-phase trajectory (migration → AI-assisted → AI-automated).
-- **Automatic .mdb → .accdb conversion**: `convert_mdb.ps1` converts Access 97-2003 .mdb files to .accdb via `Access.Application.SaveAsNewDatabase`. Wired into `GET /api/access-import/database` — user selects an .mdb, pipeline silently converts and runs unchanged. Response includes `convertedFrom` field.
+- **Automatic .mdb → .accdb conversion**: `convert_mdb.ps1` converts Access 97-2003 .mdb files to .accdb via `Access.Application.SaveAsNewDatabase`. Wired into `GET /api/database-import/database` — user selects an .mdb, pipeline silently converts and runs unchanged. Response includes `convertedFrom` field.
 - **Automatic AutoExec disabling**: `disable_autoexec.ps1` renames AutoExec → xAutoExec via `DAO.DBEngine.120` (engine-level, no macro trigger). Called before/after listing scripts in the `/database` endpoint. No more manual renaming needed.
 - **README rewrite**: "Copy the intent, not the code" philosophy — explains intent extraction pipeline as the core differentiator. Added AI-Assisted Setup section (shell-access vs chat-only tools). Added appendix positioning AccessClone as an AI agent substrate for OpenClaw integration.
 - **INSTRUCTIONS.md rewrite**: Distinguishes shell-access tools (Claude Code, Codex, Cursor) from chat-only tools (ChatGPT, Claude web) with mode-specific guidance throughout all setup steps.
@@ -158,7 +168,7 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 
 ### Previously Shipped (2026-02-12)
 - **LLM fallback for query conversion** (PR #23): When the regex-based Access→PG converter produces SQL that fails execution, automatically falls back to Claude Sonnet with schema context (tables, views, columns, functions), control mappings, and the PG error message. LLM-assisted conversions flagged in `shared.import_issues` with category `llm-assisted`. Graceful degradation when no API key configured.
-- **VBA stub function generator**: `createStubFunctions()` parses VBA modules for function declarations and creates placeholder PG functions so views can reference user-defined functions. Endpoint: `POST /api/access-import/create-function-stubs`.
+- **VBA stub function generator**: `createStubFunctions()` parses VBA modules for function declarations and creates placeholder PG functions so views can reference user-defined functions. Endpoint: `POST /api/database-import/create-function-stubs`.
 - **Query converter fixes**: EXTRACT(YEAR FROM ...) no longer schema-prefixes the FROM keyword. DAO parameters that are actually form/parent refs (`[Parent].[EmployeeID]`, `[Table].[Column]`) filtered out — queries stay as views instead of becoming functions.
 - **Table-level form state sync**: `shared.form_control_state` keyed by `(session_id, table_name, column_name)`. `shared.control_column_map` maps form controls → table.column at save time. Query converter resolves `[Forms]![frmX]![ctrl]` via this mapping. See `skills/form-state-sync.md` for full architecture.
 - **Import order**: tables → forms/reports → queries → macros → modules. Forms must be imported before queries so control_column_map exists.
@@ -173,11 +183,11 @@ After the PowerShell scripts were updated to export `BackStyle`, existing form d
 ### Next Up — Image Import Test
 With the server running, test the full image import pipeline for Northwind:
 
-curl -X POST http://localhost:3000/api/access-import/import-images -H "Content-Type: application/json" -d "{\"databasePath\": \"C:\\\\Users\\\\Ken\\\\Desktop\\\\cloneexamples\\\\northwinddev.accdb\", \"targetDatabaseId\": \"northwind4\"}"
+curl -X POST http://localhost:3000/api/database-import/import-images -H "Content-Type: application/json" -d "{\"databasePath\": \"C:\\\\Users\\\\Ken\\\\Desktop\\\\cloneexamples\\\\northwinddev.accdb\", \"targetDatabaseId\": \"northwind4\"}"
 
 This will run export_images.ps1 against all 28 forms and 15 reports, extract shared + embedded images, and patch the form/report definitions in PostgreSQL with data URIs. Then open forms in the app to verify images are visible.
 
-Check results with: `GET /api/access-import/image-status?targetDatabaseId=northwind4`
+Check results with: `GET /api/database-import/image-status?targetDatabaseId=northwind4`
 
 ### Next Up — Other
 - Connect remaining hub sections to real functionality (Meetings, Messaging, Email are still stubs — Notes is now live)

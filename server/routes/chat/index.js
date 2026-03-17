@@ -8,7 +8,7 @@ const path = require('path');
 const fs = require('fs');
 const { logError } = require('../../lib/events');
 const { dataTools, graphTools, moduleTools, queryTools, designCheckTools } = require('./tools');
-const { summarizeDefinition, checkImportCompleteness, formatMissingList, buildAppInventory, buildGraphContext, formatGraphContext, checkIntentDependencies, autoResolveGaps, autoResolveGapsLLM } = require('./context');
+const { summarizeDefinition, checkImportCompleteness, formatMissingList, buildAppInventory, buildGraphContext, formatGraphContext, checkIntentDependencies, autoResolveGaps, autoResolveGapsLLM, loadObjectIntents, formatObjectIntents } = require('./context');
 const { executeTool } = require('./tool-handlers');
 const { deriveCapabilities } = require('../../lib/capability-deriver');
 const { upsertNode, upsertEdge, findNode } = require('../../graph/query');
@@ -284,6 +284,22 @@ You can see all objects in this application. Help the user understand cross-obje
         }
       }
 
+      // Load business intents if available for the active object
+      let intentContext = '';
+      if (database_id) {
+        let intents = null;
+        if (form_context?.form_name) {
+          intents = await loadObjectIntents(pool, 'form', form_context.form_name, database_id);
+        } else if (report_context?.report_name) {
+          intents = await loadObjectIntents(pool, 'report', report_context.report_name, database_id);
+        } else if (query_context?.query_name) {
+          intents = await loadObjectIntents(pool, 'query', query_context.query_name, database_id);
+        }
+        if (intents) {
+          intentContext = '\n\nExtracted business intent for this object:\n' + formatObjectIntents(intents);
+        }
+      }
+
       // Combine all available tools
       const availableTools = [
         ...(form_context?.record_source ? dataTools : []),
@@ -312,7 +328,7 @@ You can see all objects in this application. Help the user understand cross-obje
 
 Keep responses concise. Use concrete details rather than marketing language.`;
       } else {
-        systemPrompt = `You are a helpful assistant for a database application called AccessClone. You help users understand their data, create forms, write queries, and work with their databases. ${dbContext}${tableContext}${queryContext}${formContext}${reportContext}${moduleContext}${macroContext}${sqlFunctionContext}${appContextStr}${issueContextStr}${assessmentContextStr}${graphContext}${completenessWarning}
+        systemPrompt = `You are a helpful assistant for a database application called AccessClone. You help users understand their data, create forms, write queries, and work with their databases. ${dbContext}${tableContext}${queryContext}${formContext}${reportContext}${moduleContext}${macroContext}${sqlFunctionContext}${appContextStr}${issueContextStr}${assessmentContextStr}${graphContext}${intentContext}${completenessWarning}
 
 When you encounter naming confusion, structural problems, or UX issues, you can use the run_design_check tool to analyze the database against configurable design patterns.
 

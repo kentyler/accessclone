@@ -634,7 +634,7 @@
   []
   (when-let [db-id (:database_id (:current-database @app-state))]
     (go
-      (let [response (<! (http/get (str api-base "/api/access-import/import-completeness")
+      (let [response (<! (http/get (str api-base "/api/database-import/import-completeness")
                                    {:query-params {:database_id db-id}}))]
         (when (:success response)
           (swap! app-state assoc :import-completeness (:body response)))))))
@@ -824,7 +824,7 @@
     (when db-id
       (swap! app-state assoc :logs-loading? true)
       (go
-        (let [response (<! (http/get (str api-base "/api/access-import/history")
+        (let [response (<! (http/get (str api-base "/api/database-import/history")
                                      {:query-params {:target_database_id db-id
                                                      :limit 200}}))]
           (swap! app-state assoc :logs-loading? false)
@@ -973,7 +973,7 @@
         (log-error! "Failed to save configuration" "save-config" {:response (:body response)})))))
 
 (defn has-capability?
-  "Check if a server capability is available (e.g. :file-system, :powershell, :access-import)"
+  "Check if a server capability is available (e.g. :file-system, :powershell, :database-import)"
   [cap]
   (get-in @app-state [:config :capabilities cap]))
 
@@ -1171,7 +1171,7 @@
   ([] (load-access-databases! nil))
   ([locations]
    (go
-     (let [url (cond-> (str api-base "/api/access-import/scan")
+     (let [url (cond-> (str api-base "/api/database-import/scan")
                  locations (str "?locations=" (js/encodeURIComponent locations)))
            response (<! (http/get url))]
        (if (:success response)

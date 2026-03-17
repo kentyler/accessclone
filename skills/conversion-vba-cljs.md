@@ -284,7 +284,7 @@ AccessClone can run locally (Electron + Express) or as a web app. The server exp
 Available capabilities:
 - `:file-system` — Local file read/write/copy via backend API
 - `:powershell` — PowerShell available (Windows/WSL)
-- `:access-import` — Access database import via COM
+- `:database-import` — Access database import via COM
 
 **Use `require-local!` to guard local-only operations.** This ensures web users get a clear message with a path to get help.
 

@@ -202,7 +202,7 @@ module.exports = function(router, pool) {
       });
     } catch (err) {
       console.error('Error in validation pass:', err);
-      logError(pool, 'POST /api/access-import/validation-pass', 'Failed to run validation pass', err);
+      logError(pool, 'POST /api/database-import/validation-pass', 'Failed to run validation pass', err);
       res.status(500).json({ error: err.message || 'Failed to run validation pass' });
     }
   });

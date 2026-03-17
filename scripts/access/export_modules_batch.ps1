@@ -10,6 +10,8 @@ param(
     [string]$ModuleNames
 )
 
+. "$PSScriptRoot\com_helpers.ps1"
+
 # Parse comma-separated module names
 $names = $ModuleNames -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
 
@@ -23,8 +25,11 @@ Get-Process MSACCESS -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorA
 Start-Sleep -Milliseconds 500
 
 # Remove lock file if exists
-$lockFile = $DatabasePath -replace '\.accdb$', '.laccdb'
-Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
+if ($DatabasePath -match '\.accdb$') {
+    Remove-Item ($DatabasePath -replace '\.accdb$', '.laccdb') -Force -ErrorAction SilentlyContinue
+} elseif ($DatabasePath -match '\.mdb$') {
+    Remove-Item ($DatabasePath -replace '\.mdb$', '.ldb') -Force -ErrorAction SilentlyContinue
+}
 
 $results = [ordered]@{}
 $errors = @()
@@ -33,7 +38,7 @@ $accessApp = $null
 try {
     $accessApp = New-Object -ComObject Access.Application
     $accessApp.AutomationSecurity = 3  # msoAutomationSecurityForceDisable
-    $accessApp.OpenCurrentDatabase($DatabasePath)
+    Open-AccessDatabase -AccessApp $accessApp -DatabasePath $DatabasePath
 
     foreach ($moduleName in $names) {
         try {
@@ -43,10 +48,14 @@ try {
                 try { [System.Runtime.Interopservices.Marshal]::ReleaseComObject($accessApp) | Out-Null } catch {}
                 Get-Process MSACCESS -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
                 Start-Sleep -Seconds 2
-                Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
+                if ($DatabasePath -match '\.accdb$') {
+                    Remove-Item ($DatabasePath -replace '\.accdb$', '.laccdb') -Force -ErrorAction SilentlyContinue
+                } elseif ($DatabasePath -match '\.mdb$') {
+                    Remove-Item ($DatabasePath -replace '\.mdb$', '.ldb') -Force -ErrorAction SilentlyContinue
+                }
                 $accessApp = New-Object -ComObject Access.Application
                 $accessApp.AutomationSecurity = 3
-                $accessApp.OpenCurrentDatabase($DatabasePath)
+                Open-AccessDatabase -AccessApp $accessApp -DatabasePath $DatabasePath
             }
 
             Write-Host "Exporting module: $moduleName" -ForegroundColor Cyan

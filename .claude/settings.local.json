@@ -20,7 +20,13 @@
       "Bash(tasklist:*)",
       "Bash(\"C:\\\\Program Files\\\\PostgreSQL\\\\18\\\\bin\\\\psql\":*)",
       "WebSearch",
-      "mcp__claude-corpus__corpus-search"
+      "mcp__claude-corpus__corpus-search",
+      "mcp__claude-corpus__corpus-write",
+      "mcp__claude-corpus__corpus-log",
+      "Bash(powershell:*)",
+      "Bash(\"C:/Program Files/PostgreSQL/18/bin/psql.exe\":*)",
+      "Bash(mv:*)",
+      "Bash(taskkill:*)"
     ]
   }
 }

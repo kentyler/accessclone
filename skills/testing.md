@@ -56,7 +56,7 @@ cd electron && npm run test:coverage
 These areas currently have **no automated tests**. Be extra careful when changing them, and consider adding tests if your change is non-trivial:
 
 - **API routes** (`server/routes/`) — No HTTP integration tests except schema routing. `supertest` is installed but underused.
-- **Access import pipeline** (`server/routes/access-import/`) — Complex multi-step pipeline with no tests. Changes here should be verified manually.
+- **Access import pipeline** (`server/routes/database-import/`) — Complex multi-step pipeline with no tests. Changes here should be verified manually.
 - **Expression converter** (`server/lib/expression-converter/`) — Converts Access expressions to PostgreSQL. No tests despite being a complex transformer.
 - **Graph engine** (`server/graph/`) — Dependency/intent graph population and queries.
 - **Chat/LLM integration** (`server/routes/chat.js`) — Context building, tool dispatch.

@@ -70,8 +70,12 @@ function Safe-Get {
 Get-Process MSACCESS -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 
-$lockFile = $DatabasePath -replace '\.accdb$', '.laccdb'
-Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
+# Remove lock file if exists
+if ($DatabasePath -match '\.accdb$') {
+    Remove-Item ($DatabasePath -replace '\.accdb$', '.laccdb') -Force -ErrorAction SilentlyContinue
+} elseif ($DatabasePath -match '\.mdb$') {
+    Remove-Item ($DatabasePath -replace '\.mdb$', '.ldb') -Force -ErrorAction SilentlyContinue
+}
 
 # ============================================================
 # Main diagnostic

@@ -28,7 +28,7 @@ Server runs on http://localhost:3001 (or `PORT` env variable).
 | `events.js` | `/api/events` | Error/event logging |
 | `config.js` | `/api/config` | App configuration |
 | `graph.js` | `/api/graph` | Dependency/intent graph |
-| `access-import.js` | `/api/access-import` | Import from Access databases |
+| `database-import.js` | `/api/database-import` | Import from Access databases |
 
 ## Data Storage
 

@@ -141,7 +141,7 @@ Outputs:
 
 Delegate to `conversion-tables.md`
 
-**Automated path (preferred):** Use the Access Database Viewer UI — select tables, pick target database, click Import. The server-side pipeline (`POST /api/access-import/import-table`) handles extraction, type mapping, table creation, data insertion, and index creation in one transaction.
+**Automated path (preferred):** Use the Access Database Viewer UI — select tables, pick target database, click Import. The server-side pipeline (`POST /api/database-import/import-table`) handles extraction, type mapping, table creation, data insertion, and index creation in one transaction.
 
 **Manual path (fallback):** Follow the step-by-step instructions in `conversion-tables.md`.
 

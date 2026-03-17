@@ -529,8 +529,86 @@ No explanation, no markdown fences — just the JSON array.`,
   return allSelections;
 }
 
+/**
+ * Load extracted business intents for a form, report, or query.
+ *
+ * @param {Object} pool - PG pool
+ * @param {'form'|'report'|'query'} objectType
+ * @param {string} objectName
+ * @param {string} databaseId
+ * @returns {Promise<Object|null>} The intents JSONB or null
+ */
+async function loadObjectIntents(pool, objectType, objectName, databaseId) {
+  try {
+    let result;
+    if (objectType === 'form') {
+      result = await pool.query(
+        `SELECT intents FROM shared.forms
+         WHERE database_id = $1 AND name = $2 AND is_current = true AND intents IS NOT NULL
+         LIMIT 1`,
+        [databaseId, objectName]
+      );
+    } else if (objectType === 'report') {
+      result = await pool.query(
+        `SELECT intents FROM shared.reports
+         WHERE database_id = $1 AND name = $2 AND is_current = true AND intents IS NOT NULL
+         LIMIT 1`,
+        [databaseId, objectName]
+      );
+    } else if (objectType === 'query') {
+      result = await pool.query(
+        `SELECT intents FROM shared.view_metadata
+         WHERE database_id = $1 AND view_name = $2 AND intents IS NOT NULL
+         LIMIT 1`,
+        [databaseId, objectName]
+      );
+    }
+    return result?.rows[0]?.intents || null;
+  } catch (err) {
+    console.error(`Error loading intents for ${objectType} "${objectName}":`, err.message);
+    return null;
+  }
+}
+
+/**
+ * Format extracted intents into a compact text block for the LLM system prompt.
+ */
+function formatObjectIntents(intents) {
+  if (!intents) return '';
+  const parts = [];
+  if (intents.purpose) parts.push(`Business purpose: ${intents.purpose}`);
+  if (intents.category) parts.push(`Category: ${intents.category}`);
+  if (intents.entities?.length) parts.push(`Entities: ${intents.entities.join(', ')}`);
+  if (intents.data_flows?.length) {
+    parts.push('Data flows:');
+    for (const f of intents.data_flows) {
+      parts.push(`  ${f.direction} ${f.target} — ${f.via}`);
+    }
+  }
+  if (intents.workflows?.length) {
+    parts.push('User workflows:');
+    for (const w of intents.workflows) {
+      parts.push(`  - ${w}`);
+    }
+  }
+  if (intents.grouping_purpose) parts.push(`Grouping purpose: ${intents.grouping_purpose}`);
+  if (intents.consumers?.length) {
+    parts.push('Consumers:');
+    for (const c of intents.consumers) {
+      parts.push(`  ${c.type} "${c.name}" — ${c.usage}`);
+    }
+  }
+  if (intents.gaps?.length) {
+    parts.push('Known gaps:');
+    for (const g of intents.gaps) {
+      parts.push(`  [${g.severity}] ${g.finding}`);
+    }
+  }
+  return parts.join('\n');
+}
+
 module.exports = {
   summarizeDefinition, checkImportCompleteness, formatMissingList, buildAppInventory,
   buildGraphContext, formatGraphContext, checkIntentDependencies, autoResolveGaps,
-  autoResolveGapsLLM
+  autoResolveGapsLLM, loadObjectIntents, formatObjectIntents
 };

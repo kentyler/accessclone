@@ -11,8 +11,11 @@ param(
 )
 
 # Remove lock file if exists
-$lockFile = $DatabasePath -replace '\.accdb$', '.laccdb'
-Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
+if ($DatabasePath -match '\.accdb$') {
+    Remove-Item ($DatabasePath -replace '\.accdb$', '.laccdb') -Force -ErrorAction SilentlyContinue
+} elseif ($DatabasePath -match '\.mdb$') {
+    Remove-Item ($DatabasePath -replace '\.mdb$', '.ldb') -Force -ErrorAction SilentlyContinue
+}
 
 $dbe = $null
 $db = $null

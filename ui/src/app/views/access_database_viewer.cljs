@@ -452,7 +452,7 @@
            :access-db-cache {}  ;; {path {:forms [] :reports [] :tables [] :queries [] :modules [] :macros []}}
            :import-all-active? false ;; True while Import All is running
            :import-all-status nil    ;; {:phase :tables :current "TableName" :imported 0 :total 0 :failed []}
-           :image-status nil         ;; {:total N :imported M} from /api/access-import/image-status
+           :image-status nil         ;; {:total N :imported M} from /api/database-import/image-status
            :auto-import-phase nil    ;; nil, :importing, :translating, :complete
            }))
 
@@ -524,7 +524,7 @@
                          :modules (merge-names :modules)
                          :macros  (merge-names :macros)}]
           (go
-            (<! (http/put (str api-base "/api/access-import/source-discovery")
+            (<! (http/put (str api-base "/api/database-import/source-discovery")
                           {:json-params {:database_id target-database-id
                                          :source_path (first paths)
                                          :discovery discovery}}))))))))
@@ -617,7 +617,7 @@
   [database-id]
   (when database-id
     (go
-      (let [response (<! (http/get (str api-base "/api/access-import/image-status")
+      (let [response (<! (http/get (str api-base "/api/database-import/image-status")
                                    {:query-params {:targetDatabaseId database-id}}))]
         (when (:success response)
           (let [body (:body response)]
@@ -679,7 +679,7 @@
           query-params (if target-db
                          {:target_database_id target-db :limit 200}
                          {:source_path db-path :limit 200})
-          response (<! (http/get (str api-base "/api/access-import/history")
+          response (<! (http/get (str api-base "/api/database-import/history")
                                  {:query-params query-params}))]
       (when (:success response)
         (let [history (get-in response [:body :history] [])]
@@ -703,7 +703,7 @@
   "Fetch Access database contents from API and store in cache"
   [db-path]
   (go
-    (let [response (<! (http/get (str api-base "/api/access-import/database")
+    (let [response (<! (http/get (str api-base "/api/database-import/database")
                                  {:query-params {:path db-path}}))]
       (if (:success response)
         (let [body (:body response)
@@ -803,7 +803,7 @@
   [access-db-path form-name target-database-id]
   (go
     ;; Step 1: Get JSON metadata from Access via PowerShell
-    (let [response (<! (http/post (str api-base "/api/access-import/export-form")
+    (let [response (<! (http/post (str api-base "/api/database-import/export-form")
                                   {:json-params {:databasePath access-db-path
                                                  :formName form-name
                                                  :targetDatabaseId target-database-id}}))]
@@ -837,7 +837,7 @@
   [access-db-path report-name target-database-id]
   (go
     ;; Step 1: Get JSON metadata from Access via PowerShell
-    (let [response (<! (http/post (str api-base "/api/access-import/export-report")
+    (let [response (<! (http/post (str api-base "/api/database-import/export-report")
                                   {:json-params {:databasePath access-db-path
                                                  :reportName report-name
                                                  :targetDatabaseId target-database-id}}))]
@@ -869,7 +869,7 @@
   [access-db-path module-name target-database-id]
   (go
     ;; Step 1: Get VBA source from Access via PowerShell
-    (let [response (<! (http/post (str api-base "/api/access-import/export-module")
+    (let [response (<! (http/post (str api-base "/api/database-import/export-module")
                                   {:json-params {:databasePath access-db-path
                                                  :moduleName module-name
                                                  :targetDatabaseId target-database-id}}))]
@@ -895,7 +895,7 @@
   [access-db-path macro-name target-database-id]
   (go
     ;; Step 1: Get XML definition from Access via PowerShell
-    (let [response (<! (http/post (str api-base "/api/access-import/export-macro")
+    (let [response (<! (http/post (str api-base "/api/database-import/export-macro")
                                   {:json-params {:databasePath access-db-path
                                                  :macroName macro-name
                                                  :targetDatabaseId target-database-id}}))]
@@ -920,7 +920,7 @@
   "Import a single table: server-side pipeline extracts structure + data from Access and creates PG table"
   [access-db-path table-name target-database-id & [{:keys [force?]}]]
   (go
-    (let [response (<! (http/post (str api-base "/api/access-import/import-table")
+    (let [response (<! (http/post (str api-base "/api/database-import/import-table")
                                   {:json-params (cond-> {:databasePath access-db-path
                                                          :tableName table-name
                                                          :targetDatabaseId target-database-id}
@@ -936,7 +936,7 @@
   "Import a single query: server-side pipeline extracts SQL from Access, converts to PG view/function"
   [access-db-path query-name target-database-id & [{:keys [force?]}]]
   (go
-    (let [response (<! (http/post (str api-base "/api/access-import/import-query")
+    (let [response (<! (http/post (str api-base "/api/database-import/import-query")
                                   {:json-params (cond-> {:databasePath access-db-path
                                                          :queryName query-name
                                                          :targetDatabaseId target-database-id}
@@ -963,7 +963,7 @@
    Returns {:imported [names] :failed [{:name :error}]}"
   [access-db-path form-names target-database-id]
   (go
-    (let [response (<! (http/post (str api-base "/api/access-import/export-forms-batch")
+    (let [response (<! (http/post (str api-base "/api/database-import/export-forms-batch")
                                   {:json-params {:databasePath access-db-path
                                                  :objectNames (vec form-names)
                                                  :targetDatabaseId target-database-id}}))
@@ -1007,7 +1007,7 @@
    Returns {:imported [names] :failed [{:name :error}]}"
   [access-db-path report-names target-database-id]
   (go
-    (let [response (<! (http/post (str api-base "/api/access-import/export-reports-batch")
+    (let [response (<! (http/post (str api-base "/api/database-import/export-reports-batch")
                                   {:json-params {:databasePath access-db-path
                                                  :objectNames (vec report-names)
                                                  :targetDatabaseId target-database-id}}))
@@ -1048,7 +1048,7 @@
    Returns {:imported [names] :failed [{:name :error}]}"
   [access-db-path module-names target-database-id]
   (go
-    (let [response (<! (http/post (str api-base "/api/access-import/export-modules-batch")
+    (let [response (<! (http/post (str api-base "/api/database-import/export-modules-batch")
                                   {:json-params {:databasePath access-db-path
                                                  :objectNames (vec module-names)
                                                  :targetDatabaseId target-database-id}}))
@@ -1087,7 +1087,7 @@
    Returns {:imported [names] :failed [{:name :error}]}"
   [access-db-path macro-names target-database-id]
   (go
-    (let [response (<! (http/post (str api-base "/api/access-import/export-macros-batch")
+    (let [response (<! (http/post (str api-base "/api/database-import/export-macros-batch")
                                   {:json-params {:databasePath access-db-path
                                                  :objectNames (vec macro-names)
                                                  :targetDatabaseId target-database-id}}))
@@ -1240,7 +1240,7 @@
    Returns a channel that closes when done."
   [target-database-id]
   (go
-    (let [response (<! (http/post (str api-base "/api/access-import/create-function-stubs")
+    (let [response (<! (http/post (str api-base "/api/database-import/create-function-stubs")
                                   {:json-params {:targetDatabaseId target-database-id}}))]
       (when (:success response)
         (let [body (:body response)
@@ -1257,7 +1257,7 @@
    Returns a channel that closes when done."
   [access-db-path target-database-id]
   (go
-    (let [response (<! (http/post (str api-base "/api/access-import/import-images")
+    (let [response (<! (http/post (str api-base "/api/database-import/import-images")
                                   {:json-params {:databasePath access-db-path
                                                  :targetDatabaseId target-database-id}}))]
       (if (and (:success response) (get-in response [:body :success]))
@@ -1277,7 +1277,7 @@
     (let [tables (:tables @viewer-state)
           table-names (map :name tables)]
       (doseq [table-name table-names]
-        (let [response (<! (http/post (str api-base "/api/access-import/import-attachments")
+        (let [response (<! (http/post (str api-base "/api/database-import/import-attachments")
                                       {:json-params {:databasePath access-db-path
                                                      :tableName table-name
                                                      :targetDatabaseId target-database-id}}))]
@@ -1309,7 +1309,7 @@
                                       :targetDatabaseId target-db-id}
                                (= object-type :forms) (assoc :formNames [object-name])
                                (= object-type :reports) (assoc :reportNames [object-name]))
-                  img-resp (<! (http/post (str api-base "/api/access-import/import-images")
+                  img-resp (<! (http/post (str api-base "/api/database-import/import-images")
                                           {:json-params img-params}))]
               (when (and (:success img-resp) (pos? (get-in img-resp [:body :imageCount] 0)))
                 (println (str "[REIMPORT] Imported images for " object-name)))))
@@ -1396,7 +1396,7 @@
       ;; Phase hooks (run regardless of whether items existed)
       (when (or (seq empty-tables) (seq all-relationships)
                 has-crosstab? (seq reserved-words))
-        (let [resp (<! (http/post (str api-base "/api/access-import/apply-fixes")
+        (let [resp (<! (http/post (str api-base "/api/database-import/apply-fixes")
                                   {:headers {"X-Database-ID" target-database-id}
                                    :json-params
                                    {:skipEmptyTables (vec empty-tables)
@@ -1449,7 +1449,7 @@
       (try
         (swap! viewer-state assoc-in [:import-all-status :phase] :translating)
         (swap! viewer-state assoc-in [:import-all-status :current] "Translating modules...")
-        (let [resp (<! (http/post (str api-base "/api/access-import/translate-modules")
+        (let [resp (<! (http/post (str api-base "/api/database-import/translate-modules")
                                   {:json-params {:database_id target-database-id}
                                    :headers {"X-Database-ID" target-database-id}}))]
           (when (:success resp)
@@ -1468,12 +1468,30 @@
           (swap! total-failed into (:failed result)))
         (<! (load-target-existing-async! target-database-id))))))
 
+(defn- extract-object-intents-phase!
+  "Extract business intents from all forms, reports, and queries."
+  [{:keys [target-database-id]}]
+  (go
+    (swap! viewer-state assoc-in [:import-all-status :phase] :extracting-intents)
+    (swap! viewer-state assoc-in [:import-all-status :current] "Extracting business intents...")
+    (let [resp (<! (http/post (str api-base "/api/database-import/extract-object-intents")
+                              {:json-params {:database_id target-database-id}
+                               :headers (state/db-headers)
+                               :timeout 600000}))]
+      (when (:success resp)
+        (let [body (:body resp)]
+          (.log js/console "[INTENTS] Extracted:"
+                (+ (count (get-in body [:forms :extracted]))
+                   (count (get-in body [:reports :extracted]))
+                   (count (get-in body [:queries :extracted])))
+                "objects"))))))
+
 (defn- run-validation-pipeline!
   "Run multi-pass validation: repair → validate → autofix → design-check."
   [{:keys [target-database-id]}]
   (go
     (.log js/console "[MULTI-PASS] Phase loop complete, starting multi-pass...")
-    (let [run-resp (<! (http/post (str api-base "/api/access-import/start-run")
+    (let [run-resp (<! (http/post (str api-base "/api/database-import/start-run")
                                    {:json-params {:database_id target-database-id
                                                   :source_paths (vec (:selected-paths @viewer-state))}}))
           run-id (when (:success run-resp) (get-in run-resp [:body :run_id]))]
@@ -1483,7 +1501,7 @@
       (.log js/console "[MULTI-PASS] Run ID:" run-id "- starting repair pass")
       (swap! viewer-state assoc-in [:import-all-status :phase] :repairing)
       (swap! viewer-state assoc-in [:import-all-status :current] "Checking bindings & mappings...")
-      (let [repair-resp (<! (http/post (str api-base "/api/access-import/repair-pass")
+      (let [repair-resp (<! (http/post (str api-base "/api/database-import/repair-pass")
                                         {:json-params {:run_id run-id :database_id target-database-id}}))]
         (when (:success repair-resp)
           (.log js/console "Repair pass:" (clj->js (:body repair-resp)))))
@@ -1492,7 +1510,7 @@
       (.log js/console "[MULTI-PASS] Starting validation pass")
       (swap! viewer-state assoc-in [:import-all-status :phase] :validating)
       (swap! viewer-state assoc-in [:import-all-status :current] "Validating forms & reports...")
-      (let [val-resp (<! (http/post (str api-base "/api/access-import/validation-pass")
+      (let [val-resp (<! (http/post (str api-base "/api/database-import/validation-pass")
                                      {:json-params {:run_id run-id :database_id target-database-id}}))]
         (when (:success val-resp)
           (.log js/console "Validation pass:" (clj->js (:body val-resp)))))
@@ -1501,7 +1519,7 @@
       (.log js/console "[MULTI-PASS] Starting auto-fix pass")
       (swap! viewer-state assoc-in [:import-all-status :phase] :auto-fixing)
       (swap! viewer-state assoc-in [:import-all-status :current] "Applying automated fixes...")
-      (let [autofix-resp (<! (http/post (str api-base "/api/access-import/autofix-pass")
+      (let [autofix-resp (<! (http/post (str api-base "/api/database-import/autofix-pass")
                                          {:json-params {:run_id run-id :database_id target-database-id}}))]
         (when (:success autofix-resp)
           (.log js/console "Auto-fix pass:" (clj->js (:body autofix-resp)))))
@@ -1532,7 +1550,7 @@
                       :failed @total-failed}]
     ;; Complete the run on server
     (when run-id
-      (http/post (str api-base "/api/access-import/complete-run")
+      (http/post (str api-base "/api/database-import/complete-run")
                   {:json-params {:run_id run-id
                                  :summary {:imported @total-imported
                                            :failed (count @total-failed)
@@ -1589,6 +1607,7 @@
       (<! (import-modules-phase! ctx))
       (<! (import-queries-phase! ctx))
       (<! (import-macros-phase! ctx))
+      (<! (extract-object-intents-phase! ctx))
       (let [run-id (<! (run-validation-pipeline! ctx))]
         (finalize-import! ctx run-id)))))
 
@@ -1599,7 +1618,7 @@
   (go
     ;; Step 1: Import all objects (import-all! already calls translate-modules after queries phase)
     (<! (import-all! target-database-id {:force? true}))
-    ;; Done — translation is handled inside import-all! via POST /api/access-import/translate-modules
+    ;; Done — translation is handled inside import-all! via POST /api/database-import/translate-modules
     (swap! viewer-state assoc :auto-import-phase :complete)))
 
 (defn object-type-dropdown []
@@ -1992,6 +2011,7 @@
          :resolving-gaps "Resolving gaps via AI..."
          :generating "Generating ClojureScript code..."
          :translating "Translating VBA modules..."
+         :extracting-intents "Extracting business intents..."
          :repairing "Repairing bindings & mappings..."
          :validating "Validating forms & reports..."
          :auto-fixing "Applying automated fixes..."

@@ -58,7 +58,7 @@ function createRouter(pool) {
       const userId = req.userId;
 
       const result = await pool.query(
-        `SELECT definition, version, owner FROM shared.forms
+        `SELECT definition, version, owner, intents FROM shared.forms
          WHERE database_id = $1 AND name = $2 AND is_current = true
            AND owner IN ($3, 'standard')
          ORDER BY CASE WHEN owner = 'standard' THEN 1 ELSE 0 END
@@ -72,7 +72,9 @@ function createRouter(pool) {
 
       const row = result.rows[0];
       const personalized = row.owner !== 'standard';
-      res.json({ ...row.definition, _personalized: personalized });
+      const response = { ...row.definition, _personalized: personalized };
+      if (row.intents) response._intents = row.intents;
+      res.json(response);
     } catch (err) {
       console.error('Error reading form:', err);
       logError(pool, 'GET /api/forms/:name', 'Failed to read form', err, { databaseId: req.databaseId });

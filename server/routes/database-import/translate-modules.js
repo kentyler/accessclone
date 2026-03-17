@@ -186,7 +186,7 @@ module.exports = function(router, pool, secrets) {
       res.json(results);
     } catch (err) {
       console.error('Error in translate-modules:', err);
-      logError(pool, 'POST /api/access-import/translate-modules', 'Module translation failed', err, { databaseId: database_id });
+      logError(pool, 'POST /api/database-import/translate-modules', 'Module translation failed', err, { databaseId: database_id });
       res.status(500).json({ error: err.message });
     }
   });

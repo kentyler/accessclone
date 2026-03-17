@@ -25,7 +25,7 @@ const macrosRoutes = require('./routes/macros');
 const configRoutes = require('./routes/config');
 const lintRoutes = require('./routes/lint');
 const graphRoutes = require('./routes/graph');
-const accessImportRoutes = require('./routes/access-import');
+const accessImportRoutes = require('./routes/database-import');
 const importIssuesRoutes = require('./routes/import-issues');
 const issuesRoutes = require('./routes/issues');
 const transcriptsRoutes = require('./routes/transcripts');
@@ -75,7 +75,7 @@ function createApp({
   app.use('/api', async (req, res, next) => {
     // Skip for endpoints that query shared schema or don't need database context
     if (req.path === '/databases' || req.path.startsWith('/databases') ||
-        req.path.startsWith('/access-import') ||
+        req.path.startsWith('/database-import') ||
         req.path.startsWith('/import-issues') ||
         req.path.startsWith('/issues') ||
         req.path.startsWith('/form-state') ||
@@ -128,7 +128,7 @@ function createApp({
   app.use('/api/config', configRoutes(settingsDir, pool));
   app.use('/api/lint', lintRoutes(pool, secrets));
   app.use('/api/graph', graphRoutes(pool));
-  app.use('/api/access-import', accessImportRoutes(pool, secrets));
+  app.use('/api/database-import', accessImportRoutes(pool, secrets));
   app.use('/api/import-issues', importIssuesRoutes(pool));
   app.use('/api/issues', issuesRoutes(pool));
   app.use('/api/transcripts', transcriptsRoutes(pool));

@@ -12,7 +12,7 @@
 ;; ============================================================
 
 (def load-log-entries-flow
-  "GET /api/access-import/history → set logs-entries.
+  "GET /api/database-import/history → set logs-entries.
    Original: state.cljs/load-log-entries!"
   [{:step :do
     :fn (fn [ctx]

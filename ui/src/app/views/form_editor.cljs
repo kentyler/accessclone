@@ -20,7 +20,8 @@
             [app.views.sql-function-viewer :as sql-fn-viewer]
             [app.views.report-editor :as report-editor]
             [app.views.app-viewer :as app-viewer]
-            [app.views.access-database-viewer :as access-viewer]))
+            [app.views.access-database-viewer :as access-viewer]
+            [app.views.editor-utils :as editor-utils]))
 
 (defn ask-ai-to-fix-errors!
   "Send lint errors to AI for suggestions"
@@ -216,11 +217,15 @@
                                 (get-in @state/app-state [:objects :forms])))]
         (when (and form (not= (:id form) editing-form-id))
           (f/run-fire-and-forget! (form-flow/load-form-for-editing-flow) {:form form})))
-      [:div.form-editor
-       [form-toolbar]
-       (when (= view-mode :design) [palette/control-palette])
-       [lint-errors-panel]
-       [form-editor-body view-mode (get-in @state/app-state [:form-editor :current])]])))
+      (let [current-def (get-in @state/app-state [:form-editor :current])
+            form-name (:name active-tab)]
+        [:div.form-editor
+         [form-toolbar]
+         (when (= view-mode :design) [palette/control-palette])
+         [lint-errors-panel]
+         (when (= view-mode :design)
+           [editor-utils/intent-panel (:_intents current-def) :form form-name])
+         [form-editor-body view-mode current-def]]))))
 
 (defn object-editor
   "Routes to the appropriate editor based on active tab type"

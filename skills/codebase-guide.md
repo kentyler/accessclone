@@ -163,9 +163,9 @@ The Express server serves both the API and the static frontend.
 | `config.js` | `/api/config` | Application settings |
 | `import-issues.js` | `/api/import-issues` | Conversion issue tracking |
 | `transcripts.js` | `/api/transcripts` | Chat transcript storage |
-| `access-import/` | `/api/access-import/*` | Full import pipeline (scan, export, import) |
+| `database-import/` | `/api/database-import/*` | Full import pipeline (scan, export, import) |
 
-**Access Import subsystem** (`server/routes/access-import/`):
+**Access Import subsystem** (`server/routes/database-import/`):
 
 | File | Responsibility |
 |------|---------------|
@@ -267,7 +267,7 @@ This connects forms to queries at runtime. When a user navigates records in a fo
 The system tracks which Access objects have been imported vs. which exist in the source database.
 
 - `shared.source_discovery` stores the Access object inventory (discovered during scan)
-- `GET /api/access-import/import-completeness` compares discovery vs. actual PostgreSQL objects
+- `GET /api/database-import/import-completeness` compares discovery vs. actual PostgreSQL objects
 - Incomplete imports show warnings in the chat context and block VBA translation
 
 ## Top-Level Files and Folders
@@ -329,7 +329,7 @@ If the user asks about:
 > - **State changes**: Look for functions ending in `!` in the `state_*.cljs` files. All mutations are explicit and greppable.
 > - **API endpoints**: Check `server/routes/` — each file maps to a URL prefix.
 > - **UI for an object type**: Check `ui/src/app/views/` — file names match object types (form_*, report_*, table_*, query_*, module_*, macro_*).
-> - **Import logic**: `server/routes/access-import/` for server-side, `ui/src/app/views/access_database_viewer.cljs` for the UI.
+> - **Import logic**: `server/routes/database-import/` for server-side, `ui/src/app/views/access_database_viewer.cljs` for the UI.
 > - **Conversion logic**: `server/lib/query-converter/` for SQL, `server/lib/expression-converter/` for expressions.
 
 **"What technologies does this use?"**

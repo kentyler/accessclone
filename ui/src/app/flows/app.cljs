@@ -429,3 +429,31 @@
               (when (:success resp)
                 (t/dispatch! :set-app-overview (:body resp))))
             ctx))}])
+
+;; ============================================================
+;; Business Intent Extraction
+;; ============================================================
+
+(def extract-object-intents-flow
+  "Batch extract business intents from all forms, reports, and queries."
+  [{:step :do
+    :fn (fn [ctx]
+          (go
+            (t/dispatch! :set-extracting-object-intents true)
+            (t/dispatch! :set-object-intent-results nil)
+            (t/dispatch! :set-object-intent-progress {:status "Extracting business intents..."})
+            (let [db-id (:database_id (:current-database @app-state))
+                  response (<! (http/post (str api-base "/api/database-import/extract-object-intents")
+                                          {:json-params {:database_id db-id}
+                                           :headers (db-headers)
+                                           :timeout 600000}))]
+              (if (:success response)
+                (do
+                  (t/dispatch! :set-object-intent-results (:body response))
+                  (t/dispatch! :set-object-intent-progress {:status "Done"}))
+                (do
+                  (t/dispatch! :set-object-intent-results
+                    {:error (get-in response [:body :error] "Unknown error")})
+                  (t/dispatch! :set-object-intent-progress {:status "Failed"})))
+              (t/dispatch! :set-extracting-object-intents false))
+            ctx))}])

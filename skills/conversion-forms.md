@@ -69,7 +69,7 @@ Use the Import mode in the AccessClone UI:
 4. Choose the target database
 5. Click Import on individual forms
 
-The API endpoint `POST /api/access-import/export-form` handles the PowerShell export and returns JSON.
+The API endpoint `POST /api/database-import/export-form` handles the PowerShell export and returns JSON.
 
 ## JSON Form Structure
 

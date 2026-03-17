@@ -171,7 +171,7 @@ accessclone/
 | Forms | `/api/forms/:name` | Form definition CRUD |
 | Reports | `/api/reports/:name` | Report definition CRUD |
 | Modules | `/api/modules/:name` | Module source code |
-| Import | `/api/access-import/*` | Access database import pipeline |
+| Import | `/api/database-import/*` | Access database import pipeline |
 | Chat | `/api/chat` | LLM chat with object context |
 | Graph | `/api/graph/*` | Dependency and intent queries |
 | Lint | `/api/lint/*` | Cross-object validation |

@@ -210,7 +210,7 @@ module.exports = function(router, pool, secrets) {
       res.json({ fixed: totalFixed, skipped: totalSkipped, failed: totalFailed, results });
     } catch (err) {
       console.error('Error in autofix pass:', err);
-      logError(pool, 'POST /api/access-import/autofix-pass', 'Failed to run autofix pass', err);
+      logError(pool, 'POST /api/database-import/autofix-pass', 'Failed to run autofix pass', err);
       res.status(500).json({ error: err.message || 'Failed to run autofix pass' });
     }
   });

@@ -144,7 +144,36 @@
                 [:div {:style {:padding "4px 0" :border-bottom "1px solid #f0f0f0" :font-size "13px"}}
                  [:div {:style {:font-weight "500"}} (str (:check_id rec) ": " (:finding rec))]
                  (when (:recommendation rec)
-                   [:div {:style {:color "#3498db" :margin-top "2px"}} (:recommendation rec)])])])])])]))
+                   [:div {:style {:color "#3498db" :margin-top "2px"}} (:recommendation rec)])])])])
+        ;; Business Intent Extraction section
+        (let [extracting? (get-in @state/app-state [:app-viewer :extracting-object-intents?])
+              progress (get-in @state/app-state [:app-viewer :object-intent-progress])
+              results (get-in @state/app-state [:app-viewer :object-intent-results])]
+          [:div {:style {:margin-top "16px" :padding-top "12px" :border-top "1px solid #eee"}}
+           [:div {:style {:display "flex" :align-items "center" :gap "12px"}}
+            [:button.btn-primary
+             {:on-click #(f/run-fire-and-forget! app-flow/extract-object-intents-flow)
+              :disabled extracting?}
+             (if extracting? "Extracting..." "Extract Business Intents")]
+            (when extracting?
+              [:span {:style {:font-size "12px" :color "#888"}}
+               (:status progress "Processing...")])]
+           (when results
+             (if (:error results)
+               [:div {:style {:margin-top "8px" :color "#e74c3c" :font-size "13px"}}
+                (str "Error: " (:error results))]
+               [:div {:style {:margin-top "8px"}}
+                (for [[obj-type label] [[:forms "Forms"] [:reports "Reports"] [:queries "Queries"]]]
+                  (let [extracted (count (get-in results [obj-type :extracted]))
+                        failed (count (get-in results [obj-type :failed]))]
+                    (when (pos? (+ extracted failed))
+                      ^{:key (str "intent-" (name obj-type))}
+                      [:div {:style {:font-size "13px" :padding "2px 0"}}
+                       [:span {:style {:font-weight "500"}} (str label ": ")]
+                       [:span {:style {:color "#27ae60"}} (str extracted " extracted")]
+                       (when (pos? failed)
+                         [:span {:style {:color "#e74c3c" :margin-left "8px"}}
+                          (str failed " failed")])])))]))])])]))
 
 ;; ============================================================
 ;; Gap Decisions Pane — 3-Step Pipeline

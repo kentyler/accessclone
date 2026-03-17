@@ -12,7 +12,8 @@
             [app.views.report-design :as report-design]
             [app.views.report-view :as report-view]
             [app.views.control-palette :as palette]
-            [app.views.access-database-viewer :as access-viewer]))
+            [app.views.access-database-viewer :as access-viewer]
+            [app.views.editor-utils :as editor-utils]))
 
 (defn ask-ai-to-fix-report-errors!
   "Send report lint errors to AI for suggestions"
@@ -132,11 +133,14 @@
         (when (and report (not= (:id report) editing-report-id))
           (f/run-fire-and-forget! (report-flow/load-report-for-editing-flow) {:report report})))
       (let [current-def (get-in @state/app-state [:report-editor :current])
-            is-edn? (= "edn" (:_format current-def))]
+            is-edn? (= "edn" (:_format current-def))
+            report-name (:name active-tab)]
         [:div.form-editor
          [report-toolbar]
          (when (= view-mode :design) [palette/control-palette :report])
          [report-lint-errors-panel]
+         (when (= view-mode :design)
+           [editor-utils/intent-panel (:_intents current-def) :report report-name])
          (cond
            ;; EDN format - show raw
            is-edn?

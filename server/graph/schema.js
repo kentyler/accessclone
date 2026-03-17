@@ -168,6 +168,9 @@ CREATE INDEX IF NOT EXISTS idx_modules_current ON shared.modules(database_id, na
 ALTER TABLE shared.modules ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'pending';
 ALTER TABLE shared.modules ADD COLUMN IF NOT EXISTS review_notes TEXT;
 ALTER TABLE shared.modules ADD COLUMN IF NOT EXISTS intents JSONB;
+ALTER TABLE shared.forms ADD COLUMN IF NOT EXISTS intents JSONB;
+ALTER TABLE shared.reports ADD COLUMN IF NOT EXISTS intents JSONB;
+ALTER TABLE shared.view_metadata ADD COLUMN IF NOT EXISTS intents JSONB;
 
 -- Add owner/modified_by columns for personalized versions and audit trail
 ALTER TABLE shared.forms ADD COLUMN IF NOT EXISTS owner TEXT DEFAULT 'standard';

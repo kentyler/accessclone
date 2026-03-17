@@ -1,0 +1,288 @@
+/**
+ * Image import route.
+ * POST /import-images — Extract PictureData from Access form/report image controls
+ * and patch the saved definitions with data URIs.
+ */
+
+const path = require('path');
+const { logError } = require('../../lib/events');
+const { runPowerShell, parsePowerShellJson, withComLock } = require('./helpers');
+
+module.exports = function(router, pool) {
+
+  router.post('/import-images', async (req, res) => {
+    const { databasePath, targetDatabaseId } = req.body;
+    // Optional: pass specific names to scope image extraction to just those objects
+    const requestedFormNames = req.body.formNames;
+    const requestedReportNames = req.body.reportNames;
+
+    try {
+      if (!databasePath || !targetDatabaseId) {
+        return res.status(400).json({ error: 'databasePath and targetDatabaseId required' });
+      }
+
+      // 1. Run export_images.ps1 to extract all image data
+      const scriptsDir = path.join(__dirname, '..', '..', '..', 'scripts', 'access');
+      const exportScript = path.join(scriptsDir, 'export_images.ps1');
+
+      let formNames, reportNames;
+
+      if (requestedFormNames || requestedReportNames) {
+        // Use caller-specified names (for targeted re-import)
+        formNames = requestedFormNames || [];
+        reportNames = requestedReportNames || [];
+      } else {
+        // Collect all form and report names from the target database
+        const [formsResult, reportsResult] = await Promise.all([
+          pool.query(
+            `SELECT DISTINCT name FROM shared.forms WHERE database_id = $1 AND is_current = true AND owner = 'standard'`,
+            [targetDatabaseId]
+          ),
+          pool.query(
+            `SELECT DISTINCT name FROM shared.reports WHERE database_id = $1 AND is_current = true AND owner = 'standard'`,
+            [targetDatabaseId]
+          )
+        ]);
+
+        formNames = formsResult.rows.map(r => r.name);
+        reportNames = reportsResult.rows.map(r => r.name);
+      }
+
+      if (formNames.length === 0 && reportNames.length === 0) {
+        return res.json({ success: true, imageCount: 0, updated: [] });
+      }
+
+      const args = ['-DatabasePath', databasePath];
+      if (formNames.length > 0) {
+        args.push('-FormNames', formNames.join(','));
+      }
+      if (reportNames.length > 0) {
+        args.push('-ReportNames', reportNames.join(','));
+      }
+
+      let imageData;
+      try {
+        const objectCount = formNames.length + reportNames.length;
+        const timeout = Math.max(60000, objectCount * 30000);
+        imageData = await withComLock(async () => {
+          const jsonOutput = await runPowerShell(exportScript, args, { timeout });
+          // Parse JSON robustly — find first '{' and last '}' to ignore any surrounding output
+          const clean = jsonOutput.replace(/^\uFEFF/, '').trim();
+          const jsonStart = clean.indexOf('{');
+          const jsonEnd = clean.lastIndexOf('}');
+          if (jsonStart === -1 || jsonEnd === -1 || jsonEnd <= jsonStart) {
+            throw new Error('No JSON object found in PowerShell output');
+          }
+          return JSON.parse(clean.substring(jsonStart, jsonEnd + 1));
+        });
+      } catch (psErr) {
+        console.error('PowerShell export_images.ps1 failed:', psErr.message);
+        return res.status(500).json({ error: `Image extraction failed: ${psErr.message}` });
+      }
+
+      const images = imageData.images || [];
+      if (images.length === 0) {
+        return res.json({ success: true, imageCount: 0, updated: [] });
+      }
+
+      // 2. Group images by object type and name
+      const byObject = {};
+      for (const img of images) {
+        const key = `${img.objectType}:${img.objectName}`;
+        if (!byObject[key]) byObject[key] = [];
+        byObject[key].push(img);
+      }
+
+      // 3. For each object, load definition, patch images, save new version
+      const updated = [];
+
+      for (const [key, imgs] of Object.entries(byObject)) {
+        const [objectType, objectName] = key.split(':');
+        const table = objectType === 'form' ? 'shared.forms' : 'shared.reports';
+
+        try {
+          // Load current definition
+          const defResult = await pool.query(
+            `SELECT definition FROM ${table} WHERE database_id = $1 AND name = $2 AND is_current = true AND owner = 'standard'`,
+            [targetDatabaseId, objectName]
+          );
+          if (defResult.rows.length === 0) continue;
+
+          const definition = defResult.rows[0].definition;
+          if (!definition || typeof definition !== 'object') continue;
+
+          let modified = false;
+
+          for (const img of imgs) {
+            const dataURI = `data:${img.mimeType};base64,${img.base64}`;
+
+            if (img.controlName) {
+              // Control-level: scan sections for matching image/object-frame controls
+              for (const [sectionKey, section] of Object.entries(definition)) {
+                if (!section || !Array.isArray(section.controls)) continue;
+                for (const ctrl of section.controls) {
+                  const ctrlName = ctrl.name || ctrl.id || '';
+                  if (ctrlName === img.controlName) {
+                    ctrl.picture = dataURI;
+                    modified = true;
+                    updated.push({ objectType, objectName, controlName: ctrlName });
+                  }
+                }
+              }
+            } else if (img.level === 'form' || img.level === 'report') {
+              // Object-level: set picture on the top-level definition
+              definition.picture = dataURI;
+              modified = true;
+              updated.push({ objectType, objectName, level: img.level });
+            } else if (img.level === 'section' && img.sectionName) {
+              // Section-level: set picture on the section object
+              const secKey = img.sectionName;
+              if (definition[secKey] && typeof definition[secKey] === 'object') {
+                definition[secKey].picture = dataURI;
+                modified = true;
+                updated.push({ objectType, objectName, level: 'section', sectionName: secKey });
+              }
+            }
+          }
+
+          // Save updated definition as new version
+          if (modified) {
+            const recordSource = definition['record-source'] || definition.recordSource || null;
+
+            const client = await pool.connect();
+            try {
+              await client.query('BEGIN');
+
+              const versionResult = await client.query(
+                `SELECT COALESCE(MAX(version), 0) AS max_version FROM ${table} WHERE database_id = $1 AND name = $2`,
+                [targetDatabaseId, objectName]
+              );
+              const newVersion = versionResult.rows[0].max_version + 1;
+
+              await client.query(
+                `UPDATE ${table} SET is_current = false WHERE database_id = $1 AND name = $2 AND owner = 'standard' AND is_current = true`,
+                [targetDatabaseId, objectName]
+              );
+
+              await client.query(
+                `INSERT INTO ${table} (database_id, name, definition, record_source, version, is_current, owner, modified_by) VALUES ($1, $2, $3, $4, $5, true, 'standard', 'import-images')`,
+                [targetDatabaseId, objectName, definition, recordSource, newVersion]
+              );
+
+              await client.query('COMMIT');
+            } catch (txErr) {
+              await client.query('ROLLBACK');
+              throw txErr;
+            } finally {
+              client.release();
+            }
+          }
+        } catch (objErr) {
+          console.error(`Error patching images for ${objectType} "${objectName}":`, objErr.message);
+        }
+      }
+
+      console.log(`[IMAGES] Imported ${updated.length} images into ${Object.keys(byObject).length} objects`);
+
+      res.json({
+        success: true,
+        imageCount: updated.length,
+        updated
+      });
+    } catch (err) {
+      console.error('Error importing images:', err);
+      logError(pool, 'POST /api/database-import/import-images', 'Failed to import images', err, {
+        details: { databasePath, targetDatabaseId }
+      });
+      res.status(500).json({ error: err.message || 'Failed to import images' });
+    }
+  });
+
+  /**
+   * GET /api/database-import/image-status?targetDatabaseId=...
+   * List all image controls in saved form/report definitions with their import status.
+   */
+  router.get('/image-status', async (req, res) => {
+    const { targetDatabaseId } = req.query;
+    try {
+      if (!targetDatabaseId) {
+        return res.status(400).json({ error: 'targetDatabaseId required' });
+      }
+
+      const [formsResult, reportsResult] = await Promise.all([
+        pool.query(
+          `SELECT name, definition FROM shared.forms WHERE database_id = $1 AND is_current = true AND owner = 'standard'`,
+          [targetDatabaseId]
+        ),
+        pool.query(
+          `SELECT name, definition FROM shared.reports WHERE database_id = $1 AND is_current = true AND owner = 'standard'`,
+          [targetDatabaseId]
+        )
+      ]);
+
+      const images = [];
+
+      function collectImages(rows, objectType) {
+        for (const row of rows) {
+          const def = row.definition;
+          if (!def || typeof def !== 'object') continue;
+
+          // Object-level picture (form/report background)
+          if (def.picture !== undefined) {
+            images.push({
+              name: `${row.name} (${objectType} background)`,
+              objectType,
+              objectName: row.name,
+              level: objectType,
+              imported: !!(def.picture && def.picture.startsWith('data:'))
+            });
+          }
+
+          for (const [key, section] of Object.entries(def)) {
+            if (!section || typeof section !== 'object') continue;
+
+            // Section-level picture
+            if (section.picture !== undefined) {
+              images.push({
+                name: `${row.name} / ${key} (section background)`,
+                objectType,
+                objectName: row.name,
+                level: 'section',
+                sectionName: key,
+                imported: !!(section.picture && section.picture.startsWith('data:'))
+              });
+            }
+
+            // Control-level images
+            if (!Array.isArray(section.controls)) continue;
+            for (const ctrl of section.controls) {
+              if (ctrl.type === 'image' || ctrl.type === ':image' ||
+                  ctrl.type === 'object-frame' || ctrl.type === ':object-frame') {
+                images.push({
+                  name: `${row.name} / ${ctrl.name || ctrl.id || 'unnamed'}`,
+                  objectType,
+                  objectName: row.name,
+                  controlName: ctrl.name || ctrl.id || '',
+                  section: key,
+                  imported: !!(ctrl.picture && ctrl.picture.startsWith('data:'))
+                });
+              }
+            }
+          }
+        }
+      }
+
+      collectImages(formsResult.rows, 'form');
+      collectImages(reportsResult.rows, 'report');
+
+      const total = images.length;
+      const imported = images.filter(i => i.imported).length;
+
+      res.json({ total, imported, images });
+    } catch (err) {
+      console.error('Error checking image status:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+};

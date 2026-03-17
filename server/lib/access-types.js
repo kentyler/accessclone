@@ -1,6 +1,6 @@
 /**
  * Shared utilities for Access → PostgreSQL type mapping.
- * Used by both metadata.js (table design view) and access-import.js (table import).
+ * Used by both metadata.js (table design view) and database-import.js (table import).
  */
 
 /**

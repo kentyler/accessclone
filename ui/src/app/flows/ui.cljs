@@ -320,7 +320,7 @@
    :table_names (mapv :name (:tables scan-data))})
 
 (defn run-assessment-flow
-  "POST scan data to /api/access-import/assess, dispatch :set-assessment.
+  "POST scan data to /api/database-import/assess, dispatch :set-assessment.
    After deterministic assessment, auto-sends LLM analysis if chat is empty.
 
    Context requires: {:scan-data map} — the merged scan data from access-db-cache."
@@ -333,7 +333,7 @@
     :fn (fn [ctx]
           (go
             (let [scan-data (:scan-data ctx)
-                  result (<! (http/post! (str api-base "/api/access-import/assess")
+                  result (<! (http/post! (str api-base "/api/database-import/assess")
                                          :json-params scan-data))]
               (if (:ok? result)
                 (let [findings (:data result)

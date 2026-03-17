@@ -120,7 +120,7 @@
 
 (defn- browse-dir! [dir]
   (swap! picker-state assoc :loading? true :error nil)
-  (-> (js/fetch (str "/api/access-import/browse"
+  (-> (js/fetch (str "/api/database-import/browse"
                      (when dir (str "?dir=" (js/encodeURIComponent dir)))))
       (.then #(.json %))
       (.then (fn [data]

@@ -154,6 +154,9 @@
    :set-module-pipeline-status   app/set-module-pipeline-status
    :set-module-pipeline-statuses app/set-module-pipeline-statuses
    :set-pipeline-running         app/set-pipeline-running
+   :set-extracting-object-intents  app/set-extracting-object-intents
+   :set-object-intent-progress     app/set-object-intent-progress
+   :set-object-intent-results      app/set-object-intent-results
 
 })
 

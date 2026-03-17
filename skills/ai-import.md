@@ -37,11 +37,11 @@ Access .accdb file
 ### Key Files
 
 - PowerShell scripts: `scripts/access/*.ps1`
-- Import API routes: `server/routes/access-import/`
+- Import API routes: `server/routes/database-import/`
 - Query converter: `server/lib/query-converter/`
 - VBA intent system: `server/lib/vba-intent-mapper.js`, `vba-intent-extractor.js`, `vba-wiring-generator.js`
 - Frontend import UI: `ui/src/app/views/access_database_viewer.cljs`
-- Assessment endpoint: `server/routes/access-import/assess.js`
+- Assessment endpoint: `server/routes/database-import/assess.js`
 
 ## Phase 0: Scan the Access Database (Local Only)
 
@@ -59,13 +59,13 @@ powershell.exe -File scripts/access/list_tables.ps1 -DatabasePath "C:\path\to\da
 
 2. **Or use the server API** (server must be running):
 
-`GET /api/access-import/database?path=C:\path\to\database.accdb`
+`GET /api/database-import/database?path=C:\path\to\database.accdb`
 
 Returns: tables, queries, forms, reports, modules, macros, relationships, accessVersion. Handles AutoExec disabling and .mdb conversion automatically.
 
 3. **Run the assessment**:
 
-`POST /api/access-import/assess`
+`POST /api/database-import/assess`
 
 Body — the scan data from the previous step:
 ```json
@@ -98,7 +98,7 @@ If a cloud agent will handle remediation, write the assessment output plus scan 
 
 **Import a table:**
 ```
-POST /api/access-import/import-table
+POST /api/database-import/import-table
 {
   "databasePath": "C:\\path\\to\\database.accdb",
   "tableName": "Orders",
@@ -109,7 +109,7 @@ Returns: `{ success, tableName, fieldCount, rowCount, skippedColumns, calculated
 
 **Import a query (with conversion):**
 ```
-POST /api/access-import/import-query
+POST /api/database-import/import-query
 {
   "databasePath": "C:\\path\\to\\database.accdb",
   "queryName": "qryActiveOrders",
@@ -123,7 +123,7 @@ Returns: `{ success, queryName, pgObjectType, warnings, llmAssisted, category? }
 
 **Import forms/reports** (export from Access + save to PG):
 ```
-POST /api/access-import/export-forms-batch
+POST /api/database-import/export-forms-batch
 {
   "databasePath": "C:\\path\\to\\database.accdb",
   "objectNames": ["frmOrders", "frmCustomers"],
@@ -134,7 +134,7 @@ Same pattern for `export-reports-batch`, `export-modules-batch`, `export-macros-
 
 **Create function stubs** (after modules imported, before queries):
 ```
-POST /api/access-import/create-function-stubs
+POST /api/database-import/create-function-stubs
 { "targetDatabaseId": "<uuid>" }
 ```
 Creates placeholder PG functions from VBA declarations so query conversion doesn't fail on undefined function references.
@@ -282,7 +282,7 @@ WHERE p.id IS NULL;
 ### Object Completeness
 
 ```
-GET /api/access-import/import-completeness?database_id=<uuid>
+GET /api/database-import/import-completeness?database_id=<uuid>
 ```
 
 Returns: `{ complete: bool, missing: { tables: [...], queries: [...], ... }, missing_count }`
@@ -329,7 +329,7 @@ All scripts use `DAO.DBEngine.120` directly (no Access UI). Batch variants exist
 ## Gotchas
 
 ### AutoExec macros
-Always disabled automatically by `GET /api/access-import/database`. If calling PowerShell scripts directly, run `disable_autoexec.ps1` first, restore after.
+Always disabled automatically by `GET /api/database-import/database`. If calling PowerShell scripts directly, run `disable_autoexec.ps1` first, restore after.
 
 ### PowerShell JSON bugs
 `ConvertTo-Json` has known bugs with embedded double quotes in large strings (HTML in memo fields). The `export_table.ps1` script uses a custom `ConvertTo-SafeJson` serializer.

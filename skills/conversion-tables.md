@@ -9,7 +9,7 @@ Tables can now be imported directly from the Access Database Import UI:
 1. Open the Access Database Viewer, select a database
 2. Switch to the **Tables** tab
 3. Select tables to import, choose a target database
-4. Click **Import** — each table is imported server-side via `POST /api/access-import/import-table`
+4. Click **Import** — each table is imported server-side via `POST /api/database-import/import-table`
 
 The endpoint runs `scripts/access/export_table.ps1` (DAO-based), maps Access type codes to PostgreSQL types, creates the table with PKs and NOT NULL constraints, batch-inserts all rows (500 per statement, parameterized), resets identity sequences, and creates non-PK indexes — all in a single transaction.
 

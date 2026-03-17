@@ -200,7 +200,7 @@ Each API request sets `SET LOCAL app.session_id` on the PG connection before run
 | `server/lib/query-converter/syntax.js` | Threads `stateRefs`, applies `::text` cast for `ssN.value` comparisons |
 | `server/lib/query-converter/ddl.js` | `resolveParams()` filters out DAO params that are actually form/parent refs |
 | `server/lib/expression-converter/pipeline.js` | Uses subquery mode (no stateRefs) for control-source expressions |
-| `server/routes/access-import/import-query.js` | Loads `control_column_map`, passes to converter; retry with DROP for column changes |
+| `server/routes/database-import/import-query.js` | Loads `control_column_map`, passes to converter; retry with DROP for column changes |
 | `server/routes/form-state.js` | `PUT /api/form-state` endpoint |
 | `server/routes/forms.js` | Populates `control_column_map` on form save |
 | `server/routes/reports.js` | Populates `control_column_map` on report save |

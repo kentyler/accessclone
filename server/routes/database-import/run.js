@@ -21,7 +21,7 @@ module.exports = function(router, pool) {
       res.json({ run_id: runId });
     } catch (err) {
       console.error('Error starting import run:', err);
-      logError(pool, 'POST /api/access-import/start-run', 'Failed to start import run', err);
+      logError(pool, 'POST /api/database-import/start-run', 'Failed to start import run', err);
       res.status(500).json({ error: 'Failed to start import run' });
     }
   });
@@ -36,7 +36,7 @@ module.exports = function(router, pool) {
       res.json({ success: true });
     } catch (err) {
       console.error('Error completing import run:', err);
-      logError(pool, 'POST /api/access-import/complete-run', 'Failed to complete import run', err);
+      logError(pool, 'POST /api/database-import/complete-run', 'Failed to complete import run', err);
       res.status(500).json({ error: 'Failed to complete import run' });
     }
   });
@@ -68,7 +68,7 @@ module.exports = function(router, pool) {
       });
     } catch (err) {
       console.error('Error fetching import run:', err);
-      logError(pool, 'GET /api/access-import/run/:runId', 'Failed to fetch import run', err);
+      logError(pool, 'GET /api/database-import/run/:runId', 'Failed to fetch import run', err);
       res.status(500).json({ error: 'Failed to fetch import run' });
     }
   });
@@ -93,7 +93,7 @@ module.exports = function(router, pool) {
       res.json({ passes: result.rows });
     } catch (err) {
       console.error('Error fetching run summary:', err);
-      logError(pool, 'GET /api/access-import/run/:runId/summary', 'Failed to fetch run summary', err);
+      logError(pool, 'GET /api/database-import/run/:runId/summary', 'Failed to fetch run summary', err);
       res.status(500).json({ error: 'Failed to fetch run summary' });
     }
   });

@@ -12,6 +12,8 @@ param(
     [string]$OutputPath
 )
 
+. "$PSScriptRoot\com_helpers.ps1"
+
 # Control type mapping (Access ControlType enum -> string)
 $ctlTypes = @{
     100 = "label"
@@ -256,14 +258,17 @@ Get-Process MSACCESS -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Seconds 2
 
 # Remove lock file if exists
-$lockFile = $DatabasePath -replace '\.accdb$', '.laccdb'
-Remove-Item $lockFile -ErrorAction SilentlyContinue
+if ($DatabasePath -match '\.accdb$') {
+    Remove-Item ($DatabasePath -replace '\.accdb$', '.laccdb') -Force -ErrorAction SilentlyContinue
+} elseif ($DatabasePath -match '\.mdb$') {
+    Remove-Item ($DatabasePath -replace '\.mdb$', '.ldb') -Force -ErrorAction SilentlyContinue
+}
 
 try {
     $accessApp = New-Object -ComObject Access.Application
     $accessApp.AutomationSecurity = 3  # msoAutomationSecurityForceDisable
     $accessApp.Visible = $true
-    $accessApp.OpenCurrentDatabase($DatabasePath)
+    Open-AccessDatabase -AccessApp $accessApp -DatabasePath $DatabasePath
 
     # Open report in Design view (acViewDesign = 1)
     $accessApp.DoCmd.OpenReport($ReportName, 1)

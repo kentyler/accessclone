@@ -583,7 +583,7 @@ AND table_name = 'ingredient_with_total_grams_on_hand';
 
 ## Access Form Export
 
-Forms can be imported from Microsoft Access databases via the Import UI or the `POST /api/access-import/export-form` API endpoint. The PowerShell scripts in `scripts/access/` handle COM automation.
+Forms can be imported from Microsoft Access databases via the Import UI or the `POST /api/database-import/export-form` API endpoint. The PowerShell scripts in `scripts/access/` handle COM automation.
 
 ### Access Control Type Mapping
 

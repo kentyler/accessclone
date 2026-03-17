@@ -15,7 +15,7 @@ const capabilities = {
   "powershell": process.platform === 'win32' ||
     (process.platform === 'linux' && require('fs').existsSync('/proc/version') &&
      require('fs').readFileSync('/proc/version', 'utf8').toLowerCase().includes('microsoft')),
-  "access-import": true  // Access database import via COM automation
+  "database-import": true  // Database import via COM automation
 };
 
 module.exports = function(settingsDir, pool) {

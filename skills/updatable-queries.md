@@ -154,7 +154,7 @@ If someone manually creates INSTEAD OF triggers on a view, our redirect would by
 | File | What |
 |------|------|
 | `server/graph/schema.js` | `shared.view_metadata` DDL, `backfillViewMetadata()` startup migration |
-| `server/routes/access-import/import-query.js` | Populates `view_metadata` after each view import |
+| `server/routes/database-import/import-query.js` | Populates `view_metadata` after each view import |
 | `server/routes/data.js` | `resolveWriteTarget()` -- redirects writes to base table |
 | `server/routes/metadata.js` | `GET /api/queries` -- adds `isPrimaryKey` and `isWritable` per field |
 | `ui/src/app/state.cljs` | `transform-api-field` -- maps `isWritable` to `:writable` |

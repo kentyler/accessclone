@@ -87,16 +87,24 @@ function buildStubDDL(schemaName, decl) {
   const pgName = sanitizeName(decl.name);
   const pgReturnType = decl.isSub ? 'void' : mapVbaTypeToPg(decl.returnType);
 
+  const hasVariant = decl.params.some(p => !p.type || p.type.toLowerCase() === 'variant');
+
   const pgParams = decl.params.map(p => {
     const pName = sanitizeName(p.name);
-    const pType = mapVbaTypeToPg(p.type);
-    return `${pName} ${pType}`;
+    const pType = (!p.type || p.type.toLowerCase() === 'variant') ? 'anyelement' : mapVbaTypeToPg(p.type);
+    return `"${pName}" ${pType}`;
   }).join(', ');
 
-  const body = decl.isSub
-    ? 'BEGIN\n  -- Stub: no-op\nEND;'
-    : 'BEGIN\n  RETURN NULL;\nEND;';
+  // Functions with anyelement params must use SQL language (simpler polymorphic handling)
+  if (hasVariant || decl.isSub) {
+    if (decl.isSub) {
+      return `CREATE OR REPLACE FUNCTION "${schemaName}"."${pgName}"(${pgParams}) RETURNS void AS $$\nBEGIN\nEND;\n$$ LANGUAGE plpgsql;`;
+    }
+    const sqlReturn = pgReturnType === 'void' ? '' : `SELECT NULL::${pgReturnType};`;
+    return `CREATE OR REPLACE FUNCTION "${schemaName}"."${pgName}"(${pgParams}) RETURNS ${pgReturnType} AS $$\n${sqlReturn}\n$$ LANGUAGE sql;`;
+  }
 
+  const body = 'BEGIN\n  RETURN NULL;\nEND;';
   return `CREATE OR REPLACE FUNCTION "${schemaName}"."${pgName}"(${pgParams}) RETURNS ${pgReturnType} AS $$\n${body}\n$$ LANGUAGE plpgsql;`;
 }
 
@@ -160,11 +168,14 @@ async function createStubFunctions(pool, schemaName, databaseId) {
       }
 
       try {
+        await client.query(`SAVEPOINT stub_${pgName.replace(/\W/g, '_')}`);
         const ddl = buildStubDDL(schemaName, decl);
         await client.query(ddl);
+        await client.query(`RELEASE SAVEPOINT stub_${pgName.replace(/\W/g, '_')}`);
         created.push(pgName);
         existingFunctions.add(pgName); // prevent duplicates across modules
       } catch (err) {
+        await client.query(`ROLLBACK TO SAVEPOINT stub_${pgName.replace(/\W/g, '_')}`).catch(() => {});
         warnings.push(`Failed to create stub for ${pgName} (module: ${decl.moduleName}): ${err.message}`);
       }
     }

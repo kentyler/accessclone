@@ -204,7 +204,28 @@ function Export-SingleForm {
     $accessApp.DoCmd.OpenForm($formName, 1)  # 1 = acDesign
     Start-Sleep -Seconds 1
 
-    $form = $accessApp.Screen.ActiveForm
+    # Use Forms collection by name — more reliable than Screen.ActiveForm in design view
+    $form = $null
+    try { $form = $accessApp.Forms($formName) } catch {}
+    if (-not $form) {
+        # Fallback to Screen.ActiveForm
+        Start-Sleep -Seconds 1
+        $form = $accessApp.Screen.ActiveForm
+    }
+
+    # Verify form loaded — retry with longer wait if Controls collection is empty
+    $ctlCount = 0
+    try { $ctlCount = $form.Controls.Count } catch {}
+    if ($ctlCount -eq 0) {
+        Write-Host "  Retrying $formName (0 controls on first attempt)..." -ForegroundColor Yellow
+        $accessApp.DoCmd.Close(2, $formName, 0)
+        Start-Sleep -Seconds 1
+        $accessApp.DoCmd.OpenForm($formName, 1)
+        Start-Sleep -Seconds 3
+        try { $form = $accessApp.Forms($formName) } catch {
+            $form = $accessApp.Screen.ActiveForm
+        }
+    }
 
     $formObj = [ordered]@{
         name = $form.Name
@@ -213,7 +234,11 @@ function Export-SingleForm {
     $caption = Safe-GetProperty $form "Caption"
     if ($caption) { $formObj.caption = $caption }
 
-    $recordSource = $form.RecordSource
+    $recordSource = Safe-GetProperty $form "RecordSource"
+    if (-not $recordSource) {
+        # Fallback: read from the Properties collection (more reliable in design view)
+        try { $recordSource = $form.Properties("RecordSource").Value } catch {}
+    }
     if ($recordSource) { $formObj.recordSource = $recordSource }
 
     $formObj.defaultView = [int](Safe-GetProperty $form "DefaultView" 0)

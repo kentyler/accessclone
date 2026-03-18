@@ -242,7 +242,27 @@ try {
     $accessApp.DoCmd.OpenForm($FormName, 1)  # 1 = acDesign
     Start-Sleep -Seconds 2
 
-    $form = $accessApp.Screen.ActiveForm
+    # Use Forms collection by name — more reliable than Screen.ActiveForm in design view
+    $form = $null
+    try { $form = $accessApp.Forms($FormName) } catch {}
+    if (-not $form) {
+        Start-Sleep -Seconds 1
+        $form = $accessApp.Screen.ActiveForm
+    }
+
+    # Verify form loaded — retry with longer wait if Controls collection is empty
+    $ctlCount = 0
+    try { $ctlCount = $form.Controls.Count } catch {}
+    if ($ctlCount -eq 0) {
+        Write-Host "  Retrying $FormName (0 controls on first attempt)..." -ForegroundColor Yellow
+        $accessApp.DoCmd.Close(2, $FormName, 0)
+        Start-Sleep -Seconds 1
+        $accessApp.DoCmd.OpenForm($FormName, 1)
+        Start-Sleep -Seconds 3
+        try { $form = $accessApp.Forms($FormName) } catch {
+            $form = $accessApp.Screen.ActiveForm
+        }
+    }
 
     # Build form object
     $formObj = [ordered]@{
@@ -254,7 +274,11 @@ try {
     if ($caption) { $formObj.caption = $caption }
 
     # Record source
-    $recordSource = $form.RecordSource
+    $recordSource = Safe-GetProperty $form "RecordSource"
+    if (-not $recordSource) {
+        # Fallback: read from the Properties collection (more reliable in design view)
+        try { $recordSource = $form.Properties("RecordSource").Value } catch {}
+    }
     if ($recordSource) { $formObj.recordSource = $recordSource }
 
     # Default view (0=Single, 1=Continuous, 2=Datasheet)

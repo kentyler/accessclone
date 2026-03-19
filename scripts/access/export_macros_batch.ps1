@@ -38,6 +38,7 @@ $accessApp = $null
 try {
     $accessApp = New-Object -ComObject Access.Application
     $accessApp.AutomationSecurity = 3  # msoAutomationSecurityForceDisable
+    $accessApp.Visible = $false
     Open-AccessDatabase -AccessApp $accessApp -DatabasePath $DatabasePath
 
     foreach ($macroName in $names) {
@@ -55,6 +56,7 @@ try {
                 }
                 $accessApp = New-Object -ComObject Access.Application
                 $accessApp.AutomationSecurity = 3
+                $accessApp.Visible = $false
                 Open-AccessDatabase -AccessApp $accessApp -DatabasePath $DatabasePath
             }
 

@@ -1245,7 +1245,7 @@
         current-record (or (:record projection) {})
         all-records (or (:records projection) [])
         record-pos {:current (or (:position projection) 0) :total (or (:total projection) 0)}
-        record-source (:record-source current)
+        record-source (not-empty (:record-source current))
         continuous? (= (or (:default-view current) "Single Form") "Continuous Forms")
         on-change (fn [field value] (f/run-fire-and-forget! (form-flow/update-record-field-flow) {:field field :value value}))
         on-select (fn [idx] (f/run-fire-and-forget! form-flow/navigate-to-record-flow {:position (inc idx)}))

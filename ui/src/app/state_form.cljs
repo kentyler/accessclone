@@ -274,7 +274,7 @@
   "Re-fetch records for the current form and update state. Returns channel."
   []
   (let [form-def (get-in @app-state [:form-editor :current])
-        record-source (get form-def :record-source)]
+        record-source (not-empty (get form-def :record-source))]
     (when record-source
       (go
         (let [computed (collect-computed-specs form-def)
@@ -497,7 +497,7 @@
         (save-current-record!)))
     (swap! app-state assoc-in [:form-editor :view-mode] mode)
     (when (= mode :view)
-      (let [record-source (get-in @app-state [:form-editor :current :record-source])
+      (let [record-source (not-empty (get-in @app-state [:form-editor :current :record-source]))
             data-entry? (not= 0 (get-in @app-state [:form-editor :current :data-entry] 0))]
         (when record-source
           (if data-entry?

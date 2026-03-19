@@ -23,6 +23,7 @@ module.exports = function(pool, secrets) {
   require('./property-catalog')(router, pool);
   require('./translate-modules')(router, pool, secrets);
   require('./extract-object-intents')(router, pool, secrets);
+  require('./wire-events')(router, pool);
 
   return router;
 };

@@ -314,6 +314,31 @@ SELECT log_migration(
 );
 ```
 
+## Design Notes
+
+### Division by Zero
+The converter wraps all simple identifier denominators in `NULLIF(expr, 0)` so that
+`col1 / col2` becomes `col1 / NULLIF(col2, 0)`. This is a blanket policy rather than
+a targeted fix because:
+- Access silently returns `#DIV/0!` rather than hard-erroring; PostgreSQL throws and
+  aborts the entire query
+- Asking users to manually fix every affected query is worse than the trade-off
+- The alternative (detecting division and flagging it) still requires a user action
+
+**What gets wrapped**: bare column references — `gallons`, `tblfuel.gallons`,
+`"schema"."col"`. One level of nesting, simple identifiers only.
+
+**What doesn't get wrapped**: parenthesized expressions `x / (a + b)`, subqueries
+`x / (SELECT ...)`, already-NULLIF-wrapped denominators. These are rare; if they
+produce a runtime error, the LLM fallback handles re-conversion.
+
+**Side effects**: `x / 2` becomes `x / NULLIF(2, 0)` — unnecessary overhead but harmless.
+Chained `a / b / c`: only `b` gets wrapped in the first pass (`a / NULLIF(b, 0) / c`);
+`c` is left unwrapped. Acceptable given rarity of chained division in Access queries.
+
+Implementation: `withStringLiteralsMasked` in `syntax.js` masks single-quoted strings
+before applying the regex so `'a/b'` values are never touched.
+
 ## Outputs
 
 After this phase:

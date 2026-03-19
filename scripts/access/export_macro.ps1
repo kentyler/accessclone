@@ -27,6 +27,7 @@ $accessApp = $null
 try {
     $accessApp = New-Object -ComObject Access.Application
     $accessApp.AutomationSecurity = 3  # msoAutomationSecurityForceDisable
+    $accessApp.Visible = $false
     Open-AccessDatabase -AccessApp $accessApp -DatabasePath $DatabasePath
 
     # Export macro to a temp file using SaveAsText (acMacro = 4)

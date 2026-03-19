@@ -318,8 +318,8 @@ module.exports = function(router, pool) {
         return res.status(400).json({ error: 'databasePath and objectNames[] required' });
       }
 
-      // Macros are small — 10s each is generous; 60s minimum
-      const timeout = Math.max(60000, objectNames.length * 10000);
+      // COM startup dominates — 60s base + 2s per macro (SaveAsText is near-instant)
+      const timeout = 60000 + objectNames.length * 2000;
       const batchData = await withComLock(async () => {
         const scriptsDir = path.join(__dirname, '..', '..', '..', 'scripts', 'access');
         const exportScript = path.join(scriptsDir, 'export_macros_batch.ps1');

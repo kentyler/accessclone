@@ -266,7 +266,7 @@
     :test (fn [ctx] (= (:mode ctx) :view))
     :then [{:step :do
             :fn (fn [ctx]
-                  (let [record-source (get-in @app-state [:form-editor :current :record-source])]
+                  (let [record-source (not-empty (get-in @app-state [:form-editor :current :record-source]))]
                     (when record-source
                       (app.state-form/load-form-records! record-source))
                     ctx))}]}])

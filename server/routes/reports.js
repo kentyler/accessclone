@@ -216,6 +216,15 @@ function createRouter(pool) {
         logEvent(pool, 'warning', 'PUT /api/reports/:name', 'Control-column map population failed', { databaseId, details: { error: mapErr.message } });
       }
 
+      // Populate control-event mapping (outside transaction — non-critical side effect)
+      try {
+        const { populateControlEventMap } = require('../lib/event-mapping');
+        await populateControlEventMap(pool, databaseId, reportName, content, 'report');
+      } catch (evtErr) {
+        console.error('Error populating control-event map for report:', evtErr.message);
+        logEvent(pool, 'warning', 'PUT /api/reports/:name', 'Control-event map population failed', { databaseId, details: { error: evtErr.message } });
+      }
+
       // Post-import lint: detect issues for imported reports
       if (req.query.source === 'import' && req.query.import_log_id) {
         try {

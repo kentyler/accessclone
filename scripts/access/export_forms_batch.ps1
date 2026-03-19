@@ -1,4 +1,4 @@
-# Export multiple Access Forms as JSON in a single COM session
+# Export multiple Access Forms as JSON in a single COM session via SaveAsText
 # Usage: .\export_forms_batch.ps1 -DatabasePath "path\to\db.accdb" -FormNames "Form1,Form2,Form3"
 # Outputs JSON: {"objects":{"Form1":{...},"Form2":{...}},"errors":[{"name":"Form3","error":"msg"}]}
 
@@ -12,345 +12,365 @@ param(
 
 . "$PSScriptRoot\com_helpers.ps1"
 
-# Control type mapping (Access ControlType enum -> string)
-$ctlTypes = @{
-    100 = "label"
-    101 = "rectangle"
-    102 = "line"
-    103 = "image"
-    104 = "button"
-    105 = "option-button"
-    106 = "check-box"
-    107 = "option-group"
-    109 = "text-box"
-    110 = "list-box"
-    111 = "combo-box"
-    112 = "subform"
-    114 = "object-frame"
-    118 = "page-break"
-    122 = "toggle-button"
-    123 = "tab-control"
-    124 = "page"
-}
+# --- SaveAsText parser for forms (same as export_form.ps1) ---
 
-function Safe-GetProperty {
-    param($obj, [string]$propName, $default = $null)
-    try {
-        $val = $obj.$propName
-        if ($null -ne $val) { return $val }
-        return $default
-    } catch {
-        return $default
+function Parse-FormSaveAsText {
+    param([string]$textContent, [string]$formName)
+
+    $lines = $textContent -split "`r?`n"
+
+    $formObj = [ordered]@{ name = $formName }
+    $controls = @()
+    $sectionHeights = [ordered]@{ headerHeight = 0; detailHeight = 3000; footerHeight = 0 }
+    $sectionProps = [ordered]@{}
+
+    $sectionMap = @{
+        'FormHeader' = 1
+        'Section'    = 0
+        'FormFooter' = 2
     }
-}
+    $sectionPrefix = @{ 0 = 'detail'; 1 = 'header'; 2 = 'footer' }
 
-function Export-ControlToObject {
-    param($ctl, [string]$parentPage = $null)
-
-    $typeName = $ctlTypes[[int]$ctl.ControlType]
-    if (-not $typeName) { $typeName = "unknown-$($ctl.ControlType)" }
-
-    $obj = [ordered]@{
-        type = $typeName
-        name = $ctl.Name
+    $ctlTypeMap = @{
+        'Label' = 'label'; 'TextBox' = 'text-box'; 'ComboBox' = 'combo-box'
+        'ListBox' = 'list-box'; 'CheckBox' = 'check-box'; 'OptionButton' = 'option-button'
+        'ToggleButton' = 'toggle-button'; 'CommandButton' = 'command-button'
+        'Image' = 'image'; 'Rectangle' = 'rectangle'; 'Line' = 'line'
+        'SubForm' = 'subform'; 'OptionGroup' = 'option-group'
+        'BoundObjectFrame' = 'object-frame'; 'PageBreak' = 'page-break'
+        'TabCtl' = 'tab-control'; 'Page' = 'page'; 'Attachment' = 'attachment'
     }
 
-    $obj.section = [int](Safe-GetProperty $ctl "Section" 0)
+    $depth = 0
+    $inBinary = $false
+    $binaryDepth = 0
 
-    if ($parentPage) {
-        $obj.parentPage = $parentPage
-    }
+    # Context stack
+    $ctxStack = [System.Collections.ArrayList]::new()
+    $ctx = 'none'
 
-    $obj.left   = [int](Safe-GetProperty $ctl "Left" 0)
-    $obj.top    = [int](Safe-GetProperty $ctl "Top" 0)
-    $obj.width  = [int](Safe-GetProperty $ctl "Width" 100)
-    $obj.height = [int](Safe-GetProperty $ctl "Height" 20)
+    # Control stack -- when entering a control's children, push current control
+    $controlStack = [System.Collections.ArrayList]::new()
+    $currentControl = $null
+    $currentSection = 0
+    $currentTabPage = $null
 
-    $fontName = Safe-GetProperty $ctl "FontName"
-    if ($fontName) { $obj.fontName = $fontName }
+    # Form-level event tracking
+    $formEvents = [ordered]@{}
 
-    $fontSize = Safe-GetProperty $ctl "FontSize"
-    if ($fontSize -and $fontSize -gt 0) { $obj.fontSize = [int]$fontSize }
+    foreach ($rawLine in $lines) {
+        $line = $rawLine.Trim()
+        if (-not $line) { continue }
 
-    if (Safe-GetProperty $ctl "FontBold" $false) { $obj.fontBold = $true }
-    if (Safe-GetProperty $ctl "FontItalic" $false) { $obj.fontItalic = $true }
-    if (Safe-GetProperty $ctl "FontUnderline" $false) { $obj.fontUnderline = $true }
+        # Binary property blocks
+        if ($line -match '^\w+\s*=\s*Begin\s*$') {
+            $inBinary = $true; $binaryDepth = 1; continue
+        }
+        if ($inBinary) {
+            if ($line -eq 'Begin') { $binaryDepth++ }
+            elseif ($line -eq 'End') { $binaryDepth--; if ($binaryDepth -eq 0) { $inBinary = $false } }
+            continue
+        }
 
-    $foreColor = Safe-GetProperty $ctl "ForeColor"
-    if ($null -ne $foreColor -and $foreColor -ge 0) { $obj.foreColor = [long]$foreColor }
+        # --- Begin ---
+        if ($line -match '^Begin\s*(.*)$') {
+            $typeName = $Matches[1].Trim()
+            $depth++
 
-    $backColor = Safe-GetProperty $ctl "BackColor"
-    if ($null -ne $backColor -and $backColor -ge 0) { $obj.backColor = [long]$backColor }
+            # Push context
+            $null = $ctxStack.Add($ctx)
 
-    $borderColor = Safe-GetProperty $ctl "BorderColor"
-    if ($null -ne $borderColor -and $borderColor -ge 0) { $obj.borderColor = [long]$borderColor }
-
-    # BackStyle (0=Transparent, 1=Normal)
-    $backStyle = Safe-GetProperty $ctl "BackStyle"
-    if ($null -ne $backStyle) { $obj.backStyle = [int]$backStyle }
-
-    $ctlSource = Safe-GetProperty $ctl "ControlSource"
-    if ($ctlSource) { $obj.controlSource = $ctlSource }
-
-    $caption = Safe-GetProperty $ctl "Caption"
-    if ($caption) { $obj.caption = $caption }
-
-    $defaultValue = Safe-GetProperty $ctl "DefaultValue"
-    if ($defaultValue) { $obj.defaultValue = $defaultValue }
-
-    $format = Safe-GetProperty $ctl "Format"
-    if ($format) { $obj.format = $format }
-
-    $inputMask = Safe-GetProperty $ctl "InputMask"
-    if ($inputMask) { $obj.inputMask = $inputMask }
-
-    $validationRule = Safe-GetProperty $ctl "ValidationRule"
-    if ($validationRule) { $obj.validationRule = $validationRule }
-
-    $validationText = Safe-GetProperty $ctl "ValidationText"
-    if ($validationText) { $obj.validationText = $validationText }
-
-    $controlTip = Safe-GetProperty $ctl "ControlTipText"
-    if ($controlTip) { $obj.tooltip = $controlTip }
-
-    $tag = Safe-GetProperty $ctl "Tag"
-    if ($tag) { $obj.tag = $tag }
-
-    $tabIndex = Safe-GetProperty $ctl "TabIndex"
-    if ($null -ne $tabIndex) { $obj.tabIndex = [int]$tabIndex }
-
-    $enabled = Safe-GetProperty $ctl "Enabled" $true
-    if (-not $enabled) { $obj.enabled = $false }
-
-    $locked = Safe-GetProperty $ctl "Locked" $false
-    if ($locked) { $obj.locked = $true }
-
-    $visible = Safe-GetProperty $ctl "Visible" $true
-    if (-not $visible) { $obj.visible = $false }
-
-    $rowSource = Safe-GetProperty $ctl "RowSource"
-    if ($rowSource) {
-        $obj.rowSource = $rowSource
-        $obj.boundColumn = [int](Safe-GetProperty $ctl "BoundColumn" 1)
-        $obj.columnCount = [int](Safe-GetProperty $ctl "ColumnCount" 1)
-
-        $colWidths = Safe-GetProperty $ctl "ColumnWidths"
-        if ($colWidths) { $obj.columnWidths = $colWidths }
-
-        $limitToList = Safe-GetProperty $ctl "LimitToList" $false
-        if ($limitToList) { $obj.limitToList = $true }
-    }
-
-    $sourceObject = Safe-GetProperty $ctl "SourceObject"
-    if ($sourceObject) {
-        $obj.sourceForm = $sourceObject
-        $linkChild = Safe-GetProperty $ctl "LinkChildFields"
-        $linkMaster = Safe-GetProperty $ctl "LinkMasterFields"
-        if ($linkChild) { $obj.linkChildFields = $linkChild }
-        if ($linkMaster) { $obj.linkMasterFields = $linkMaster }
-    }
-
-    if ($typeName -eq "tab-control") {
-        try {
-            $pageNames = @()
-            foreach ($page in $ctl.Pages) {
-                $pageNames += $page.Name
+            if ($ctx -eq 'none' -and $typeName -eq 'Form') {
+                $ctx = 'form'
             }
-            if ($pageNames.Count -gt 0) { $obj.pages = $pageNames }
-        } catch {}
-    }
+            elseif ($ctx -eq 'form' -and -not $typeName) {
+                $ctx = 'formContainer'
+            }
+            elseif ($ctx -eq 'formContainer') {
+                if ($sectionMap.ContainsKey($typeName)) {
+                    $currentSection = $sectionMap[$typeName]
+                    $ctx = 'section'
+                } else {
+                    $ctx = 'defaults'  # default control settings (Label, TextBox blocks before sections)
+                }
+            }
+            elseif ($ctx -eq 'section' -and -not $typeName) {
+                $ctx = 'sectionControls'
+            }
+            elseif ($ctx -eq 'sectionControls') {
+                # Main control in a section
+                $ctlType = if ($ctlTypeMap.ContainsKey($typeName)) { $ctlTypeMap[$typeName] } else { $typeName.ToLower() }
+                $currentControl = [ordered]@{
+                    type = $ctlType; name = ''; section = $currentSection
+                    left = 0; top = 0; width = 0; height = 0
+                }
+                if ($currentTabPage) { $currentControl.parentPage = $currentTabPage }
+                $ctx = 'control'
+            }
+            elseif ($ctx -eq 'control' -and -not $typeName) {
+                # Entering control's children container -- save current control, push to stack
+                if ($currentControl -and $currentControl.name) {
+                    $controls += $currentControl
+                }
+                $null = $controlStack.Add($currentControl)
+                $currentControl = $null
+                $ctx = 'controlChildren'
+            }
+            elseif ($ctx -eq 'controlChildren') {
+                if ($ctlTypeMap.ContainsKey($typeName)) {
+                    $ctlType = $ctlTypeMap[$typeName]
+                    if ($typeName -eq 'Page') {
+                        # Tab page -- create page control, will set tab page name from Name property
+                        $currentControl = [ordered]@{
+                            type = 'page'; name = ''; section = $currentSection
+                            left = 0; top = 0; width = 0; height = 0
+                        }
+                        $ctx = 'tabPage'
+                    } else {
+                        # Attached label or other child
+                        $currentControl = [ordered]@{
+                            type = $ctlType; name = ''; section = $currentSection
+                            left = 0; top = 0; width = 0; height = 0
+                        }
+                        if ($currentTabPage) { $currentControl.parentPage = $currentTabPage }
+                        $ctx = 'control'
+                    }
+                } else {
+                    $ctx = 'skip'
+                }
+            }
+            elseif ($ctx -eq 'tabPage' -and -not $typeName) {
+                # Tab page controls container -- save page control first
+                if ($currentControl -and $currentControl.name) {
+                    $currentTabPage = $currentControl.name
+                    $controls += $currentControl
+                }
+                $null = $controlStack.Add($currentControl)
+                $currentControl = $null
+                $ctx = 'sectionControls'  # reuse sectionControls for page children
+            }
+            else {
+                $ctx = 'skip'
+            }
+            continue
+        }
 
-    if ($typeName -eq "page") {
-        $pageIndex = Safe-GetProperty $ctl "PageIndex"
-        if ($null -ne $pageIndex) { $obj.pageIndex = [int]$pageIndex }
-    }
+        # --- End ---
+        if ($line -eq 'End') {
+            $prevCtx = $ctx
+            # Pop context
+            if ($ctxStack.Count -gt 0) {
+                $ctx = $ctxStack[$ctxStack.Count - 1]
+                $ctxStack.RemoveAt($ctxStack.Count - 1)
+            } else { $ctx = 'none' }
+            $depth--
 
-    if ($typeName -eq "image") {
-        $picture = Safe-GetProperty $ctl "Picture"
-        if ($picture) { $obj.picture = $picture }
-        $sizeMode = Safe-GetProperty $ctl "SizeMode"
-        if ($null -ne $sizeMode) {
-            $sizeModeMap = @{ 0 = "clip"; 1 = "stretch"; 3 = "zoom" }
-            $sizeModeName = $sizeModeMap[[int]$sizeMode]
-            if ($sizeModeName) { $obj.sizeMode = $sizeModeName }
+            # Save control when exiting control context (if not already saved)
+            if ($prevCtx -eq 'control' -and $currentControl -and $currentControl.name) {
+                $controls += $currentControl
+                $currentControl = $null
+            }
+            # Restore from control stack when exiting children containers
+            if ($prevCtx -eq 'controlChildren' -and $controlStack.Count -gt 0) {
+                $currentControl = $controlStack[$controlStack.Count - 1]
+                $controlStack.RemoveAt($controlStack.Count - 1)
+                $currentControl = $null  # already saved
+            }
+            # Exiting tabPage's controls -- pop controlStack and clear tab page
+            if ($prevCtx -eq 'sectionControls' -and $ctx -eq 'tabPage') {
+                # Nothing to do -- will be handled by tabPage End
+            }
+            if ($prevCtx -eq 'tabPage') {
+                if ($controlStack.Count -gt 0) {
+                    $controlStack.RemoveAt($controlStack.Count - 1)
+                }
+                $currentTabPage = $null
+                if ($currentControl -and $currentControl.name) {
+                    $controls += $currentControl
+                    $currentControl = $null
+                }
+            }
+            continue
+        }
+
+        # --- Property parsing ---
+        if ($line -match '^(\w+)\s*=\s*(.+)$') {
+            $pName = $Matches[1]
+            $pVal = $Matches[2].Trim()
+            if ($pVal -match '^"(.*)"$') { $pVal = $Matches[1] }
+            $isNotDefault = ($pVal -eq 'NotDefault')
+
+            # Form-level
+            if ($ctx -eq 'form') {
+                switch ($pName) {
+                    'RecordSource'      { $formObj.recordSource = $pVal }
+                    'Width'             { $formObj.formWidth = [int]$pVal }
+                    'Caption'           { $formObj.caption = $pVal }
+                    'DefaultView'       { $formObj.defaultView = [int]$pVal }
+                    'ScrollBars'        { $formObj.scrollBars = [int]$pVal }
+                    'NavigationButtons' { if ($isNotDefault) { $formObj.navigationButtons = $false } }
+                    'RecordSelectors'   { if ($isNotDefault) { $formObj.recordSelectors = $false } }
+                    'AllowAdditions'    { if ($isNotDefault) { $formObj.allowAdditions = $false } }
+                    'AllowDeletions'    { if ($isNotDefault) { $formObj.allowDeletions = $false } }
+                    'AllowEdits'        { if ($isNotDefault) { $formObj.allowEdits = $false } }
+                    'PopUp'             { if ($isNotDefault) { $formObj.popup = $true } }
+                    'Modal'             { if ($isNotDefault) { $formObj.modal = $true } }
+                    'DividingLines'     { if ($isNotDefault) { $formObj.dividingLines = $false } }
+                    'DataEntry'         { if ($isNotDefault) { $formObj.dataEntry = $true } }
+                    'Filter'            { $formObj.filter = $pVal }
+                    'FilterOn'          { if ($isNotDefault) { $formObj.filterOn = $true } }
+                    'OrderBy'           { $formObj.orderBy = $pVal }
+                    'OrderByOn'         { if ($isNotDefault) { $formObj.orderByOn = $true } }
+                    # Form events
+                    'OnLoad'        { if ($pVal -eq '[Event Procedure]') { $formObj.hasLoadEvent = $true }; $formEvents['on-load'] = $pVal }
+                    'OnOpen'        { if ($pVal -eq '[Event Procedure]') { $formObj.hasOpenEvent = $true }; $formEvents['on-open'] = $pVal }
+                    'OnClose'       { if ($pVal -eq '[Event Procedure]') { $formObj.hasCloseEvent = $true }; $formEvents['on-close'] = $pVal }
+                    'OnCurrent'     { if ($pVal -eq '[Event Procedure]') { $formObj.hasCurrentEvent = $true }; $formEvents['on-current'] = $pVal }
+                    'BeforeInsert'  { if ($pVal -eq '[Event Procedure]') { $formObj.hasBeforeInsertEvent = $true }; $formEvents['before-insert'] = $pVal }
+                    'AfterInsert'   { if ($pVal -eq '[Event Procedure]') { $formObj.hasAfterInsertEvent = $true }; $formEvents['after-insert'] = $pVal }
+                    'BeforeUpdate'  { if ($pVal -eq '[Event Procedure]') { $formObj.hasBeforeUpdateEvent = $true }; $formEvents['before-update'] = $pVal }
+                    'AfterUpdate'   { if ($pVal -eq '[Event Procedure]') { $formObj.hasAfterUpdateEvent = $true }; $formEvents['after-update'] = $pVal }
+                    'OnDelete'      { if ($pVal -eq '[Event Procedure]') { $formObj.hasDeleteEvent = $true }; $formEvents['on-delete'] = $pVal }
+                }
+            }
+            # Section properties
+            elseif ($ctx -eq 'section') {
+                $secPfx = $sectionPrefix[$currentSection]
+                switch ($pName) {
+                    'Height' {
+                        $heightKey = switch ($currentSection) { 0 {'detailHeight'} 1 {'headerHeight'} 2 {'footerHeight'} }
+                        $sectionHeights[$heightKey] = [int]$pVal
+                    }
+                    'BackColor' { $sectionProps["${secPfx}BackColor"] = [long]$pVal }
+                    'Name' { }  # internal name, skip
+                    default {
+                        # Capture other section properties with prefix
+                        if ($pVal -match '^\d+$') {
+                            $sectionProps["${secPfx}${pName}"] = [int]$pVal
+                        } elseif ($isNotDefault) {
+                            $sectionProps["${secPfx}${pName}"] = 1
+                        }
+                    }
+                }
+            }
+            # Tab page
+            elseif ($ctx -eq 'tabPage') {
+                if ($pName -eq 'Name' -and $currentControl) { $currentControl.name = $pVal }
+                elseif ($pName -eq 'PageIndex' -and $currentControl) { $currentControl.pageIndex = [int]$pVal }
+                elseif ($pName -eq 'Caption' -and $currentControl) { $currentControl.caption = $pVal }
+            }
+            # Control properties
+            elseif ($ctx -eq 'control' -and $currentControl) {
+                switch ($pName) {
+                    'Name'              { $currentControl.name = $pVal }
+                    'Left'              { $currentControl.left = [int]$pVal }
+                    'Top'               { $currentControl.top = [int]$pVal }
+                    'Width'             { $currentControl.width = [int]$pVal }
+                    'Height'            { $currentControl.height = [int]$pVal }
+                    'FontName'          { $currentControl.fontName = $pVal }
+                    'FontSize'          { $currentControl.fontSize = [int]$pVal }
+                    'FontWeight'        { if ([int]$pVal -ge 700) { $currentControl.fontBold = $true } }
+                    'FontItalic'        { if ($isNotDefault) { $currentControl.fontItalic = $true } }
+                    'FontUnderline'     { if ($isNotDefault) { $currentControl.fontUnderline = $true } }
+                    'ForeColor'         { $currentControl.foreColor = [long]$pVal }
+                    'BackColor'         { $currentControl.backColor = [long]$pVal }
+                    'BorderColor'       { $currentControl.borderColor = [long]$pVal }
+                    'BackStyle'         { $currentControl.backStyle = [int]$pVal }
+                    'ControlSource'     { $currentControl.controlSource = $pVal }
+                    'Caption'           { $currentControl.caption = $pVal }
+                    'Format'            { $currentControl.format = $pVal }
+                    'DefaultValue'      { $currentControl.defaultValue = $pVal }
+                    'InputMask'         { $currentControl.inputMask = $pVal }
+                    'ValidationRule'    { $currentControl.validationRule = $pVal }
+                    'ValidationText'    { $currentControl.validationText = $pVal }
+                    'TabIndex'          { $currentControl.tabIndex = [int]$pVal }
+                    'Enabled'           { if ($pVal -eq '0') { $currentControl.enabled = $false } }
+                    'Locked'            { if ($isNotDefault) { $currentControl.locked = $true } }
+                    'Visible'           { if ($isNotDefault) { $currentControl.visible = $false } }
+                    'ControlTipText'    { $currentControl.tooltip = $pVal }
+                    'StatusBarText'     { $currentControl.tooltip = $pVal }
+                    'Tag'               { $currentControl.tag = $pVal }
+                    'TextAlign'         { $currentControl.textAlign = [int]$pVal }
+                    'DecimalPlaces'     { $currentControl.'decimal-places' = [int]$pVal }
+                    'RowSource'         { $currentControl.rowSource = $pVal }
+                    'BoundColumn'       { $currentControl.boundColumn = [int]$pVal }
+                    'ColumnCount'       { $currentControl.columnCount = [int]$pVal }
+                    'ColumnWidths'      { $currentControl.columnWidths = $pVal }
+                    'LimitToList'       { if ($isNotDefault) { $currentControl.limitToList = $true } }
+                    'SourceObject'      { $currentControl.sourceForm = $pVal }
+                    'LinkChildFields'   { $currentControl.linkChildFields = $pVal }
+                    'LinkMasterFields'  { $currentControl.linkMasterFields = $pVal }
+                    'SizeMode'          { $currentControl.sizeMode = [int]$pVal }
+                    'Picture'           { $currentControl.picture = $pVal }
+                    'ScrollBars'        { }  # control-level scrollbars, skip
+                    'SpecialEffect'     { }  # skip
+                    'OverlapFlags'      { }  # skip
+                    'ColumnHidden'      { }  # skip
+                    'ColumnWidth'       { }  # skip
+                    'ColumnOrder'       { }  # skip
+                    'TabStop'           { }  # skip
+                    'EventProcPrefix'   { }  # skip
+                    # Control events
+                    'OnClick'       { if ($pVal -eq '[Event Procedure]') { $currentControl.hasClickEvent = $true } }
+                    'OnDblClick'    { if ($pVal -eq '[Event Procedure]') { $currentControl.hasDblClickEvent = $true }
+                                      elseif ($pVal) { $currentControl.hasDblClickEvent = $true } }
+                    'OnChange'      { if ($pVal -eq '[Event Procedure]') { $currentControl.hasChangeEvent = $true } }
+                    'OnEnter'       { if ($pVal -eq '[Event Procedure]') { $currentControl.hasEnterEvent = $true } }
+                    'OnExit'        { if ($pVal -eq '[Event Procedure]') { $currentControl.hasExitEvent = $true } }
+                    'BeforeUpdate'  { if ($pVal -eq '[Event Procedure]') { $currentControl.hasBeforeUpdateEvent = $true } }
+                    'AfterUpdate'   { if ($pVal -eq '[Event Procedure]') { $currentControl.hasAfterUpdateEvent = $true } }
+                    'OnGotFocus'    { if ($pVal -eq '[Event Procedure]') { $currentControl.hasGotFocusEvent = $true } }
+                    'OnLostFocus'   { if ($pVal -eq '[Event Procedure]') { $currentControl.hasLostFocusEvent = $true } }
+                }
+            }
         }
     }
 
-    $events = @(
-        @("OnClick", "hasClickEvent"),
-        @("OnDblClick", "hasDblClickEvent"),
-        @("OnChange", "hasChangeEvent"),
-        @("OnEnter", "hasEnterEvent"),
-        @("OnExit", "hasExitEvent"),
-        @("BeforeUpdate", "hasBeforeUpdateEvent"),
-        @("AfterUpdate", "hasAfterUpdateEvent"),
-        @("OnGotFocus", "hasGotFocusEvent"),
-        @("OnLostFocus", "hasLostFocusEvent")
-    )
+    # Assemble output
+    if (-not $formObj.Contains('formWidth')) { $formObj.formWidth = 10000 }
+    if (-not $formObj.Contains('defaultView')) { $formObj.defaultView = 0 }
 
-    foreach ($evt in $events) {
-        $evtValue = Safe-GetProperty $ctl $evt[0]
-        if ($evtValue -eq "[Event Procedure]") {
-            $obj[$evt[1]] = $true
-        }
-    }
+    # Merge section heights and props
+    $sectionsObj = [ordered]@{}
+    foreach ($k in $sectionHeights.Keys) { $sectionsObj[$k] = $sectionHeights[$k] }
+    foreach ($k in $sectionProps.Keys) { $sectionsObj[$k] = $sectionProps[$k] }
+    $formObj.sections = $sectionsObj
 
-    return $obj
+    # Defaults for boolean form properties
+    if (-not $formObj.Contains('navigationButtons')) { $formObj.navigationButtons = $true }
+    if (-not $formObj.Contains('recordSelectors')) { $formObj.recordSelectors = $true }
+    if (-not $formObj.Contains('allowAdditions')) { $formObj.allowAdditions = $true }
+    if (-not $formObj.Contains('allowDeletions')) { $formObj.allowDeletions = $true }
+    if (-not $formObj.Contains('allowEdits')) { $formObj.allowEdits = $true }
+    if (-not $formObj.Contains('scrollBars')) { $formObj.scrollBars = 3 }
+    if (-not $formObj.Contains('popup')) { $formObj.popup = $false }
+    if (-not $formObj.Contains('modal')) { $formObj.modal = $false }
+    if (-not $formObj.Contains('dividingLines')) { $formObj.dividingLines = $true }
+    if (-not $formObj.Contains('dataEntry')) { $formObj.dataEntry = $false }
+
+    if ($formEvents.Count -gt 0) { $formObj.events = $formEvents }
+    $formObj.controls = $controls
+
+    return $formObj
 }
+
+# --- Export a single form via SaveAsText ---
 
 function Export-SingleForm {
     param($accessApp, [string]$formName)
 
-    $accessApp.DoCmd.OpenForm($formName, 1)  # 1 = acDesign
-    Start-Sleep -Seconds 1
+    $tempFile = [System.IO.Path]::GetTempFileName()
+    try {
+        $accessApp.SaveAsText(2, $formName, $tempFile)  # 2 = acForm
+        $textContent = Get-Content $tempFile -Raw -Encoding Default
+        $formObj = Parse-FormSaveAsText -textContent $textContent -formName $formName
 
-    # Use Forms collection by name — more reliable than Screen.ActiveForm in design view
-    $form = $null
-    try { $form = $accessApp.Forms($formName) } catch {}
-    if (-not $form) {
-        # Fallback to Screen.ActiveForm
-        Start-Sleep -Seconds 1
-        $form = $accessApp.Screen.ActiveForm
+        Write-Host "Exported $($formObj.controls.Count) controls ($formName)" -ForegroundColor Cyan
+
+        return $formObj
+    } finally {
+        Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
     }
-
-    # Verify form loaded — retry with longer wait if Controls collection is empty
-    $ctlCount = 0
-    try { $ctlCount = $form.Controls.Count } catch {}
-    if ($ctlCount -eq 0) {
-        Write-Host "  Retrying $formName (0 controls on first attempt)..." -ForegroundColor Yellow
-        $accessApp.DoCmd.Close(2, $formName, 0)
-        Start-Sleep -Seconds 1
-        $accessApp.DoCmd.OpenForm($formName, 1)
-        Start-Sleep -Seconds 3
-        try { $form = $accessApp.Forms($formName) } catch {
-            $form = $accessApp.Screen.ActiveForm
-        }
-    }
-
-    $formObj = [ordered]@{
-        name = $form.Name
-    }
-
-    $caption = Safe-GetProperty $form "Caption"
-    if ($caption) { $formObj.caption = $caption }
-
-    $recordSource = Safe-GetProperty $form "RecordSource"
-    if (-not $recordSource) {
-        # Fallback: read from the Properties collection (more reliable in design view)
-        try { $recordSource = $form.Properties("RecordSource").Value } catch {}
-    }
-    if ($recordSource) { $formObj.recordSource = $recordSource }
-
-    $formObj.defaultView = [int](Safe-GetProperty $form "DefaultView" 0)
-
-    $filter = Safe-GetProperty $form "Filter"
-    if ($filter) { $formObj.filter = $filter }
-
-    $filterOn = Safe-GetProperty $form "FilterOn" $false
-    if ($filterOn) { $formObj.filterOn = $true }
-
-    $orderBy = Safe-GetProperty $form "OrderBy"
-    if ($orderBy) { $formObj.orderBy = $orderBy }
-
-    $orderByOn = Safe-GetProperty $form "OrderByOn" $false
-    if ($orderByOn) { $formObj.orderByOn = $true }
-
-    $formObj.formWidth = [int](Safe-GetProperty $form "Width" 10000)
-
-    $formObj.sections = [ordered]@{}
-    try { $formObj.sections.headerHeight = [int]$form.Section(1).Height } catch { $formObj.sections.headerHeight = 0 }
-    try { $formObj.sections.detailHeight = [int]$form.Section(0).Height } catch { $formObj.sections.detailHeight = 3000 }
-    try { $formObj.sections.footerHeight = [int]$form.Section(2).Height } catch { $formObj.sections.footerHeight = 0 }
-
-    # Section-level properties (enumerate all via COM Properties collection)
-    foreach ($secDef in @(@(1, "header"), @(0, "detail"), @(2, "footer"))) {
-        try {
-            $sec = $form.Section($secDef[0])
-            foreach ($prop in $sec.Properties) {
-                try {
-                    $propName = $prop.Name
-                    if ($propName -eq "Height") { continue }  # Already extracted separately
-                    $val = $prop.Value
-                    if ($null -eq $val) { continue }
-                    $key = "$($secDef[1])$propName"
-                    if ($val -is [string]) {
-                        if ($val -ne "") { $formObj.sections[$key] = $val }
-                    } elseif ($val -is [bool]) {
-                        $formObj.sections[$key] = [int]$val
-                    } else {
-                        try { $formObj.sections[$key] = [long]$val } catch {}
-                    }
-                } catch {}
-            }
-        } catch {}
-    }
-
-    $formObj.navigationButtons = [bool](Safe-GetProperty $form "NavigationButtons" $true)
-    $formObj.recordSelectors = [bool](Safe-GetProperty $form "RecordSelectors" $true)
-    $formObj.allowAdditions = [bool](Safe-GetProperty $form "AllowAdditions" $true)
-    $formObj.allowDeletions = [bool](Safe-GetProperty $form "AllowDeletions" $true)
-    $formObj.allowEdits = [bool](Safe-GetProperty $form "AllowEdits" $true)
-    $formObj.scrollBars = [int](Safe-GetProperty $form "ScrollBars" 3)
-    $formObj.popup = [bool](Safe-GetProperty $form "PopUp" $false)
-    $formObj.modal = [bool](Safe-GetProperty $form "Modal" $false)
-    $formObj.dividingLines = [bool](Safe-GetProperty $form "DividingLines" $true)
-    $formObj.dataEntry = [bool](Safe-GetProperty $form "DataEntry" $false)
-
-    $backColor = Safe-GetProperty $form "Section(0).BackColor"
-    if ($null -eq $backColor) {
-        try { $backColor = $form.Section(0).BackColor } catch {}
-    }
-    if ($null -ne $backColor -and $backColor -ge 0) { $formObj.backColor = [long]$backColor }
-
-    $formEvents = @(
-        @("OnLoad", "hasLoadEvent"),
-        @("OnOpen", "hasOpenEvent"),
-        @("OnClose", "hasCloseEvent"),
-        @("OnCurrent", "hasCurrentEvent"),
-        @("BeforeInsert", "hasBeforeInsertEvent"),
-        @("AfterInsert", "hasAfterInsertEvent"),
-        @("BeforeUpdate", "hasBeforeUpdateEvent"),
-        @("AfterUpdate", "hasAfterUpdateEvent"),
-        @("OnDelete", "hasDeleteEvent")
-    )
-
-    foreach ($evt in $formEvents) {
-        $evtValue = Safe-GetProperty $form $evt[0]
-        if ($evtValue -eq "[Event Procedure]") {
-            $formObj[$evt[1]] = $true
-        }
-    }
-
-    $tabPageControls = @{}
-    foreach ($ctl in $form.Controls) {
-        if ([int]$ctl.ControlType -eq 123) {
-            try {
-                foreach ($page in $ctl.Pages) {
-                    foreach ($pageCtl in $page.Controls) {
-                        $tabPageControls[$pageCtl.Name] = $page.Name
-                    }
-                }
-            } catch {}
-        }
-    }
-
-    $controls = @()
-    foreach ($ctl in $form.Controls) {
-        try {
-            $parentPage = $tabPageControls[$ctl.Name]
-            $ctlObj = Export-ControlToObject -ctl $ctl -parentPage $parentPage
-            $controls += $ctlObj
-        } catch {
-            Write-Host "Warning: Could not export control $($ctl.Name): $_" -ForegroundColor Yellow
-        }
-    }
-    $formObj.controls = $controls
-
-    Write-Host "Exported $($controls.Count) controls ($formName)" -ForegroundColor Cyan
-
-    $accessApp.DoCmd.Close(2, $formName, 0)
-
-    return $formObj
 }
 
 # Parse comma-separated form names
@@ -378,12 +398,12 @@ $errors = @()
 try {
     $accessApp = New-Object -ComObject Access.Application
     $accessApp.AutomationSecurity = 3  # msoAutomationSecurityForceDisable
-    $accessApp.Visible = $true
+    $accessApp.Visible = $false
     Open-AccessDatabase -AccessApp $accessApp -DatabasePath $DatabasePath
 
     foreach ($formName in $names) {
         try {
-            # Check COM health before each export — reconnect if dead
+            # Check COM health before each export -- reconnect if dead
             try { $null = $accessApp.Visible } catch {
                 Write-Host "COM connection lost. Reconnecting..." -ForegroundColor Yellow
                 try { [System.Runtime.Interopservices.Marshal]::ReleaseComObject($accessApp) | Out-Null } catch {}
@@ -396,7 +416,7 @@ try {
                 }
                 $accessApp = New-Object -ComObject Access.Application
                 $accessApp.AutomationSecurity = 3
-                $accessApp.Visible = $true
+                $accessApp.Visible = $false
                 Open-AccessDatabase -AccessApp $accessApp -DatabasePath $DatabasePath
             }
 

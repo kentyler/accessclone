@@ -67,12 +67,39 @@ function applySyntaxTranslations(sql, controlMapping, referencedEntries, warning
     return `"${sanitizeName(inner)}"`;
   });
 
+  // Division by zero protection: wrap simple identifier denominators in NULLIF so runtime
+  // errors become NULL instead of crashing the query. Design decision: blanket policy is
+  // better than asking users to manually fix every Access query that divides two columns,
+  // since Access itself degrades to #DIV/0! rather than hard-erroring.
+  //
+  // Scope: only wraps bare identifiers (col or table.col). Complex denominators
+  // (parenthesized expressions, subqueries) are left alone — they're rare and the LLM
+  // fallback handles them if they produce a runtime error.
+  //
+  // String literals are masked first to avoid matching / inside 'a/b' values.
+  sql = withStringLiteralsMasked(sql, s =>
+    s.replace(/\/\s*(?!NULLIF\s*\()("?[\w][\w."]*"?)/g, '/ NULLIF($1, 0)')
+  );
+
   // Append LIMIT if we found TOP N
   if (topN) {
     sql = sql.trimEnd().replace(/;$/, '') + ` LIMIT ${topN}`;
   }
 
   return sql;
+}
+
+/**
+ * Mask single-quoted string literals, apply fn, then restore them.
+ * Prevents regex transforms from matching content inside string values.
+ */
+function withStringLiteralsMasked(sql, fn) {
+  const stash = [];
+  const masked = sql.replace(/'(?:[^']|'')*'/g, match => {
+    stash.push(match);
+    return `\x00S${stash.length - 1}\x00`;
+  });
+  return fn(masked).replace(/\x00S(\d+)\x00/g, (_, i) => stash[parseInt(i)]);
 }
 
 function addSchemaPrefix(sql, schemaName) {

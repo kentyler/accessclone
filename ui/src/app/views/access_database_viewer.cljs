@@ -121,7 +121,8 @@
     (:hasBeforeUpdateEvent ctrl) (assoc :has-before-update-event true)
     (:hasAfterUpdateEvent ctrl)  (assoc :has-after-update-event true)
     (:hasGotFocusEvent ctrl)     (assoc :has-gotfocus-event true)
-    (:hasLostFocusEvent ctrl)    (assoc :has-lostfocus-event true)))
+    (:hasLostFocusEvent ctrl)    (assoc :has-lostfocus-event true)
+    (:events ctrl)               (assoc :events (:events ctrl))))
 
 (defn convert-control
   "Convert a single Access control JSON object to AccessClone format"
@@ -183,7 +184,8 @@
     (:columnWidths ctrl) (assoc :column-widths (:columnWidths ctrl))
     (:hasFormatEvent ctrl) (assoc :has-format-event true)
     (:hasPrintEvent ctrl)  (assoc :has-print-event true)
-    (:hasClickEvent ctrl)  (assoc :has-click-event true)))
+    (:hasClickEvent ctrl)  (assoc :has-click-event true)
+    (:events ctrl)         (assoc :events (:events ctrl))))
 
 (defn convert-report-section
   "Convert a report section JSON object to AccessClone format"
@@ -205,7 +207,8 @@
       ;; Section events
       (:hasFormatEvent section)  (assoc :has-format-event true)
       (:hasPrintEvent section)   (assoc :has-print-event true)
-      (:hasRetreatEvent section) (assoc :has-retreat-event true))))
+      (:hasRetreatEvent section) (assoc :has-retreat-event true)
+      (:events section)          (assoc :events (:events section)))))
 
 (defn- convert-grouping
   "Convert Access grouping array to AccessClone format."
@@ -255,7 +258,8 @@
       (:hasDeactivateEvent report-data) (assoc :has-deactivate-event true)
       (:hasNoDataEvent report-data)     (assoc :has-no-data-event true)
       (:hasPageEvent report-data)       (assoc :has-page-event true)
-      (:hasErrorEvent report-data)      (assoc :has-error-event true))))
+      (:hasErrorEvent report-data)      (assoc :has-error-event true)
+      (:events report-data)            (assoc :events (:events report-data)))))
 
 ;; ============================================================
 
@@ -351,7 +355,8 @@
       (:hasAfterInsertEvent form-data)  (assoc :has-after-insert-event true)
       (:hasBeforeUpdateEvent form-data) (assoc :has-before-update-event true)
       (:hasAfterUpdateEvent form-data)  (assoc :has-after-update-event true)
-      (:hasDeleteEvent form-data)       (assoc :has-delete-event true))))
+      (:hasDeleteEvent form-data)       (assoc :has-delete-event true)
+      (:events form-data)              (assoc :events (:events form-data)))))
 
 ;; ============================================================
 ;; Server-side function call rewriting
@@ -1486,6 +1491,21 @@
                    (count (get-in body [:queries :extracted])))
                 "objects"))))))
 
+(defn- wire-events-phase!
+  "Populate control_event_map for all forms and reports."
+  [{:keys [target-database-id]}]
+  (go
+    (swap! viewer-state assoc-in [:import-all-status :phase] :wiring-events)
+    (swap! viewer-state assoc-in [:import-all-status :current] "Wiring event handlers...")
+    (let [resp (<! (http/post (str api-base "/api/database-import/wire-events")
+                              {:headers (state/db-headers)
+                               :timeout 120000}))]
+      (when (:success resp)
+        (let [body (:body resp)]
+          (.log js/console "[WIRE-EVENTS] Forms:" (:formsWired body)
+                "Reports:" (:reportsWired body)
+                "Errors:" (count (:errors body))))))))
+
 (defn- run-validation-pipeline!
   "Run multi-pass validation: repair → validate → autofix → design-check."
   [{:keys [target-database-id]}]
@@ -1581,12 +1601,16 @@
    Uses individual import with retry loop for tables/queries (server-side pipeline).
    When force? is true, re-imports ALL objects regardless of existing status."
   [target-database-id & [{:keys [force?]}]]
-  (swap! viewer-state assoc
-         :import-all-active? true
-         :importing? true
-         :import-all-status {:phase nil :current nil :imported 0 :total 0 :failed []}
-         :target-existing (if force? {} (:target-existing @viewer-state)))
-  (go
+  (if (:import-all-active? @viewer-state)
+    (do (println "[IMPORT] import-all! already running, ignoring duplicate call")
+        (go nil))
+    (do
+      (swap! viewer-state assoc
+             :import-all-active? true
+             :importing? true
+             :import-all-status {:phase nil :current nil :imported 0 :total 0 :failed []}
+             :target-existing (if force? {} (:target-existing @viewer-state)))
+      (go
     (let [findings (:assessment-findings @state/app-state)
           ctx {:target-database-id target-database-id
                :force? force?
@@ -1608,8 +1632,9 @@
       (<! (import-queries-phase! ctx))
       (<! (import-macros-phase! ctx))
       (<! (extract-object-intents-phase! ctx))
+      (<! (wire-events-phase! ctx))
       (let [run-id (<! (run-validation-pipeline! ctx))]
-        (finalize-import! ctx run-id)))))
+        (finalize-import! ctx run-id)))))))
 
 (defn auto-import-all!
   "Import all objects, then translate modules server-side."

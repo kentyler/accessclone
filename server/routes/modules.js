@@ -80,10 +80,102 @@ function createRouter(pool) {
   router.get('/:name/handlers', async (req, res) => {
     try {
       const databaseId = req.databaseId;
+      const moduleName = req.params.name;
+
+      // Determine object name/type from module name (Form_MyForm → form/MyForm)
+      let objectName = null;
+      let objectType = null;
+      if (moduleName.startsWith('Form_')) {
+        objectName = moduleName.slice(5);
+        objectType = 'form';
+      } else if (moduleName.startsWith('Report_')) {
+        objectName = moduleName.slice(7);
+        objectType = 'report';
+      }
+
+      // Try control_event_map first (authoritative when populated)
+      if (objectName && objectType) {
+        const cemResult = await pool.query(
+          `SELECT control_name, event, handler_type, handler_ref, module_name
+           FROM shared.control_event_map
+           WHERE database_id = $1 AND object_name = $2`,
+          [databaseId, objectName]
+        );
+
+        if (cemResult.rows.length > 0) {
+          // Load module intents for resolving event-procedure handlers
+          const modResult = await pool.query(
+            `SELECT intents FROM shared.modules
+             WHERE database_id = $1 AND name = $2 AND is_current = true`,
+            [databaseId, moduleName]
+          );
+          const intents = modResult.rows[0]?.intents;
+          const procedures = (intents?.mapped?.procedures) || [];
+          const procMap = {};
+          for (const proc of procedures) {
+            if (proc.name) procMap[proc.name] = proc;
+          }
+
+          // Get the set of triggers already handled by reactions so we can exclude them
+          const reactionTriggers = new Set(
+            extractReactions(procedures).map(r => r.trigger)
+          );
+
+          const handlers = [];
+          for (const row of cemResult.rows) {
+            const controlName = row.control_name;
+            const eventKey = row.event;
+
+            // Normalize control name for key generation
+            const controlKw = controlName === '_form' ? 'form'
+              : controlName === '_report' ? 'report'
+              : toKw(controlName);
+
+            // Skip AfterUpdate procedures already fully covered by reactions
+            if (eventKey === 'after-update' && controlKw !== 'form' && controlKw !== 'report') {
+              if (reactionTriggers.has(controlKw)) continue;
+            }
+
+            const key = `${controlKw}.${eventKey}`;
+
+            if (row.handler_type === 'event-procedure') {
+              // Look up the procedure's intents from the module
+              const proc = procMap[row.handler_ref];
+              handlers.push({
+                key,
+                control: controlKw,
+                event: eventKey,
+                procedure: row.handler_ref,
+                intents: proc?.intents || [],
+              });
+            } else if (row.handler_type === 'expression') {
+              handlers.push({
+                key,
+                control: controlKw,
+                event: eventKey,
+                procedure: `=${row.handler_ref}()`,
+                intents: [{ type: 'call-function', function: row.handler_ref }],
+              });
+            } else if (row.handler_type === 'macro') {
+              handlers.push({
+                key,
+                control: controlKw,
+                event: eventKey,
+                procedure: row.handler_ref,
+                intents: [{ type: 'run-macro', macro: row.handler_ref }],
+              });
+            }
+          }
+
+          return res.json(handlers);
+        }
+      }
+
+      // Fallback: regex-based parsing from module intents (backward compat)
       const result = await pool.query(
         `SELECT intents FROM shared.modules
          WHERE database_id = $1 AND name = $2 AND is_current = true`,
-        [databaseId, req.params.name]
+        [databaseId, moduleName]
       );
 
       if (result.rows.length === 0 || !result.rows[0].intents) {

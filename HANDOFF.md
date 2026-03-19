@@ -6,7 +6,16 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 
 ## Current State
 
-### Just Shipped (2026-03-16)
+### Just Shipped (2026-03-18)
+- **SaveAsText rewrite of all export scripts**: Rewrote all 4 PowerShell export scripts from COM design-view to `Application.SaveAsText` parsing:
+  - `export_form.ps1` / `export_forms_batch.ps1` — context stack parser handling nested labels, tab controls with pages
+  - `export_report.ps1` / `export_reports_batch.ps1` — simpler parser (all controls at same depth)
+  - Both batch scripts include COM health check with auto-reconnect, `$accessApp.Visible = $false`
+- **Macro export fixes**: Added `$accessApp.Visible = $false` to `export_macro.ps1` and `export_macros_batch.ps1`. Changed batch timeout from `max(60s, 10s/macro)` to `60s + 2s/macro` in `server/routes/database-import/export.js`.
+- **cranbrook14 full pipeline success**: All 33 forms with controls (previously 7 had 0), all 7 reports with controls (MPG=26, Miles=35, RN=24), 38 modules translated, queries imported with multi-pass retry. First fully successful import of a complex .mdb database.
+- **Business intent extraction** (March 17): LLM extracts purpose/category/data-flows/gaps from forms, reports, queries. Runs in import pipeline and as manual button in App Viewer. Stored in JSONB columns on shared.forms/reports/view_metadata. Integrated into chat context.
+
+### Previously Shipped (2026-03-16)
 - **Import pipeline folder rename**: `server/routes/access-import/` renamed to `server/routes/database-import/` to make the import pipeline platform-agnostic for upcoming FoxPro support. All references updated across frontend and backend. API prefix is `/api/database-import`.
 - **Qualifying analysis: Import Difficulty Assessment**: New section in `scripts/qualifying-analysis.ps1` that scores databases on import difficulty (0-10+ weighted score) and recommends auto-import vs individual import.
   - Scoring based on: tables without PKs, action/crosstab/passthrough queries, form-referencing queries, complex forms (10+ events), subforms, VBA external deps, large modules, problematic column types.
@@ -174,11 +183,14 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 - **Import order**: tables → forms/reports → queries → macros → modules. Forms must be imported before queries so control_column_map exists.
 - **Tested against two databases**: Northwind and a second Access database both import fully (tables, forms, reports, queries, modules, macros) without errors.
 
-### In Progress / Uncommitted
-Working tree has uncommitted changes for multi-pass import pipeline, server-side module translation, Form View color/layout fidelity, and event runtime (intent interpreter, report events, focus events, expression evaluator). Forms imported before the BackStyle PowerShell change will use type-based fallback for transparency. Re-import forms to get full BackStyle data.
+### Session Notes (2026-03-19)
+- **Unbound forms showing "no records"**: `record-source` stored as `""` (empty string) was truthy in ClojureScript, bypassing the unbound-form render path. Fixed with `not-empty` in `form_view.cljs`, `state_form.cljs` (2 sites), and `flows/form.cljs`.
+- **Division by zero in converted queries**: Added blanket `NULLIF(denominator, 0)` transform to `syntax.js` (`withStringLiteralsMasked` protects string literals). Applies to simple identifier denominators only. Design note in `skills/conversion-queries.md`.
+- **translate-modules double-run**: Server-side `activeTranslations` Set in `translate-modules.js` blocks concurrent calls for the same database. Cause of duplicate was likely UI triggering import twice before guard flag was set.
+- **`server/rebuild.bat`**: New script — compiles ClojureScript then starts the server (`set PGPASSWORD=7297`). Lives in `server/` folder, run directly when server is stopped.
 
-### Next Up — Re-import Forms for BackStyle
-After the PowerShell scripts were updated to export `BackStyle`, existing form definitions in the database don't have this property. Re-importing forms will populate it. Until then, the type-based fallback applies (labels transparent, text-boxes opaque, etc.).
+### In Progress / Uncommitted
+Working tree has uncommitted changes for: SaveAsText rewrite of all 4 export scripts (forms/reports single+batch), macro export Visible fix + timeout change, business intent extraction, lint test updates, schema updates, event-mapping module, wire-events module, and various route/frontend updates. SaveAsText now exports BackStyle so newly imported forms get correct transparency values.
 
 ### Next Up — Image Import Test
 With the server running, test the full image import pipeline for Northwind:

@@ -10,9 +10,9 @@ const VALID_CONTROL_TYPES = [
   'toggle-button', 'tab-control', 'subform', 'page'
 ];
 
-const REQUIRED_FORM_FIELDS = ['id', 'name', 'record-source'];
+const REQUIRED_FORM_FIELDS = ['name'];
 const REQUIRED_CONTROL_FIELDS = ['type', 'x', 'y', 'width', 'height'];
-const REQUIRED_REPORT_FIELDS = ['id', 'name', 'record-source'];
+const REQUIRED_REPORT_FIELDS = ['name'];
 
 const STANDARD_REPORT_BANDS = [
   'report-header', 'page-header', 'detail', 'page-footer', 'report-footer'

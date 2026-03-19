@@ -12,334 +12,238 @@ param(
 
 . "$PSScriptRoot\com_helpers.ps1"
 
-# Control type mapping (Access ControlType enum -> string)
-$ctlTypes = @{
-    100 = "label"
-    101 = "rectangle"
-    102 = "line"
-    103 = "image"
-    104 = "button"
-    105 = "option-button"
-    106 = "check-box"
-    107 = "option-group"
-    109 = "text-box"
-    110 = "list-box"
-    111 = "combo-box"
-    112 = "subreport"
-    114 = "object-frame"
-    118 = "page-break"
-    122 = "toggle-button"
-    123 = "tab-control"
-    124 = "page"
-}
+# --- SaveAsText parser (same as export_report.ps1) ---
 
-$sectionNames = @{
-    0 = "detail"
-    1 = "report-header"
-    2 = "report-footer"
-    3 = "page-header"
-    4 = "page-footer"
-}
+function Parse-ReportSaveAsText {
+    param([string]$textContent, [string]$reportName)
 
-function Safe-GetProperty {
-    param($obj, [string]$propName, $default = $null)
-    try {
-        $val = $obj.$propName
-        if ($null -ne $val) { return $val }
-        return $default
-    } catch {
-        return $default
-    }
-}
+    $lines = $textContent -split "`r?`n"
 
-function Export-ReportControlToObject {
-    param($ctl)
+    $reportObj = [ordered]@{ name = $reportName }
+    $grouping = @()
+    $sections = @()
 
-    $typeName = $ctlTypes[[int]$ctl.ControlType]
-    if (-not $typeName) { $typeName = "unknown-$($ctl.ControlType)" }
-
-    $obj = [ordered]@{
-        type = $typeName
-        name = $ctl.Name
+    $sectionTypeMap = @{
+        'FormHeader' = 'report-header'
+        'PageHeader' = 'page-header'
+        'Section'    = 'detail'
+        'PageFooter' = 'page-footer'
+        'FormFooter' = 'report-footer'
     }
 
-    $obj.left   = [int](Safe-GetProperty $ctl "Left" 0)
-    $obj.top    = [int](Safe-GetProperty $ctl "Top" 0)
-    $obj.width  = [int](Safe-GetProperty $ctl "Width" 100)
-    $obj.height = [int](Safe-GetProperty $ctl "Height" 20)
+    $ctlTypeMap = @{
+        'Label' = 'label'; 'TextBox' = 'text-box'; 'ComboBox' = 'combo-box'
+        'ListBox' = 'list-box'; 'CheckBox' = 'check-box'; 'OptionButton' = 'option-button'
+        'ToggleButton' = 'toggle-button'; 'CommandButton' = 'command-button'
+        'Image' = 'image'; 'Rectangle' = 'rectangle'; 'Line' = 'line'
+        'SubForm' = 'subreport'; 'OptionGroup' = 'option-group'
+        'BoundObjectFrame' = 'object-frame'; 'PageBreak' = 'page-break'
+    }
 
-    $fontName = Safe-GetProperty $ctl "FontName"
-    if ($fontName) { $obj.fontName = $fontName }
+    $depth = 0
+    $inBinary = $false
+    $binaryDepth = 0
+    $context = 'none'
+    $currentSection = $null
+    $currentControl = $null
 
-    $fontSize = Safe-GetProperty $ctl "FontSize"
-    if ($fontSize -and $fontSize -gt 0) { $obj.fontSize = [int]$fontSize }
+    foreach ($rawLine in $lines) {
+        $line = $rawLine.Trim()
+        if (-not $line) { continue }
 
-    if (Safe-GetProperty $ctl "FontBold" $false) { $obj.fontBold = $true }
-    if (Safe-GetProperty $ctl "FontItalic" $false) { $obj.fontItalic = $true }
-    if (Safe-GetProperty $ctl "FontUnderline" $false) { $obj.fontUnderline = $true }
+        # Binary property blocks
+        if ($line -match '^\w+\s*=\s*Begin\s*$') {
+            $inBinary = $true
+            $binaryDepth = 1
+            continue
+        }
+        if ($inBinary) {
+            if ($line -eq 'Begin') { $binaryDepth++ }
+            elseif ($line -eq 'End') { $binaryDepth--; if ($binaryDepth -eq 0) { $inBinary = $false } }
+            continue
+        }
 
-    $foreColor = Safe-GetProperty $ctl "ForeColor"
-    if ($null -ne $foreColor -and $foreColor -ge 0) { $obj.foreColor = [long]$foreColor }
+        # Structural Begin
+        if ($line -match '^Begin\s*(.*)$') {
+            $typeName = $Matches[1].Trim()
+            $depth++
 
-    $backColor = Safe-GetProperty $ctl "BackColor"
-    if ($null -ne $backColor -and $backColor -ge 0) { $obj.backColor = [long]$backColor }
+            if ($depth -eq 1 -and $typeName -eq 'Report') {
+                $context = 'report'
+            }
+            elseif ($depth -eq 3) {
+                if ($sectionTypeMap.ContainsKey($typeName)) {
+                    $context = 'section'
+                    $currentSection = [ordered]@{
+                        name = $sectionTypeMap[$typeName]
+                        height = 0; visible = $true; canGrow = $false; canShrink = $false
+                        forceNewPage = 0; keepTogether = $false; controls = @()
+                    }
+                }
+                elseif ($typeName -eq 'BreakLevel') {
+                    $context = 'grouping'
+                    $currentGroupObj = [ordered]@{
+                        field = ''; groupHeader = $false; groupFooter = $false
+                        sortOrder = 0; groupOn = 0; groupInterval = 1; keepTogether = 0
+                    }
+                }
+                elseif ($typeName -match '^GroupLevel(\d+)Header$') {
+                    $context = 'section'
+                    $currentSection = [ordered]@{
+                        name = "group-header-$($Matches[1])"
+                        height = 0; visible = $true; canGrow = $false; canShrink = $false
+                        forceNewPage = 0; keepTogether = $false; controls = @()
+                    }
+                }
+                elseif ($typeName -match '^GroupLevel(\d+)Footer$') {
+                    $context = 'section'
+                    $currentSection = [ordered]@{
+                        name = "group-footer-$($Matches[1])"
+                        height = 0; visible = $true; canGrow = $false; canShrink = $false
+                        forceNewPage = 0; keepTogether = $false; controls = @()
+                    }
+                }
+                else { $context = 'defaults' }
+            }
+            elseif ($depth -eq 4 -and $context -eq 'section' -and -not $typeName) {
+                $context = 'section-controls'
+            }
+            elseif ($depth -eq 5 -and $context -eq 'section-controls') {
+                $ctlType = if ($ctlTypeMap.ContainsKey($typeName)) { $ctlTypeMap[$typeName] } else { $typeName.ToLower() }
+                $context = 'control'
+                $currentControl = [ordered]@{
+                    type = $ctlType; name = ''; left = 0; top = 0; width = 0; height = 0
+                }
+            }
+            continue
+        }
 
-    $borderColor = Safe-GetProperty $ctl "BorderColor"
-    if ($null -ne $borderColor -and $borderColor -ge 0) { $obj.borderColor = [long]$borderColor }
+        # Structural End
+        if ($line -eq 'End') {
+            if ($depth -eq 5 -and $context -eq 'control') {
+                if ($currentControl -and $currentControl.name) {
+                    $currentSection.controls += $currentControl
+                }
+                $currentControl = $null
+                $context = 'section-controls'
+            }
+            elseif ($depth -eq 4 -and $context -eq 'section-controls') {
+                $context = 'section'
+            }
+            elseif ($depth -eq 3) {
+                if ($context -eq 'section' -and $currentSection) {
+                    $sections += $currentSection
+                    $currentSection = $null
+                }
+                elseif ($context -eq 'grouping' -and $currentGroupObj) {
+                    $grouping += $currentGroupObj
+                    $currentGroupObj = $null
+                }
+                $context = 'report'
+            }
+            $depth--
+            continue
+        }
 
-    $ctlSource = Safe-GetProperty $ctl "ControlSource"
-    if ($ctlSource) { $obj.controlSource = $ctlSource }
+        # Property parsing
+        if ($line -match '^(\w+)\s*=\s*(.+)$') {
+            $pName = $Matches[1]
+            $pVal = $Matches[2].Trim()
+            if ($pVal -match '^"(.*)"$') { $pVal = $Matches[1] }
+            $isNotDefault = ($pVal -eq 'NotDefault')
 
-    $caption = Safe-GetProperty $ctl "Caption"
-    if ($caption) { $obj.caption = $caption }
-
-    $format = Safe-GetProperty $ctl "Format"
-    if ($format) { $obj.format = $format }
-
-    $controlTip = Safe-GetProperty $ctl "ControlTipText"
-    if ($controlTip) { $obj.tooltip = $controlTip }
-
-    $tag = Safe-GetProperty $ctl "Tag"
-    if ($tag) { $obj.tag = $tag }
-
-    $visible = Safe-GetProperty $ctl "Visible" $true
-    if (-not $visible) { $obj.visible = $false }
-
-    $runningSum = Safe-GetProperty $ctl "RunningSum"
-    if ($null -ne $runningSum -and $runningSum -gt 0) { $obj.runningSum = [int]$runningSum }
-
-    $canGrow = Safe-GetProperty $ctl "CanGrow" $false
-    if ($canGrow) { $obj.canGrow = $true }
-
-    $canShrink = Safe-GetProperty $ctl "CanShrink" $false
-    if ($canShrink) { $obj.canShrink = $true }
-
-    $hideDuplicates = Safe-GetProperty $ctl "HideDuplicates" $false
-    if ($hideDuplicates) { $obj.hideDuplicates = $true }
-
-    # Image specific
-    if ($typeName -eq "image") {
-        $picture = Safe-GetProperty $ctl "Picture"
-        if ($picture) { $obj.picture = $picture }
-        $sizeMode = Safe-GetProperty $ctl "SizeMode"
-        if ($null -ne $sizeMode) {
-            $sizeModeMap = @{ 0 = "clip"; 1 = "stretch"; 3 = "zoom" }
-            $sizeModeName = $sizeModeMap[[int]$sizeMode]
-            if ($sizeModeName) { $obj.sizeMode = $sizeModeName }
+            if ($context -eq 'report' -and $depth -eq 1) {
+                switch ($pName) {
+                    'RecordSource' { $reportObj.recordSource = $pVal }
+                    'Width'        { $reportObj.reportWidth = [int]$pVal }
+                    'Caption'      { $reportObj.caption = $pVal }
+                    'PageHeader'   { $reportObj.pageHeader = [int]$pVal }
+                    'PageFooter'   { $reportObj.pageFooter = [int]$pVal }
+                }
+            }
+            elseif ($context -eq 'grouping') {
+                switch ($pName) {
+                    'ControlSource' { $currentGroupObj.field = $pVal }
+                    'SortOrder'     { if ($isNotDefault) { $currentGroupObj.sortOrder = 1 } }
+                    'GroupOn'       { $currentGroupObj.groupOn = [int]$pVal }
+                    'GroupInterval' { $currentGroupObj.groupInterval = [int]$pVal }
+                    'KeepTogether'  { $currentGroupObj.keepTogether = [int]$pVal }
+                    'GroupHeader'   { if ($isNotDefault) { $currentGroupObj.groupHeader = $true } }
+                    'GroupFooter'   { if ($isNotDefault) { $currentGroupObj.groupFooter = $true } }
+                }
+            }
+            elseif ($context -eq 'section' -and $currentSection -and $depth -eq 3) {
+                switch ($pName) {
+                    'Height'       { $currentSection.height = [int]$pVal }
+                    'Visible'      { if ($pVal -eq '0' -or $pVal -eq 'False') { $currentSection.visible = $false } }
+                    'CanGrow'      { if ($isNotDefault) { $currentSection.canGrow = $true } }
+                    'CanShrink'    { if ($isNotDefault) { $currentSection.canShrink = $true } }
+                    'KeepTogether' { if ($isNotDefault) { $currentSection.keepTogether = $true } }
+                    'ForceNewPage' { $currentSection.forceNewPage = [int]$pVal }
+                    'BackColor'    { $currentSection.backColor = [int]$pVal }
+                }
+            }
+            elseif ($context -eq 'control' -and $currentControl) {
+                switch ($pName) {
+                    'Name'            { $currentControl.name = $pVal }
+                    'Left'            { $currentControl.left = [int]$pVal }
+                    'Top'             { $currentControl.top = [int]$pVal }
+                    'Width'           { $currentControl.width = [int]$pVal }
+                    'Height'          { $currentControl.height = [int]$pVal }
+                    'FontName'        { $currentControl.fontName = $pVal }
+                    'FontSize'        { $currentControl.fontSize = [int]$pVal }
+                    'FontWeight'      { if ([int]$pVal -ge 700) { $currentControl.fontBold = $true } }
+                    'FontItalic'      { if ($isNotDefault) { $currentControl.fontItalic = $true } }
+                    'FontUnderline'   { if ($isNotDefault) { $currentControl.fontUnderline = $true } }
+                    'ForeColor'       { $currentControl.foreColor = [long]$pVal }
+                    'BackColor'       { $currentControl.backColor = [long]$pVal }
+                    'BorderColor'     { $currentControl.borderColor = [long]$pVal }
+                    'ControlSource'   { $currentControl.controlSource = $pVal }
+                    'Caption'         { $currentControl.caption = $pVal }
+                    'Format'          { $currentControl.format = $pVal }
+                    'DecimalPlaces'   { $currentControl.'decimal-places' = [int]$pVal }
+                    'TextAlign'       { $currentControl.textAlign = [int]$pVal }
+                    'Visible'         { if ($pVal -eq '0' -or $pVal -eq 'False') { $currentControl.visible = $false } }
+                    'CanGrow'         { if ($isNotDefault) { $currentControl.canGrow = $true } }
+                    'CanShrink'       { if ($isNotDefault) { $currentControl.canShrink = $true } }
+                    'RunningSum'      { $currentControl.runningSum = [int]$pVal }
+                    'RowSource'       { $currentControl.rowSource = $pVal }
+                    'BoundColumn'     { $currentControl.boundColumn = [int]$pVal }
+                    'ColumnCount'     { $currentControl.columnCount = [int]$pVal }
+                    'ColumnWidths'    { $currentControl.columnWidths = $pVal }
+                }
+            }
         }
     }
 
-    $sourceObject = Safe-GetProperty $ctl "SourceObject"
-    if ($sourceObject) {
-        $obj.sourceReport = $sourceObject
-        $linkChild = Safe-GetProperty $ctl "LinkChildFields"
-        $linkMaster = Safe-GetProperty $ctl "LinkMasterFields"
-        if ($linkChild) { $obj.linkChildFields = $linkChild }
-        if ($linkMaster) { $obj.linkMasterFields = $linkMaster }
-    }
+    if (-not $reportObj.Contains('reportWidth')) { $reportObj.reportWidth = 10000 }
+    if (-not $reportObj.Contains('pageHeader')) { $reportObj.pageHeader = 0 }
+    if (-not $reportObj.Contains('pageFooter')) { $reportObj.pageFooter = 0 }
+    $reportObj.grouping = $grouping
+    $reportObj.sections = $sections
 
-    $rowSource = Safe-GetProperty $ctl "RowSource"
-    if ($rowSource) {
-        $obj.rowSource = $rowSource
-        $obj.boundColumn = [int](Safe-GetProperty $ctl "BoundColumn" 1)
-        $obj.columnCount = [int](Safe-GetProperty $ctl "ColumnCount" 1)
-
-        $colWidths = Safe-GetProperty $ctl "ColumnWidths"
-        if ($colWidths) { $obj.columnWidths = $colWidths }
-    }
-
-    $events = @(
-        @("OnFormat", "hasFormatEvent"),
-        @("OnPrint", "hasPrintEvent"),
-        @("OnClick", "hasClickEvent")
-    )
-
-    foreach ($evt in $events) {
-        $evtValue = Safe-GetProperty $ctl $evt[0]
-        if ($evtValue -eq "[Event Procedure]") {
-            $obj[$evt[1]] = $true
-        }
-    }
-
-    return $obj
+    return $reportObj
 }
 
-function Export-SectionToObject {
-    param($section, [string]$sectionName, $report)
-
-    $obj = [ordered]@{
-        name = $sectionName
-    }
-
-    $obj.height = [int](Safe-GetProperty $section "Height" 0)
-
-    $visible = Safe-GetProperty $section "Visible" $true
-    $obj.visible = [bool]$visible
-
-    $canGrow = Safe-GetProperty $section "CanGrow" $false
-    $obj.canGrow = [bool]$canGrow
-
-    $canShrink = Safe-GetProperty $section "CanShrink" $false
-    $obj.canShrink = [bool]$canShrink
-
-    $forceNewPage = Safe-GetProperty $section "ForceNewPage" 0
-    $obj.forceNewPage = [int]$forceNewPage
-
-    $keepTogether = Safe-GetProperty $section "KeepTogether" $true
-    $obj.keepTogether = [bool]$keepTogether
-
-    $backColor = Safe-GetProperty $section "BackColor"
-    if ($null -ne $backColor -and $backColor -ge 0) { $obj.backColor = [long]$backColor }
-
-    $events = @(
-        @("OnFormat", "hasFormatEvent"),
-        @("OnPrint", "hasPrintEvent"),
-        @("OnRetreat", "hasRetreatEvent")
-    )
-
-    foreach ($evt in $events) {
-        $evtValue = Safe-GetProperty $section $evt[0]
-        if ($evtValue -eq "[Event Procedure]") {
-            $obj[$evt[1]] = $true
-        }
-    }
-
-    $controls = @()
-    foreach ($ctl in $section.Controls) {
-        try {
-            $ctlObj = Export-ReportControlToObject -ctl $ctl
-            $controls += $ctlObj
-        } catch {
-            Write-Host "Warning: Could not export control $($ctl.Name): $_" -ForegroundColor Yellow
-        }
-    }
-    $obj.controls = $controls
-
-    return $obj
-}
+# --- Export a single report via SaveAsText ---
 
 function Export-SingleReport {
     param($accessApp, [string]$reportName)
 
-    $accessApp.DoCmd.OpenReport($reportName, 1)  # 1 = acViewDesign
-    Start-Sleep -Seconds 1
-
-    $report = $accessApp.Screen.ActiveReport
-
-    $reportObj = [ordered]@{
-        name = $report.Name
-    }
-
-    $caption = Safe-GetProperty $report "Caption"
-    if ($caption) { $reportObj.caption = $caption }
-
-    $recordSource = $report.RecordSource
-    if ($recordSource) { $reportObj.recordSource = $recordSource }
-
-    $reportObj.reportWidth = [int](Safe-GetProperty $report "Width" 10000)
-
-    $reportObj.pageHeader = [int](Safe-GetProperty $report "PageHeader" 0)
-    $reportObj.pageFooter = [int](Safe-GetProperty $report "PageFooter" 0)
-
-    $reportEvents = @(
-        @("OnOpen", "hasOpenEvent"),
-        @("OnClose", "hasCloseEvent"),
-        @("OnActivate", "hasActivateEvent"),
-        @("OnDeactivate", "hasDeactivateEvent"),
-        @("OnNoData", "hasNoDataEvent"),
-        @("OnPage", "hasPageEvent"),
-        @("OnError", "hasErrorEvent")
-    )
-
-    foreach ($evt in $reportEvents) {
-        $evtValue = Safe-GetProperty $report $evt[0]
-        if ($evtValue -eq "[Event Procedure]") {
-            $reportObj[$evt[1]] = $true
-        }
-    }
-
-    $grouping = @()
-    $groupCount = 0
+    $tempFile = [System.IO.Path]::GetTempFileName()
     try {
-        $groupLevel = 0
-        while ($true) {
-            try {
-                $grpField = $report.GroupLevel($groupLevel).ControlSource
-                if (-not $grpField) { break }
+        $accessApp.SaveAsText(3, $reportName, $tempFile)  # 3 = acReport
+        $textContent = Get-Content $tempFile -Raw -Encoding Default
+        $reportObj = Parse-ReportSaveAsText -textContent $textContent -reportName $reportName
 
-                $grpObj = [ordered]@{
-                    field = $grpField
-                    groupHeader = [bool]$report.GroupLevel($groupLevel).GroupHeader
-                    groupFooter = [bool]$report.GroupLevel($groupLevel).GroupFooter
-                    sortOrder = [int]$report.GroupLevel($groupLevel).SortOrder
-                    groupOn = [int]$report.GroupLevel($groupLevel).GroupOn
-                    groupInterval = [int]$report.GroupLevel($groupLevel).GroupInterval
-                    keepTogether = [int]$report.GroupLevel($groupLevel).KeepTogether
-                }
+        $totalControls = 0
+        foreach ($sec in $reportObj.sections) { $totalControls += $sec.controls.Count }
+        Write-Host "Exported $totalControls controls across $($reportObj.sections.Count) sections ($reportName)" -ForegroundColor Cyan
 
-                $grouping += $grpObj
-                $groupCount++
-                $groupLevel++
-            } catch {
-                break
-            }
-        }
-    } catch {}
-    $reportObj.grouping = $grouping
-
-    $sections = @()
-
-    $standardSections = @(
-        @(1, "report-header"),
-        @(3, "page-header"),
-        @(0, "detail"),
-        @(4, "page-footer"),
-        @(2, "report-footer")
-    )
-
-    foreach ($secDef in $standardSections) {
-        $secIndex = $secDef[0]
-        $secName = $secDef[1]
-        try {
-            $section = $report.Section($secIndex)
-            if ($section) {
-                $secObj = Export-SectionToObject -section $section -sectionName $secName -report $report
-                $sections += $secObj
-            }
-        } catch {}
+        return $reportObj
+    } finally {
+        Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
     }
-
-    for ($gl = 0; $gl -lt $groupCount; $gl++) {
-        if ($report.GroupLevel($gl).GroupHeader) {
-            try {
-                $headerIndex = 5 + ($gl * 2)
-                $section = $report.Section($headerIndex)
-                $secObj = Export-SectionToObject -section $section -sectionName "group-header-$gl" -report $report
-                $sections += $secObj
-            } catch {}
-        }
-
-        if ($report.GroupLevel($gl).GroupFooter) {
-            try {
-                $footerIndex = 6 + ($gl * 2)
-                $section = $report.Section($footerIndex)
-                $secObj = Export-SectionToObject -section $section -sectionName "group-footer-$gl" -report $report
-                $sections += $secObj
-            } catch {}
-        }
-    }
-
-    $reportObj.sections = $sections
-
-    $totalControls = 0
-    foreach ($sec in $sections) {
-        $totalControls += $sec.controls.Count
-    }
-    Write-Host "Exported $totalControls controls across $($sections.Count) sections ($reportName)" -ForegroundColor Cyan
-
-    $accessApp.DoCmd.Close(3, $reportName, 0)  # 3 = acReport
-
-    return $reportObj
 }
 
 # Parse comma-separated report names
@@ -367,7 +271,7 @@ $errors = @()
 try {
     $accessApp = New-Object -ComObject Access.Application
     $accessApp.AutomationSecurity = 3  # msoAutomationSecurityForceDisable
-    $accessApp.Visible = $true
+    $accessApp.Visible = $false
     Open-AccessDatabase -AccessApp $accessApp -DatabasePath $DatabasePath
 
     foreach ($reportName in $names) {
@@ -385,7 +289,7 @@ try {
                 }
                 $accessApp = New-Object -ComObject Access.Application
                 $accessApp.AutomationSecurity = 3
-                $accessApp.Visible = $true
+                $accessApp.Visible = $false
                 Open-AccessDatabase -AccessApp $accessApp -DatabasePath $DatabasePath
             }
 

@@ -9,6 +9,8 @@ const { mapIntentsToTransforms } = require('../../lib/vba-intent-mapper');
 const { generateWiring } = require('../../lib/vba-wiring-generator');
 const { buildGraphContext, autoResolveGaps, autoResolveGapsLLM } = require('../chat/context');
 
+const activeTranslations = new Set();
+
 module.exports = function(router, pool, secrets) {
   router.post('/translate-modules', async (req, res) => {
     // This endpoint processes all modules sequentially (LLM calls) — can take 5-10 minutes
@@ -19,11 +21,17 @@ module.exports = function(router, pool, secrets) {
       return res.status(400).json({ error: 'database_id is required' });
     }
 
+    if (activeTranslations.has(database_id)) {
+      console.log(`[translate-modules] Already running for ${database_id}, ignoring duplicate call`);
+      return res.json({ skipped: true, message: 'Translation already in progress for this database' });
+    }
+
     const apiKey = secrets?.anthropic?.api_key || process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
       return res.json({ skipped: true, message: 'No API key configured' });
     }
 
+    activeTranslations.add(database_id);
     try {
       // 1. Load all modules with VBA source
       const modulesResult = await pool.query(
@@ -188,6 +196,8 @@ module.exports = function(router, pool, secrets) {
       console.error('Error in translate-modules:', err);
       logError(pool, 'POST /api/database-import/translate-modules', 'Module translation failed', err, { databaseId: database_id });
       res.status(500).json({ error: err.message });
+    } finally {
+      activeTranslations.delete(database_id);
     }
   });
 };

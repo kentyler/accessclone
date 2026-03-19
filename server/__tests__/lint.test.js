@@ -23,25 +23,11 @@ describe('normalizeType', () => {
 });
 
 describe('validateForm', () => {
-  test('form missing id is rejected', () => {
-    const form = { name: 'Test', 'record-source': 'users' };
-    const issues = validateForm(form);
-    const errors = issues.filter(i => i.severity === 'error');
-    expect(errors.some(e => e.field === 'id')).toBe(true);
-  });
-
   test('form missing name is rejected', () => {
-    const form = { id: '1', 'record-source': 'users' };
+    const form = { 'record-source': 'users' };
     const issues = validateForm(form);
     const errors = issues.filter(i => i.severity === 'error');
     expect(errors.some(e => e.field === 'name')).toBe(true);
-  });
-
-  test('form missing record-source is rejected', () => {
-    const form = { id: '1', name: 'Test' };
-    const issues = validateForm(form);
-    const errors = issues.filter(i => i.severity === 'error');
-    expect(errors.some(e => e.field === 'record-source')).toBe(true);
   });
 
   test('control with string type "text-box" passes validation', () => {
@@ -295,9 +281,7 @@ describe('validateReport', () => {
     const report = {};
     const issues = validateReport(report);
     const errors = issues.filter(i => i.severity === 'error');
-    expect(errors.some(e => e.field === 'id')).toBe(true);
     expect(errors.some(e => e.field === 'name')).toBe(true);
-    expect(errors.some(e => e.field === 'record-source')).toBe(true);
   });
 
   test('report with no bands generates warning', () => {

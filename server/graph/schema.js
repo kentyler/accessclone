@@ -389,6 +389,22 @@ CREATE TABLE IF NOT EXISTS shared.control_column_map (
 CREATE INDEX IF NOT EXISTS idx_ccm_table ON shared.control_column_map(database_id, table_name, column_name);
 
 -- ============================================================
+-- Control-Event Mapping — maps (object, control, event) → handler
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.control_event_map (
+    database_id VARCHAR(100) NOT NULL,
+    object_name TEXT NOT NULL,
+    object_type VARCHAR(10) NOT NULL,
+    control_name TEXT NOT NULL,
+    event TEXT NOT NULL,
+    handler_type VARCHAR(20) NOT NULL,
+    handler_ref TEXT NOT NULL,
+    module_name TEXT,
+    PRIMARY KEY (database_id, object_name, control_name, event)
+);
+CREATE INDEX IF NOT EXISTS idx_cem_module ON shared.control_event_map(database_id, module_name);
+
+-- ============================================================
 -- Attachments — files extracted from Access attachment columns (DAO type 101)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS shared.attachments (

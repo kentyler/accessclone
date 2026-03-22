@@ -427,7 +427,7 @@
           (state-form/call-session-function! (:function-name ctx))
           ctx)}])
 
-;; Register callbacks for intent_interpreter (breaks circular dep)
+;; Register callbacks for runtime.cljs (breaks circular dep)
 (state/register-callback! :save-current-record
   #(f/run-fire-and-forget! save-current-record-flow))
 (state/register-callback! :delete-current-record

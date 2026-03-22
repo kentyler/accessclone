@@ -334,25 +334,18 @@
           (<! (http/delete (str api-base "/api/session/" session-id))))))))
 
 (defn fire-form-event!
-  "Fire a form-level event. Checks client-side intent handlers first,
-   then falls back to server-side session function."
+  "Fire a form-level event handler."
   [event-key & [{:keys [on-complete]}]]
   (let [projection (get-in @app-state [:form-editor :projection])
-        ;; Map event-key (:on-load) to handler event string ("on-load")
         event-str (name event-key)
         handler (projection/get-event-handler projection "Form" event-str)]
-    (if (seq (:intents handler))
-      ;; Client-side: execute intents directly
-      (try
-        (state/invoke-callback :execute-intents (:intents handler))
-        (when on-complete (on-complete))
-        (catch :default e
-          (js/console.warn "Error in form event handler" event-str ":" (.-message e))))
-      ;; Server-side fallback: existing behavior
-      (let [form-def (get-in @app-state [:form-editor :current])
-            function-name (get form-def event-key)]
-        (when (and function-name (string? function-name) (not (str/blank? function-name)))
-          (call-session-function! function-name {:on-complete on-complete}))))))
+    (when handler
+      (if-let [js-code (:js handler)]
+        (try (let [f (js/Function. js-code)] (.call f))
+             (when on-complete (on-complete))
+             (catch :default e
+               (js/console.warn "Error in form event handler" event-str ":" (.-message e))))
+        (js/console.warn "Form handler has no :js code:" event-str)))))
 
 ;; ============================================================
 ;; FORM STATE SYNC (shared.form_control_state)
@@ -471,14 +464,19 @@
   (go
     (let [form-def (get-in @app-state [:form-editor :current])
           computed (collect-computed-specs form-def)
+          sql-source? (str/starts-with? (str/lower-case record-source) "select ")
           query-params (cond-> (build-data-query-params
                                  (get form-def :order-by)
                                  (get form-def :filter))
                          (seq computed)
                          (assoc :computed (.stringify js/JSON (clj->js computed))))
-          response (<! (http/get (str api-base "/api/data/" record-source)
-                                 {:query-params query-params
-                                  :headers (db-headers)}))]
+          response (<! (if sql-source?
+                         (http/post (str api-base "/api/queries/run")
+                                    {:json-params {:sql record-source}
+                                     :headers (db-headers)})
+                         (http/get (str api-base "/api/data/" record-source)
+                                   {:query-params query-params
+                                    :headers (db-headers)})))]
       (if (:success response)
         (let [data (get-in response [:body :data])
               total (get-in response [:body :pagination :totalCount] (count data))]
@@ -526,14 +524,15 @@
         (sync-form-state! [{:tableName (:table-name mapping)
                             :columnName (:column-name mapping)
                             :value (when (some? value) (str value))}])))
-    ;; Fire AfterUpdate intent handler if registered
+    ;; Fire AfterUpdate handler if registered
     (let [projection (get-in @app-state [:form-editor :projection])
           handler (projection/get-event-handler projection (name field-kw) "after-update")]
-      (when (seq (:intents handler))
-        (try
-          (state/invoke-callback :execute-intents (:intents handler))
-          (catch :default e
-            (js/console.warn "Error in after-update handler for" (name field-kw) ":" (.-message e))))))))
+      (when handler
+        (if-let [js-code (:js handler)]
+          (try (let [f (js/Function. js-code)] (.call f))
+               (catch :default e
+                 (js/console.warn "Error in after-update handler for" (name field-kw) ":" (.-message e))))
+          (js/console.warn "AfterUpdate handler has no :js code:" (name field-kw)))))))
 
 (defn navigate-to-record!
   "Navigate to a specific record by position (1-indexed)"
@@ -553,7 +552,7 @@
       ;; Fire on-current event after navigating to new record
       (fire-form-event! :on-current))))
 
-;; Register callbacks for intent_interpreter (breaks circular dep)
+;; Register callbacks for runtime.cljs (breaks circular dep)
 (state/register-callback! :navigate-to-record navigate-to-record!)
 (state/register-callback! :update-record-field update-record-field!)
 

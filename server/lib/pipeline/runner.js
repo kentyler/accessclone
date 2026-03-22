@@ -36,7 +36,7 @@ async function runStep(stepName, input, context, strategyName) {
 /**
  * Pipeline step order.
  */
-const STEP_ORDER = ['extract', 'map', 'gap-questions', 'resolve-gaps', 'generate'];
+const STEP_ORDER = ['extract', 'map', 'gap-questions', 'resolve-gaps'];
 
 /**
  * Run the full pipeline for one module.
@@ -106,14 +106,6 @@ async function runPipeline(moduleData, context, config = {}) {
           mapped = stepResult.result.mapped;
           break;
         }
-
-        case 'generate': {
-          if (!mapped) {
-            return { status: 'failed', results, failedStep: 'generate', error: 'No mapped data available' };
-          }
-          stepResult = await runStep('generate', { mapped, moduleName, vbaSource }, context, strategy);
-          break;
-        }
       }
 
       if (stepResult) {
@@ -139,7 +131,7 @@ async function runPipeline(moduleData, context, config = {}) {
   return {
     status: 'complete',
     results,
-    moduleStatus: getModuleStatus({ intents, mapped, cljsSource: results.find(r => r.step === 'generate')?.result?.cljsSource })
+    moduleStatus: getModuleStatus({ intents, mapped })
   };
 }
 
@@ -179,14 +171,14 @@ function getModuleStatus(moduleRecord) {
     return { step: 'extract', status: 'pending' };
   }
 
-  // Check for intents (step 1 complete)
+  // Check for mapped data (steps 1-2 complete)
   const intents = moduleRecord.intents;
-  if (!intents) {
+  const mapped = moduleRecord.mapped || intents?.mapped;
+
+  if (!intents && !mapped) {
     return { step: 'extract', status: 'pending' };
   }
 
-  // Check for mapped data (step 2 complete)
-  const mapped = moduleRecord.mapped || intents?.mapped;
   if (!mapped) {
     return { step: 'map', status: 'pending' };
   }
@@ -196,12 +188,7 @@ function getModuleStatus(moduleRecord) {
     return { step: 'resolve-gaps', status: 'pending' };
   }
 
-  // Check for generated code (step 5 complete)
-  const cljsSource = moduleRecord.cljs_source || moduleRecord.cljsSource;
-  if (!cljsSource) {
-    return { step: 'generate', status: 'pending' };
-  }
-
+  // No unresolved gaps — pipeline complete
   return { step: 'complete', status: 'complete' };
 }
 

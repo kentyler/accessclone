@@ -461,6 +461,22 @@
            :auto-import-phase nil    ;; nil, :importing, :translating, :complete
            }))
 
+(defn current-target-db-id
+  "Get the current target database ID from the global app state (global selector IS the import target)"
+  []
+  (:database_id (:current-database @state/app-state)))
+
+(defn import-busy?
+  "True while an import is in progress"
+  []
+  (let [{:keys [importing? auto-import-phase]} @viewer-state]
+    (or importing? (and auto-import-phase (not= auto-import-phase :complete)))))
+
+(defn source-selected?
+  "True when at least one Access database has been scanned/selected for import"
+  []
+  (seq (:selected-paths @viewer-state)))
+
 ;; ============================================================
 ;; Import Phase Ordering
 ;; ============================================================
@@ -537,13 +553,12 @@
 (defn save-import-state!
   "Persist import viewer state to server"
   []
-  (let [{:keys [active-path selected-paths object-type target-database-id]} @viewer-state]
+  (let [{:keys [active-path selected-paths object-type]} @viewer-state]
     (go
       (<! (http/put (str api-base "/api/session/import-state")
                     {:json-params {:loaded_path active-path
                                    :selected_paths selected-paths
-                                   :object_type (when object-type (name object-type))
-                                   :target_database_id target-database-id}})))))
+                                   :object_type (when object-type (name object-type))}})))))
 
 (defn- load-import-chat-for-id!
   "Look up database name from ID and load the import transcript."
@@ -557,28 +572,26 @@
   "Load saved import state from server and restore viewer position.
    Skips reload if data is already present in viewer-state."
   []
+  ;; Always refresh import status for the current database (global selector = import target)
+  (let [db-id (current-target-db-id)]
+    (when db-id
+      (load-target-existing! db-id)
+      (load-import-chat-for-id! db-id)))
   ;; If viewer already has loaded data, just restore the sidebar list
   (if (seq (:selected-paths @viewer-state))
     (do
       (when (empty? (get-in @state/app-state [:objects :access_databases]))
         (state/load-access-databases!))
-      (when-let [target (:target-database-id @viewer-state)]
-        (load-target-existing! target)
-        (load-import-chat-for-id! target))
       (when-let [active (:active-path @viewer-state)]
         (load-import-history! active)))
     ;; Otherwise fetch saved state from server
     (go
       (let [response (<! (http/get (str api-base "/api/session/import-state")))]
         (when (and (:success response) (seq (:body response)))
-          (let [{:keys [loaded_path selected_paths object_type target_database_id]} (:body response)
+          (let [{:keys [loaded_path selected_paths object_type]} (:body response)
                 paths (or (seq selected_paths) (when loaded_path [loaded_path]))]
             (when object_type
               (swap! viewer-state assoc :object-type (keyword object_type)))
-            (when target_database_id
-              (swap! viewer-state assoc :target-database-id target_database_id)
-              (load-target-existing! target_database_id)
-              (load-import-chat-for-id! target_database_id))
             (when (seq paths)
               (when (empty? (get-in @state/app-state [:objects :access_databases]))
                 (state/load-access-databases!))
@@ -1646,6 +1659,19 @@
     ;; Done — translation is handled inside import-all! via POST /api/database-import/translate-modules
     (swap! viewer-state assoc :auto-import-phase :complete)))
 
+(defn trigger-import!
+  "Import into the currently selected (global) database. Called from the header Import button."
+  []
+  (cond
+    (not (source-selected?))
+    (state/set-error! "Select an Access database first (Browse in the import panel)")
+
+    (not (current-target-db-id))
+    (state/set-error! "Select a target database from the dropdown")
+
+    :else
+    (auto-import-all! (current-target-db-id))))
+
 (defn object-type-dropdown []
   (let [obj-type (:object-type @viewer-state)]
     [:div.access-object-type-selector
@@ -1902,7 +1928,7 @@
            (when (:recommendation rec)
              [:div {:style {:font-size "12px" :color "#3498db" :margin-top "2px"}} (:recommendation rec)])])])]))
 
-(defn- suggest-name-from-path
+(defn suggest-name-from-path
   "Derive a suggested database name from the Access file path.
    e.g. 'C:\\...\\Diversity_Dev.accdb' → 'Diversity Dev'"
   []
@@ -1912,80 +1938,6 @@
         last
         (.replace #"\.(accdb|mdb)$" "")
         (.replace #"_" " "))))
-
-(defn target-database-selector
-  "Dropdown to choose which AccessClone database to import into"
-  []
-  (let [creating? (r/atom false)
-        new-name (r/atom "")
-        create-error (r/atom nil)]
-    (fn []
-      (let [available-dbs (filter #(not= (:database_id %) "_access_import")
-                                  (:available-databases @state/app-state))
-            target-id (:target-database-id @viewer-state)]
-        [:div.target-db-selector
-         [:label "Import into:"]
-         [:select
-          {:value (or target-id "")
-           :on-change (fn [e]
-                        (let [v (.. e -target -value)]
-                          (cond
-                            (= v "__create_new__")
-                            (do (reset! creating? true)
-                                (reset! new-name (or (suggest-name-from-path) ""))
-                                (reset! create-error nil))
-                            (= v "")
-                            (do (swap! viewer-state assoc :target-database-id nil)
-                                (state/load-import-chat! nil)
-                                (save-import-state!))
-                            :else
-                            (let [db (first (filter (fn [d] (= (:database_id d) v)) available-dbs))]
-                              (t/dispatch! :clear-assessment)
-                              (swap! viewer-state assoc :target-database-id v)
-                              (state/load-import-chat! (:name db))
-                              (load-target-existing! v)
-                              (save-source-discovery! v)
-                              (save-import-state!)
-                              (run-assessment!)))))}
-          [:option {:value ""} "Select a database..."]
-          (for [db available-dbs]
-            ^{:key (:database_id db)}
-            [:option {:value (:database_id db)} (:name db)])
-          [:option {:value "__create_new__"} "Create New Database..."]]
-         (when @creating?
-           [:div.create-db-inline {:style {:margin-top "6px"}}
-            [:input {:type "text"
-                     :placeholder "Database name"
-                     :value @new-name
-                     :auto-focus true
-                     :on-change #(do (reset! new-name (.. % -target -value))
-                                     (reset! create-error nil))
-                     :on-key-down #(when (= (.-key %) "Escape")
-                                     (reset! creating? false))}]
-            [:button.btn-primary
-             {:style {:margin-left "4px"}
-              :disabled (str/blank? @new-name)
-              :on-click #(state/create-database!
-                           (str/trim @new-name) nil
-                           (fn [new-db]
-                             (t/dispatch! :clear-assessment)
-                             (swap! viewer-state assoc :target-database-id (:database_id new-db))
-                             (state/load-import-chat! (:name new-db))
-                             (load-target-existing! (:database_id new-db))
-                             (save-source-discovery! (:database_id new-db))
-                             (save-import-state!)
-                             (run-assessment!)
-                             (reset! creating? false))
-                           (fn [err-msg]
-                             (reset! create-error err-msg)))}
-             "Create"]
-            [:button.btn-link
-             {:style {:margin-left "4px"}
-              :on-click #(reset! creating? false)}
-             "Cancel"]
-            (when @create-error
-              [:div.create-db-error {:style {:color "red" :font-size "12px" :margin-top "2px"}}
-               @create-error])])]))))
 
 (defn import-all-progress
   "Progress display shown during Import All operation"
@@ -2049,7 +2001,8 @@
          nil)])))
 
 (defn toolbar [access-db-path]
-  (let [{:keys [selected object-type target-database-id loading? importing?]} @viewer-state
+  (let [{:keys [selected object-type loading? importing?]} @viewer-state
+        target-database-id (current-target-db-id)
         cached? (some? (get-in @viewer-state [:access-db-cache access-db-path]))
         ;; Count total un-imported objects across all types
         total-remaining (reduce + (map #(count (not-yet-imported %))
@@ -2112,32 +2065,7 @@
   [:<>
    [:div.viewer-header
     [:div.viewer-header-top
-     [source-databases-list]
-     [:div.header-actions
-      (let [{:keys [target-database-id importing?]} @viewer-state
-            auto-phase (:auto-import-phase @viewer-state)
-            all-types [:tables :queries :forms :reports :modules :macros]
-            total-remaining (reduce + (map #(count (not-yet-imported %)) all-types))
-            total-all-cache (reduce + (map #(count (all-source-objects %)) all-types))
-            ;; Fallback: if cache returns 0 but display slots have data, use display counts.
-            ;; This handles async timing where display slots are populated before the cache.
-            total-all-display (reduce + (map #(count (get @viewer-state % [])) all-types))
-            total-all (max total-all-cache total-all-display)
-            busy? (or importing? (and auto-phase (not= auto-phase :complete)))]
-        (when (and (zero? total-all-cache) (pos? total-all-display))
-          (println "[IMPORT-BUTTONS] Cache empty but display has" total-all-display
-                   "items. Paths:" (:selected-paths @viewer-state)
-                   "Cache keys:" (keys (:access-db-cache @viewer-state))))
-        [:<>
-         (when (and target-database-id (pos? total-all) (not busy?) (not error))
-           [:<>
-            [:button.btn-primary.import-all-btn
-             {:on-click #(auto-import-all! target-database-id)}
-             (str "Auto-Import (" total-all ")")]
-            [:button.btn-secondary.import-all-btn
-             {:on-click #(import-all! target-database-id {:force? true})}
-             (str "Manual Import (" total-all ")")]])])
-      [target-database-selector]]]]
+     [source-databases-list]]]
    (when-not (or error loading?)
      [:div.viewer-phase-bar
       [import-phase-tracker]])
@@ -2163,7 +2091,19 @@
       (fn [_]
         (when (and (not @restored?) (empty? (:selected-paths @viewer-state)))
           (reset! restored? true)
-          (restore-import-state!)))
+          (restore-import-state!))
+        ;; When the global database selector changes while in import mode, refresh target-existing
+        (add-watch state/app-state ::db-change-watcher
+          (fn [_ _ old-state new-state]
+            (let [old-id (get-in old-state [:current-database :database_id])
+                  new-id (get-in new-state [:current-database :database_id])]
+              (when (and (not= old-id new-id)
+                         (= :import (:app-mode new-state)))
+                (load-target-existing! new-id)
+                (load-import-chat-for-id! new-id))))))
+      :component-will-unmount
+      (fn [_]
+        (remove-watch state/app-state ::db-change-watcher))
       :reagent-render
       (fn []
         (let [{:keys [loading? error active-path selected-paths]} @viewer-state]

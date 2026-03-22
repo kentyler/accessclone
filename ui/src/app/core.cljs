@@ -4,11 +4,13 @@
             [reagent.dom :as rdom]
             [app.state :as state]
             [app.state-transforms]
+            [app.runtime :as runtime]
             [app.views.main :as main]))
 
 (defn ^:dev/after-load mount-root []
   (rdom/render [main/app] (.getElementById js/document "app")))
 
 (defn ^:export init []
+  (runtime/install!)
   (state/init!)
   (mount-root))

@@ -8,6 +8,7 @@ const express = require('express');
 const router = express.Router();
 const { logEvent, logError } = require('../lib/events');
 const { extractReactions, toKw } = require('../lib/reactions-extractor');
+const { parseVbaToHandlers } = require('../lib/vba-to-js');
 
 function createRouter(pool) {
   /**
@@ -171,18 +172,28 @@ function createRouter(pool) {
         }
       }
 
-      // Fallback: regex-based parsing from module intents (backward compat)
+      // Fallback: try stored js_handlers, then module intents
       const result = await pool.query(
-        `SELECT intents FROM shared.modules
+        `SELECT intents, js_handlers FROM shared.modules
          WHERE database_id = $1 AND name = $2 AND is_current = true`,
         [databaseId, moduleName]
       );
 
-      if (result.rows.length === 0 || !result.rows[0].intents) {
+      if (result.rows.length === 0) {
         return res.json([]);
       }
 
-      const intents = result.rows[0].intents;
+      const { intents, js_handlers } = result.rows[0];
+
+      // JS handlers (generated at import time from VBA source)
+      if (js_handlers && js_handlers.length > 0) {
+        return res.json(js_handlers);
+      }
+
+      if (!intents) {
+        return res.json([]);
+      }
+
       const procedures = (intents?.mapped?.procedures) || [];
 
       // Get the set of triggers already handled by reactions so we can exclude them
@@ -253,7 +264,7 @@ function createRouter(pool) {
       const databaseId = req.databaseId;
 
       const result = await pool.query(
-        `SELECT name, vba_source, cljs_source, description, status, review_notes, intents, version, created_at
+        `SELECT name, vba_source, cljs_source, description, status, review_notes, intents, js_handlers, version, created_at
          FROM shared.modules
          WHERE database_id = $1 AND name = $2 AND is_current = true`,
         [databaseId, req.params.name]
@@ -280,13 +291,13 @@ function createRouter(pool) {
     try {
       const databaseId = req.databaseId;
       const moduleName = req.params.name;
-      const { vba_source, cljs_source, description, status, review_notes, intents } = req.body;
+      const { vba_source, description, status, review_notes, intents, js_handlers } = req.body;
 
       await client.query('BEGIN');
 
       // Load current version to preserve fields not being updated
       const currentResult = await client.query(
-        `SELECT vba_source, cljs_source, description, status, review_notes, intents
+        `SELECT vba_source, cljs_source, description, status, review_notes, intents, js_handlers
          FROM shared.modules
          WHERE database_id = $1 AND name = $2 AND is_current = true`,
         [databaseId, moduleName]
@@ -304,11 +315,22 @@ function createRouter(pool) {
 
       // Merge: use provided value when present, otherwise preserve current
       const finalVba = vba_source !== undefined ? vba_source : (prev.vba_source || null);
-      const finalCljs = cljs_source !== undefined ? cljs_source : (prev.cljs_source || null);
+      const finalCljs = prev.cljs_source || null; // Historical only — no longer written from frontend
       const finalDesc = description !== undefined ? description : (prev.description || null);
       const finalStatus = status || prev.status || 'pending';
       const finalNotes = review_notes !== undefined ? review_notes : (prev.review_notes || null);
       const finalIntents = intents !== undefined ? intents : prev.intents;
+
+      // Auto-generate JS handlers from VBA source when VBA changes
+      let finalJsHandlers = js_handlers !== undefined ? js_handlers : (prev.js_handlers || null);
+      if (vba_source !== undefined && vba_source) {
+        try {
+          const parsed = parseVbaToHandlers(vba_source);
+          finalJsHandlers = parsed.length > 0 ? parsed : null;
+        } catch (e) {
+          console.warn('Failed to parse VBA to JS handlers:', e.message);
+        }
+      }
 
       // Mark all existing versions as not current
       await client.query(
@@ -320,10 +342,11 @@ function createRouter(pool) {
 
       // Insert new version as current
       await client.query(
-        `INSERT INTO shared.modules (database_id, name, vba_source, cljs_source, description, status, review_notes, intents, version, is_current)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)`,
+        `INSERT INTO shared.modules (database_id, name, vba_source, cljs_source, description, status, review_notes, intents, js_handlers, version, is_current)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)`,
         [databaseId, moduleName, finalVba, finalCljs, finalDesc,
-         finalStatus, finalNotes, finalIntents ? JSON.stringify(finalIntents) : null, newVersion]
+         finalStatus, finalNotes, finalIntents ? JSON.stringify(finalIntents) : null,
+         finalJsHandlers ? JSON.stringify(finalJsHandlers) : null, newVersion]
       );
 
       await client.query('COMMIT');

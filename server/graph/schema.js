@@ -154,6 +154,7 @@ CREATE TABLE IF NOT EXISTS shared.modules (
     description TEXT,
     status VARCHAR(20) NOT NULL DEFAULT 'pending',  -- pending, translated, needs-review, complete
     review_notes TEXT,                               -- why this needs revisiting
+    js_handlers JSONB,                               -- generated at import from VBA; [{key, control, event, js}]
     version INT NOT NULL DEFAULT 1,
     is_current BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT NOW(),

@@ -22,31 +22,6 @@
        [:code macro-xml]]]]))
 
 ;; ============================================================
-;; CLJS PANEL - Read-only display of current translation
-;; ============================================================
-
-(defn cljs-panel
-  "Read-only display of the current ClojureScript translation"
-  []
-  (let [macro-info (get-in @state/app-state [:macro-viewer :macro-info])
-        cljs-source (:cljs-source macro-info)
-        dirty? (get-in @state/app-state [:macro-viewer :cljs-dirty?])]
-    [:div.module-cljs-panel
-     [:div.panel-header
-      [:span (str "ClojureScript"
-                  (when dirty? " (unsaved)"))]
-      (when dirty?
-        [:div.panel-actions
-         [:button.btn-primary.btn-sm
-          {:on-click #(f/run-fire-and-forget! module-flow/save-macro-cljs-flow)}
-          "Save"]])]
-     (if cljs-source
-       [:div.code-container
-        [:pre.code-display.cljs-display
-         [:code cljs-source]]]
-       [:div.cljs-empty "No translation yet. Use the chat panel to translate this macro."])]))
-
-;; ============================================================
 ;; INFO PANEL - Macro metadata
 ;; ============================================================
 
@@ -111,23 +86,16 @@
 (defn macro-toolbar
   "Toolbar for the macro viewer"
   []
-  (let [macro-info (get-in @state/app-state [:macro-viewer :macro-info])
-        dirty? (get-in @state/app-state [:macro-viewer :cljs-dirty?])]
-    [:div.module-toolbar
-     [:div.toolbar-left
-      [:span.toolbar-label "Access Macro"]]
-     [:div.toolbar-right
-      (when dirty?
-        [:button.btn-primary
-         {:on-click #(f/run-fire-and-forget! module-flow/save-macro-cljs-flow)}
-         "Save Translation"])]]))
+  [:div.module-toolbar
+   [:div.toolbar-left
+    [:span.toolbar-label "Access Macro"]]])
 
 ;; ============================================================
 ;; MAIN COMPONENT
 ;; ============================================================
 
 (defn macro-viewer
-  "Main macro viewer component - macro XML + optional CLJS translation"
+  "Main macro viewer component - macro XML definition"
   []
   (let [active-tab (:active-tab @state/app-state)
         current-macro-id (get-in @state/app-state [:macro-viewer :macro-id])
@@ -145,6 +113,4 @@
          [:<>
           [info-panel]
           [import-completeness-banner]
-          [:div.module-split-view
-           [xml-panel]
-           [cljs-panel]]])])))
+          [xml-panel]])])))

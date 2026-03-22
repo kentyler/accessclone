@@ -1283,6 +1283,11 @@ header.header {
   pointer-events: none;
 }
 
+/* Labels are non-interactive in Access — clicks pass through to controls underneath */
+.view-control.label {
+  pointer-events: none;
+}
+
 .view-control.readonly-lookup input,
 .view-control.readonly-lookup select,
 .view-control.readonly-lookup textarea {

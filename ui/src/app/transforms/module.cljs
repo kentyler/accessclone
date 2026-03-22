@@ -1,33 +1,19 @@
 (ns app.transforms.module
   "Pure module transforms — (state, args) -> state.
-   9 transforms covering ClojureScript source editing, module status,
-   review notes, dirty flag, intents, extracting state, gap resolution,
-   gap questions, and gap selections.")
-
-(defn update-module-cljs-source [state new-source]
-  (-> state
-      (assoc-in [:module-viewer :module-info :cljs-source] new-source)
-      (assoc-in [:module-viewer :cljs-dirty?] true)))
+   Covers module status, review notes, intents, extracting state,
+   gap resolution, gap questions, and gap selections.")
 
 (defn set-module-status
   "Set translation status and optional review notes for current module."
   ([state status]
-   (-> state
-       (assoc-in [:module-viewer :module-info :status] status)
-       (assoc-in [:module-viewer :cljs-dirty?] true)))
+   (assoc-in state [:module-viewer :module-info :status] status))
   ([state status review-notes]
    (-> state
        (assoc-in [:module-viewer :module-info :status] status)
-       (assoc-in [:module-viewer :module-info :review-notes] review-notes)
-       (assoc-in [:module-viewer :cljs-dirty?] true))))
+       (assoc-in [:module-viewer :module-info :review-notes] review-notes))))
 
 (defn update-module-review-notes [state notes]
-  (-> state
-      (assoc-in [:module-viewer :module-info :review-notes] notes)
-      (assoc-in [:module-viewer :cljs-dirty?] true)))
-
-(defn set-module-cljs-dirty [state dirty?]
-  (assoc-in state [:module-viewer :cljs-dirty?] dirty?))
+  (assoc-in state [:module-viewer :module-info :review-notes] notes))
 
 (defn set-module-intents [state intents]
   (assoc-in state [:module-viewer :intents] intents))

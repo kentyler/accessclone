@@ -275,7 +275,7 @@
     :domain   :module
     :headers  :db
     :params   {}
-    :produces {:modules "vector of module names" :details "vector of {has_vba_source, has_cljs_source, description}"}
+    :produces {:modules "vector of module names" :details "vector of {has_vba_source, description}"}
     :used-by  ['load-functions!]
     :desc     "List all VBA modules"}
 
@@ -285,7 +285,7 @@
     :domain   :module
     :headers  :db
     :params   {}
-    :produces {:vba_source "string" :cljs_source "string" :description "string"
+    :produces {:vba_source "string" :js_handlers "JSONB" :description "string"
                :status "string" :review_notes "string" :version "number" :created_at "string"}
     :used-by  ['load-module-for-viewing!]
     :desc     "Load full module source (VBA + CLJS translation)"}
@@ -295,10 +295,10 @@
     :url      "/api/modules/:module-name"
     :domain   :module
     :headers  :db
-    :params   {:vba_source "string" :cljs_source "string" :status "string" :review_notes "string"}
+    :params   {:vba_source "string" :status "string" :review_notes "string"}
     :produces {:version "number"}
-    :used-by  ['save-module-cljs! 'create-new-module!]
-    :desc     "Save module translation and status"}
+    :used-by  ['create-new-module!]
+    :desc     "Save module status"}
 
    ;; ----------------------------------------------------------
    ;; SQL Functions (1)
@@ -322,7 +322,7 @@
     :domain   :macro
     :headers  :db
     :params   {}
-    :produces {:macros "vector of macro names" :details "vector of {has_macro_xml, has_cljs_source, description}"}
+    :produces {:macros "vector of macro names" :details "vector of {has_macro_xml, description}"}
     :used-by  ['load-macros!]
     :desc     "List all Access macros"}
 
@@ -332,7 +332,7 @@
     :domain   :macro
     :headers  :db
     :params   {}
-    :produces {:macro_xml "string" :cljs_source "string" :description "string"
+    :produces {:macro_xml "string" :description "string"
                :status "string" :review_notes "string" :version "number" :created_at "string"}
     :used-by  ['load-macro-for-viewing!]
     :desc     "Load full macro definition (XML + CLJS translation)"}
@@ -342,10 +342,10 @@
     :url      "/api/macros/:macro-name"
     :domain   :macro
     :headers  :db
-    :params   {:macro_xml "string" :cljs_source "string" :status "string" :review_notes "string"}
+    :params   {:macro_xml "string" :status "string" :review_notes "string"}
     :produces {:version "number"}
-    :used-by  ['save-macro-cljs!]
-    :desc     "Save macro translation and status"}
+    :used-by  []
+    :desc     "Save macro status"}
 
    ;; ----------------------------------------------------------
    ;; Chat & Transcripts (3)
@@ -360,20 +360,10 @@
                :module_context "optional" :macro_context "optional"
                :sql_function_context "optional" :table_context "optional"
                :query_context "optional" :issue_context "optional"}
-    :produces {:message "LLM response" :updated_code "optional CLJS" :updated_query "optional"
+    :produces {:message "LLM response" :updated_query "optional"
                :navigation "optional {action, record_id}"}
     :used-by  ['send-chat-message!]
     :desc     "Send message to LLM with object context"}
-
-   :translate-module
-   {:method   :post
-    :url      "/api/chat/translate"
-    :domain   :chat
-    :headers  :db
-    :params   {:vba_source "VBA code" :module_name "string" :app_objects "inventory" :database_id "string"}
-    :produces {:cljs_source "translated code"}
-    :used-by  ['translate-module!]
-    :desc     "Translate VBA module to ClojureScript via LLM"}
 
    :save-transcript
    {:method   :put

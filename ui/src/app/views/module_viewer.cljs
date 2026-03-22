@@ -200,11 +200,10 @@
 ;; ============================================================
 
 (defn vba-panel
-  "Read-only VBA source display with intent extraction and legacy translate buttons"
+  "Read-only VBA source display with intent extraction button"
   []
   (let [module-info (get-in @state/app-state [:module-viewer :module-info])
         vba-source (or (:vba-source module-info) (:source module-info))
-        translating? (get-in @state/app-state [:module-viewer :translating?])
         extracting? (get-in @state/app-state [:module-viewer :extracting-intents?])]
     [:div.module-vba-panel
      [:div.panel-header
@@ -213,57 +212,37 @@
         [:div.panel-actions
          [:button.btn-primary.btn-sm
           {:on-click #(f/run-fire-and-forget! module-flow/extract-intents-flow)
-           :disabled (or extracting? translating?)}
-          (if extracting? "Extracting..." "Extract Intents")]
-         [:button.btn-secondary.btn-sm
-          {:on-click #(f/run-fire-and-forget! module-flow/translate-module-flow)
-           :disabled (or translating? extracting?)
-           :title "Direct translation without intent extraction (legacy)"}
-          (if translating? "Translating..." "Direct Translate")]])]
+           :disabled extracting?}
+          (if extracting? "Extracting..." "Extract Intents")]])]
      [:div.code-container
       [:pre.code-display
        [:code vba-source]]]]))
 
 ;; ============================================================
-;; CLJS PANEL - Read-only display of current translation
+;; JS HANDLERS PANEL - Read-only display of generated JS handlers
 ;; ============================================================
 
-(defn cljs-panel
-  "Read-only display of the current ClojureScript translation with generate button"
+(defn js-handlers-panel
+  "Read-only display of JS event handlers generated from VBA by vba-to-js.js"
   []
-  (let [module-info (get-in @state/app-state [:module-viewer :module-info])
-        cljs-source (:cljs-source module-info)
-        dirty? (get-in @state/app-state [:module-viewer :cljs-dirty?])
-        translating? (get-in @state/app-state [:module-viewer :translating?])
-        intents-data (get-in @state/app-state [:module-viewer :intents])]
+  (let [js-handlers (get-in @state/app-state [:module-viewer :js-handlers])]
     [:div.module-cljs-panel
      [:div.panel-header
-      [:span (str "ClojureScript"
-                  (when dirty? " (unsaved)"))]
-      [:div.panel-actions
-       (when intents-data
-         [:button.btn-primary.btn-sm
-          {:on-click #(f/run-fire-and-forget! module-flow/generate-wiring-flow)
-           :disabled translating?}
-          (if translating? "Generating..." "Generate Code")])
-       (when dirty?
-         [:button.btn-secondary.btn-sm
-          {:on-click #(f/run-fire-and-forget! module-flow/save-module-cljs-flow)}
-          "Save"])]]
-     (cond
-       translating?
-       [:div.translating-indicator "Generating..."]
-
-       cljs-source
+      [:span "JS Handlers"]]
+     (if (seq js-handlers)
        [:div.code-container
-        [:pre.code-display.cljs-display
-         [:code cljs-source]]]
-
-       :else
+        (for [handler js-handlers]
+          ^{:key (:key handler)}
+          [:div.js-handler-entry
+           [:div.js-handler-key
+            [:strong (:key handler)]
+            (when (:event handler)
+              [:span.handler-event (str " (" (:event handler) ")")])]
+           (when (:js handler)
+             [:pre.code-display.js-display
+              [:code (:js handler)]])])]
        [:div.cljs-empty
-        (if intents-data
-          "Intents extracted. Click \"Generate Code\" to produce ClojureScript."
-          "No translation yet. Extract intents first, or use \"Direct Translate\".")])]))
+        "No JS handlers generated. VBA source is parsed to JS at import time."])]))
 
 ;; ============================================================
 ;; INFO PANEL - Module metadata
@@ -336,19 +315,13 @@
 ;; ============================================================
 
 (defn module-toolbar
-  "Toolbar with translate and save actions"
+  "Toolbar showing module type"
   []
   (let [module-info (get-in @state/app-state [:module-viewer :module-info])
-        is-vba? (:vba-source module-info)
-        dirty? (get-in @state/app-state [:module-viewer :cljs-dirty?])]
+        is-vba? (:vba-source module-info)]
     [:div.module-toolbar
      [:div.toolbar-left
-      [:span.toolbar-label (if is-vba? "VBA Module" "Module (Read-only)")]]
-     [:div.toolbar-right
-      (when (and is-vba? dirty?)
-        [:button.btn-primary
-         {:on-click #(f/run-fire-and-forget! module-flow/save-module-cljs-flow)}
-         "Save Translation"])]]))
+      [:span.toolbar-label (if is-vba? "VBA Module" "Module (Read-only)")]]]))
 
 ;; ============================================================
 ;; MAIN COMPONENT
@@ -375,4 +348,4 @@
           [import-completeness-banner]
           [:div.module-split-view
            [vba-panel]
-           [cljs-panel]]])])))
+           [js-handlers-panel]]])])))

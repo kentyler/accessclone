@@ -75,14 +75,13 @@ describe('step registry', () => {
     expect(listStrategies('map')).toEqual(['deterministic']);
     expect(listStrategies('gap-questions')).toEqual(expect.arrayContaining(['llm', 'skip']));
     expect(listStrategies('resolve-gaps')).toEqual(expect.arrayContaining(['auto', 'skip']));
-    expect(listStrategies('generate')).toEqual(expect.arrayContaining(['full', 'mechanical']));
   });
 
-  test('all 5 steps are defined', () => {
+  test('all 4 steps are defined', () => {
     expect(Object.keys(steps)).toEqual(
-      expect.arrayContaining(['extract', 'map', 'gap-questions', 'resolve-gaps', 'generate'])
+      expect.arrayContaining(['extract', 'map', 'gap-questions', 'resolve-gaps'])
     );
-    expect(Object.keys(steps).length).toBe(5);
+    expect(Object.keys(steps).length).toBe(4);
   });
 });
 
@@ -92,7 +91,7 @@ describe('step registry', () => {
 
 describe('STEP_ORDER', () => {
   test('has correct step order', () => {
-    expect(STEP_ORDER).toEqual(['extract', 'map', 'gap-questions', 'resolve-gaps', 'generate']);
+    expect(STEP_ORDER).toEqual(['extract', 'map', 'gap-questions', 'resolve-gaps']);
   });
 });
 
@@ -139,17 +138,6 @@ describe('runStep', () => {
     expect(result.result.resolvedCount).toBe(0);
   });
 
-  test('generate with mechanical strategy returns cljs source', async () => {
-    const mapResult = await runStep('map', { intents: MOCK_INTENTS }, {});
-    const result = await runStep('generate', { mapped: mapResult.result.mapped, moduleName: 'TestModule' }, {}, 'mechanical');
-    expect(result.step).toBe('generate');
-    expect(result.strategy).toBe('mechanical');
-    expect(result.result.cljsSource).toContain('ns app.modules.test-module');
-    expect(result.result.cljsSource).toContain('btn-save-click');
-    expect(result.result.stats.total_procedures).toBe(1);
-    expect(result.result.stats.mechanical_count).toBe(2);
-  });
-
   test('runStep throws for unknown strategy', async () => {
     await expect(runStep('extract', {}, {}, 'nonexistent')).rejects.toThrow('Unknown strategy');
   });
@@ -170,7 +158,7 @@ describe('runStep', () => {
 // ============================================================
 
 describe('step chaining', () => {
-  test('extract → map → generate chain works', async () => {
+  test('extract → map chain works', async () => {
     // Step 1: Extract (mock)
     const extractResult = await runStep('extract', { vbaSource: MOCK_VBA_SOURCE, moduleName: 'ChainTest' }, {}, 'mock');
     expect(extractResult.result.intents.procedures).toHaveLength(1);
@@ -178,13 +166,7 @@ describe('step chaining', () => {
     // Step 2: Map
     const mapResult = await runStep('map', { intents: extractResult.result.intents }, {});
     expect(mapResult.result.mapped.procedures).toHaveLength(1);
-
-    // Step 5: Generate (mechanical)
-    const genResult = await runStep('generate', {
-      mapped: mapResult.result.mapped,
-      moduleName: 'ChainTest'
-    }, {}, 'mechanical');
-    expect(genResult.result.cljsSource).toContain('chain-test');
+    expect(mapResult.result.stats.mechanical).toBeGreaterThanOrEqual(0);
   });
 
   test('map → gap-questions chain with gaps', async () => {
@@ -302,7 +284,7 @@ describe('getModuleStatus', () => {
     expect(status).toEqual({ step: 'resolve-gaps', status: 'pending' });
   });
 
-  test('intents with mapped, no gaps, no cljs → generate pending', () => {
+  test('intents with mapped, no gaps → complete', () => {
     const status = getModuleStatus({
       intents: {
         mapped: {
@@ -313,10 +295,10 @@ describe('getModuleStatus', () => {
         }
       }
     });
-    expect(status).toEqual({ step: 'generate', status: 'pending' });
+    expect(status).toEqual({ step: 'complete', status: 'complete' });
   });
 
-  test('intents with mapped, resolved gaps, no cljs → generate pending', () => {
+  test('intents with mapped, resolved gaps → complete', () => {
     const status = getModuleStatus({
       intents: {
         mapped: {
@@ -331,36 +313,6 @@ describe('getModuleStatus', () => {
         }
       }
     });
-    expect(status).toEqual({ step: 'generate', status: 'pending' });
-  });
-
-  test('full module with cljs_source → complete', () => {
-    const status = getModuleStatus({
-      intents: {
-        mapped: {
-          procedures: [{
-            name: 'test',
-            intents: [{ type: 'show-message', classification: 'mechanical' }]
-          }]
-        }
-      },
-      cljs_source: '(ns app.modules.test)'
-    });
-    expect(status).toEqual({ step: 'complete', status: 'complete' });
-  });
-
-  test('recognizes cljsSource (camelCase) as complete', () => {
-    const status = getModuleStatus({
-      intents: {
-        mapped: {
-          procedures: [{
-            name: 'test',
-            intents: [{ type: 'show-message' }]
-          }]
-        }
-      },
-      cljsSource: '(ns app.modules.test)'
-    });
     expect(status).toEqual({ step: 'complete', status: 'complete' });
   });
 });
@@ -370,27 +322,22 @@ describe('getModuleStatus', () => {
 // ============================================================
 
 describe('runPipeline', () => {
-  test('full pipeline with mock extract and mechanical generate', async () => {
+  test('full pipeline with mock extract', async () => {
     const result = await runPipeline(
       { vbaSource: MOCK_VBA_SOURCE, moduleName: 'PipelineTest' },
       {},
-      { extract: 'mock', 'gap-questions': 'skip', 'resolve-gaps': 'skip', generate: 'mechanical' }
+      { extract: 'mock', 'gap-questions': 'skip', 'resolve-gaps': 'skip' }
     );
 
     expect(result.status).toBe('complete');
-    expect(result.results.length).toBeGreaterThanOrEqual(3); // extract, map, generate (gap steps skipped)
+    expect(result.results.length).toBeGreaterThanOrEqual(2); // extract, map (gap steps skipped)
 
     // Verify step ordering
     const stepNames = result.results.map(r => r.step);
     expect(stepNames[0]).toBe('extract');
     expect(stepNames[1]).toBe('map');
-    expect(stepNames[stepNames.length - 1]).toBe('generate');
 
-    // Verify final output
-    const generateResult = result.results.find(r => r.step === 'generate');
-    expect(generateResult.result.cljsSource).toContain('pipeline-test');
-
-    // Module status should be complete
+    // Module status should be complete (no unresolved gaps)
     expect(result.moduleStatus.step).toBe('complete');
   });
 
@@ -398,7 +345,7 @@ describe('runPipeline', () => {
     const result = await runPipeline(
       { moduleName: 'PreProvided', intents: MOCK_INTENTS },
       {},
-      { 'gap-questions': 'skip', 'resolve-gaps': 'skip', generate: 'mechanical' }
+      { 'gap-questions': 'skip', 'resolve-gaps': 'skip' }
     );
 
     expect(result.status).toBe('complete');
@@ -414,21 +361,22 @@ describe('runPipeline', () => {
     const result = await runPipeline(
       { moduleName: 'PreMapped', mapped: mapResult.result.mapped, vbaSource: MOCK_VBA_SOURCE },
       {},
-      { 'gap-questions': 'skip', 'resolve-gaps': 'skip', generate: 'mechanical' }
+      { 'gap-questions': 'skip', 'resolve-gaps': 'skip' }
     );
 
     expect(result.status).toBe('complete');
     const stepNames = result.results.map(r => r.step);
     expect(stepNames).not.toContain('extract');
     expect(stepNames).not.toContain('map');
-    expect(stepNames[0]).toBe('generate');
+    // No steps needed — already mapped with no gaps
+    expect(result.moduleStatus.step).toBe('complete');
   });
 
   test('pipeline with gaps includes gap-questions step', async () => {
     const result = await runPipeline(
       { vbaSource: MOCK_VBA_SOURCE, moduleName: 'GapPipeline', intents: MOCK_INTENTS_WITH_GAP },
       {},
-      { 'gap-questions': 'skip', 'resolve-gaps': 'skip', generate: 'mechanical' }
+      { 'gap-questions': 'skip', 'resolve-gaps': 'skip' }
     );
 
     expect(result.status).toBe('complete');
@@ -443,11 +391,11 @@ describe('runPipeline', () => {
     const result = await runPipeline(
       { moduleName: 'FailTest' },
       {},
-      { extract: 'mock', generate: 'mechanical' }
+      { extract: 'mock' }
     );
 
     // Mock extract produces intents, so it should succeed
-    // Then map should work, then generate
+    // Then map should work
     expect(result.status).toBe('complete');
   });
 
@@ -455,21 +403,18 @@ describe('runPipeline', () => {
     const result = await runPipeline(
       { vbaSource: MOCK_VBA_SOURCE, moduleName: 'ConfigTest' },
       {},
-      { extract: 'mock', generate: 'mechanical', 'gap-questions': 'skip', 'resolve-gaps': 'skip' }
+      { extract: 'mock', 'gap-questions': 'skip', 'resolve-gaps': 'skip' }
     );
 
     const extractStep = result.results.find(r => r.step === 'extract');
     expect(extractStep.strategy).toBe('mock');
-
-    const generateStep = result.results.find(r => r.step === 'generate');
-    expect(generateStep.strategy).toBe('mechanical');
   });
 
   test('each step result includes duration', async () => {
     const result = await runPipeline(
       { vbaSource: MOCK_VBA_SOURCE, moduleName: 'DurationTest' },
       {},
-      { extract: 'mock', 'gap-questions': 'skip', 'resolve-gaps': 'skip', generate: 'mechanical' }
+      { extract: 'mock', 'gap-questions': 'skip', 'resolve-gaps': 'skip' }
     );
 
     for (const stepResult of result.results) {
@@ -482,13 +427,12 @@ describe('runPipeline', () => {
     const result = await runPipeline(
       { moduleName: 'ResolvedGaps', intents: MOCK_INTENTS_WITH_RESOLVED_GAP },
       {},
-      { 'gap-questions': 'skip', 'resolve-gaps': 'skip', generate: 'mechanical' }
+      { 'gap-questions': 'skip', 'resolve-gaps': 'skip' }
     );
 
     expect(result.status).toBe('complete');
-    const genResult = result.results.find(r => r.step === 'generate');
-    expect(genResult).toBeDefined();
-    expect(genResult.result.cljsSource).toContain('GAP RESOLVED');
+    // No unresolved gaps — pipeline completes at map step
+    expect(result.moduleStatus.step).toBe('complete');
   });
 });
 
@@ -503,17 +447,6 @@ describe('strategy isolation', () => {
 
     expect(mapResult.result.mapped.procedures).toBeDefined();
     expect(mapResult.result.stats).toBeDefined();
-  });
-
-  test('deterministic map produces valid structure for generate step', async () => {
-    const mapResult = await runStep('map', { intents: MOCK_INTENTS }, {});
-    const genResult = await runStep('generate', {
-      mapped: mapResult.result.mapped,
-      moduleName: 'Iso'
-    }, {}, 'mechanical');
-
-    expect(typeof genResult.result.cljsSource).toBe('string');
-    expect(genResult.result.cljsSource.length).toBeGreaterThan(0);
   });
 
   test('skip gap-questions returns correct structure', async () => {
@@ -540,15 +473,6 @@ describe('edge cases', () => {
     expect(result.result.stats.total).toBe(0);
   });
 
-  test('generate with empty mapped produces minimal output', async () => {
-    const result = await runStep('generate', {
-      mapped: { procedures: [] },
-      moduleName: 'Empty'
-    }, {}, 'mechanical');
-    expect(result.result.cljsSource).toBeDefined();
-    expect(result.result.stats.total_procedures).toBe(0);
-  });
-
   test('map with null intents returns empty', async () => {
     const result = await runStep('map', { intents: null }, {});
     expect(result.result.mapped.procedures).toEqual([]);
@@ -558,7 +482,7 @@ describe('edge cases', () => {
     const result = await runPipeline(
       { moduleName: 'MinimalTest', vbaSource: 'Sub Test()\nEnd Sub' },
       {},
-      { extract: 'mock', 'gap-questions': 'skip', 'resolve-gaps': 'skip', generate: 'mechanical' }
+      { extract: 'mock', 'gap-questions': 'skip', 'resolve-gaps': 'skip' }
     );
     expect(result.status).toBe('complete');
   });
@@ -567,10 +491,9 @@ describe('edge cases', () => {
     // Some callers store mapped at top level, not nested under intents
     const status = getModuleStatus({
       intents: { procedures: [{ name: 'test', intents: [] }] },
-      mapped: { procedures: [{ name: 'test', intents: [] }] },
-      cljs_source: '(ns test)'
+      mapped: { procedures: [{ name: 'test', intents: [] }] }
     });
-    // intents exists but intents.mapped is undefined, top-level mapped should be found
+    // intents exists but intents.mapped is undefined — no unresolved gaps → complete
     expect(status.step).toBe('complete');
   });
 });

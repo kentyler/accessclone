@@ -39,7 +39,7 @@ Access .accdb file
 - PowerShell scripts: `scripts/access/*.ps1`
 - Import API routes: `server/routes/database-import/`
 - Query converter: `server/lib/query-converter/`
-- VBA intent system: `server/lib/vba-intent-mapper.js`, `vba-intent-extractor.js`, `vba-wiring-generator.js`
+- VBA intent system: `server/lib/vba-intent-mapper.js`, `vba-intent-extractor.js`
 - Frontend import UI: `ui/src/app/views/access_database_viewer.cljs`
 - Assessment endpoint: `server/routes/database-import/assess.js`
 

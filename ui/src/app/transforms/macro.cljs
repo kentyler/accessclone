@@ -3,6 +3,4 @@
    1 transform covering macro translation status.")
 
 (defn set-macro-status [state status]
-  (-> state
-      (assoc-in [:macro-viewer :macro-info :status] status)
-      (assoc-in [:macro-viewer :cljs-dirty?] true)))
+  (assoc-in state [:macro-viewer :macro-info :status] status))

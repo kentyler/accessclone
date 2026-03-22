@@ -1,38 +1,105 @@
 # Event Runtime — Forms & Reports
 
-How translated VBA event handlers execute client-side in AccessClone. Covers the full pipeline from intent extraction through runtime dispatch for both forms and reports.
-
-## Overview
-
-When VBA modules are translated, structured **intent trees** describe what each event handler does. At runtime, the **intent interpreter** (`ui/src/app/intent_interpreter.cljs`) walks these trees and dispatches to framework functions — opening forms, navigating records, showing messages, running domain lookups, toggling control visibility, etc.
-
-The system is **async-capable**: sync intents (navigation, messages, control state) execute immediately; async intents (DLookup, DCount, DSum, RunSQL) make HTTP calls and await results before continuing to the next intent in the sequence.
+How VBA event handlers execute client-side in AccessClone. VBA is parsed into JavaScript at import time, stored in the database, and eval'd at runtime via `window.AC` — a ClojureScript-backed runtime API.
 
 ## Architecture
+
+**Key principle**: Intents are for LLM reasoning about code during translation. They play no part in runtime event execution. Buttons click, forms load, and reports open by running JavaScript — not by walking intent trees.
 
 ```
 VBA Source Code
      |
      v
-Intent Extraction (LLM)         ── POST /api/chat/extract-intents
+VBA-to-JS Parser (deterministic)   ── server/lib/vba-to-js.js
+     |                                 (parses Sub btnSave_Click() into JS strings)
      |
      v
-Intent Mapping (mechanical)      ── vba-intent-mapper.js
+shared.modules.js_handlers (JSONB)  ── stored at module save time (PUT /api/modules/:name)
      |
      v
-shared.modules.intents (JSONB)   ── stored in database
+Handler Loading                     ── GET /api/modules/:name/handlers
+     |                                 (returns [{key, control, event, procedure, js}])
      |
      v
-Handler Extraction               ── GET /api/modules/:name/handlers
-     |                               (parses procedure names like btnSave_Click,
-     |                                Form_Load, Report_Open into control+event pairs)
+Client Registration                 ── Forms:   projection/register-event-handlers
+                                        Reports: state_report/load-event-handlers-for-report!
      |
      v
-Client Registration              ── Forms:   projection/register-event-handlers
-                                     Reports: state_report/load-event-handlers-for-report!
-     |
-     v
-Runtime Dispatch                  ── intent-interpreter/execute-intents
+Runtime Execution                   ── (js/Function. js-code) → .call
+                                        JS calls window.AC.openForm(), AC.closeForm(), etc.
+```
+
+**No fallbacks**: If a handler exists but has no `:js` code, a warning is logged. There is no silent fallback to caption-based guessing, intent execution, or server-side evaluation. Fallbacks mask bugs — if something fails, that's an error.
+
+## VBA-to-JS Parser
+
+`server/lib/vba-to-js.js` — deterministic parser that converts VBA event procedures into executable JavaScript strings.
+
+### Pipeline
+
+1. `extractProcedures(vbaSource)` — finds `Sub controlName_Event()...End Sub` blocks
+2. `stripBoilerplate(body)` — removes line numbers, error handlers (`On Error`), labels, comments
+3. `translateStatement(stmt)` — maps individual VBA statements to `AC.*` calls
+4. `parseVbaToHandlers(vbaSource)` — returns `[{key, control, event, procedure, js}]`
+
+### Supported VBA Patterns
+
+| VBA Statement | Generated JavaScript |
+|--------------|---------------------|
+| `DoCmd.OpenForm "frmOrders"` | `AC.openForm("frmOrders")` |
+| `DoCmd.OpenReport "rptSales"` | `AC.openReport("rptSales")` |
+| `DoCmd.Close` | `AC.closeForm()` |
+| `DoCmd.GoToRecord , , acNewRec` | `AC.gotoRecord("new")` |
+| `DoCmd.GoToRecord , , acNext` | `AC.gotoRecord("next")` |
+| `DoCmd.RunSQL "INSERT INTO..."` | `AC.runSQL("INSERT INTO...")` |
+| `DoCmd.Save` | `AC.saveRecord()` |
+| `DoCmd.Quit` | `AC.closeForm()` |
+| `DoCmd.Requery` | `AC.requery()` |
+| `DoCmd.RunCommand acCmdSaveRecord` | `AC.saveRecord()` |
+| `MsgBox "text"` | `alert("text")` |
+| `Me.Requery` | `AC.requery()` |
+| `Me.Refresh` | `AC.requery()` |
+| `Me.ctrlName.Visible = True` | `AC.setVisible("ctrlName", true)` |
+| `Me.ctrlName.Enabled = False` | `AC.setEnabled("ctrlName", false)` |
+| `Me.ctrlName = value` | `AC.setValue("ctrlName", value)` |
+| `Me.ctrlName.SourceObject = "..."` | `AC.setSubformSource("ctrlName", "...")` |
+
+### Storage
+
+JS handlers are generated and stored when a module is saved:
+
+```
+PUT /api/modules/:name
+  → if vba_source changed:
+      parseVbaToHandlers(vba_source)
+      → store result in js_handlers JSONB column
+```
+
+The `js_handlers` column on `shared.modules` stores an array of handler objects. Each has `key`, `control`, `event`, `procedure`, and `js` (the executable JavaScript string).
+
+## Runtime API
+
+`ui/src/app/runtime.cljs` — exposes `window.AC` with framework methods callable from generated JavaScript.
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `AC.openForm(name)` | Open a form tab by name |
+| `AC.openReport(name)` | Open a report tab by name |
+| `AC.closeForm()` | Close the active tab |
+| `AC.gotoRecord(direction)` | Navigate: "first", "last", "next", "previous", "new" |
+| `AC.saveRecord()` | Save the current record |
+| `AC.requery()` | Reload form data |
+| `AC.setVisible(ctrl, bool)` | Toggle control visibility |
+| `AC.setEnabled(ctrl, bool)` | Toggle control enabled state |
+| `AC.setValue(ctrl, value)` | Set a control's value |
+| `AC.setSubformSource(ctrl, src)` | Set a subform's source object |
+| `AC.runSQL(sql)` | Execute INSERT/UPDATE/DELETE via POST /api/queries/execute |
+
+Installed at app init in `core.cljs`:
+```clojure
+(runtime/install!)  ;; sets window.AC
 ```
 
 ## Form Events
@@ -53,34 +120,47 @@ When a form opens in view mode:
 |-------|-----------|---------------|
 | `on-load` | `Form_Load` | After records load in view mode |
 | `on-current` | `Form_Current` | After navigating to a different record |
-| `on-click` | `btnName_Click` | Button click (3-tier: intent handler → `:on-click` property → caption match) |
-| `after-update` | `ctrlName_AfterUpdate` | After a field value changes (via `update-record-field!`) |
+| `on-click` | `btnName_Click` | Button click |
+| `after-update` | `ctrlName_AfterUpdate` | After a field value changes |
 | `on-enter` | `ctrlName_Enter` | Control receives focus (fires before GotFocus) |
 | `on-gotfocus` | `ctrlName_GotFocus` | Control receives focus (fires after Enter) |
 | `on-exit` | `ctrlName_Exit` | Control loses focus (fires before LostFocus) |
 | `on-lostfocus` | `ctrlName_LostFocus` | Control loses focus (fires after Exit) |
 
-### Focus Event Wiring
-
-Focus events are attached to the `.view-control` wrapper div in `form_view.cljs`. React's `onFocus`/`onBlur` bubble from child inputs, so one attachment point covers all control types.
-
-The projection's `field-triggers` map tracks which controls have focus event flags:
-- `:has-enter-event`, `:has-exit-event`, `:has-gotfocus-event`, `:has-lostfocus-event`
-
-Only controls with at least one flag get handlers attached (no overhead for controls without focus events).
-
 ### Button Click Resolution
 
-Buttons use a 3-tier resolution in `resolve-button-action`:
-1. **Intent handler**: Check projection `:event-handlers` for `ctrl-name.on-click`
-2. **Property**: Check `:on-click` property (action map or function name)
-3. **Caption**: Match button text to built-in actions ("Save", "Close", "Delete", "New Record", "Refresh")
+Simple: look up the handler in the projection's `:event-handlers` map with key `ctrl-name.on-click`. If found, execute the `:js` code. If not found, do nothing (no fallback, no caption guessing).
+
+```clojure
+(defn- resolve-button-action [ctrl]
+  (let [ctrl-name (or (:name ctrl) "")
+        projection (get-in @state/app-state [:form-editor :projection])
+        handler (projection/get-event-handler projection ctrl-name "on-click")]
+    (if handler
+      (run-js-handler handler ctrl-name)
+      (fn []))))
+```
+
+### Focus Event Wiring
+
+Focus events attached to `.view-control` wrapper div. React's `onFocus`/`onBlur` bubble from child inputs. Only controls with focus event flags (`:has-enter-event`, `:has-exit-event`, `:has-gotfocus-event`, `:has-lostfocus-event`) get handlers attached.
+
+### JS Execution
+
+All event handler paths use the same pattern:
+
+```clojure
+(defn- run-js-handler [handler context-label]
+  (if-let [js-code (:js handler)]
+    #(try (let [f (js/Function. js-code)] (.call f))
+          (catch :default e
+            (js/console.warn "Error in event handler" context-label ":" (.-message e))))
+    #(js/console.warn "Handler has no :js code:" context-label)))
+```
 
 ## Report Events
 
 ### Loading Pipeline
-
-When a report opens:
 
 1. `load-report-for-editing!` fetches the report definition
 2. `setup-report-editor!` initializes state with `:event-handlers {}`
@@ -95,153 +175,54 @@ When a report opens:
 | `on-close` | `Report_Close` | When leaving preview mode or closing the report tab |
 | `on-no-data` | `Report_NoData` | After preview data loads with 0 rows |
 
-Reports are read-only previews — no control-level events (click, focus, value change) apply.
-
-### Handler Key Format
-
-The server generates handler keys like `"report.on-open"` (using `toKw(rawControl) + "." + eventKey`). Report-level events use `"report"` as the control name. The `fire-report-event!` function constructs the same key format for lookup.
-
-## Intent Interpreter
-
-### Async Execution Model
-
-`execute-intents` returns a `core.async` channel (`go` block):
-
-```
-(execute-intents intents)           ;; fire-and-forget — go block runs in background
-(execute-intents intents ctx)       ;; with initial context map
-```
-
-Internally, a loop processes intents sequentially. Each intent dispatches via `execute-single-intent`, which returns:
-- `nil` for sync intents (already executed)
-- A channel for async intents (awaited with `<!` before continuing)
-
-### Context Threading
-
-A `ctx` map threads through the intent loop:
-
-- **`{last-result}`**: Always holds the most recent async result
-- **`{result_var}`**: DLookup/DCount/DSum intents with `:result_var` also store results under named keys
-
-Example flow from VBA:
-```
-DLookup("CompanyName", "Customers", "CustomerID = {CustomerID}")  → result_var: "ship_name"
-write-field ShipName = {ship_name}
-```
-
-The `resolve-intent-value` function resolves `{var_name}` placeholders by checking ctx first, then the current form record.
-
-### Supported Intent Types
-
-**Sync intents** (execute immediately):
-
-| Intent | Description |
-|--------|-------------|
-| `open-form` | Open a form tab by name |
-| `open-report` | Open a report tab by name |
-| `close-current` | Close the active tab |
-| `goto-record` | Navigate to first/last/next/previous/new record |
-| `new-record` | Create a new record |
-| `save-record` | Save the current record |
-| `delete-record` | Delete with confirmation |
-| `requery` | Reload form data |
-| `show-message` | `js/alert` with message text |
-| `confirm-action` | `js/confirm` → then/else branches |
-| `set-control-visible` | Toggle control visibility |
-| `set-control-enabled` | Toggle control enabled state |
-| `set-control-value` | Set control caption/text |
-| `write-field` | Update a field value in the current record |
-| `validate-required` | Alert + throw if field is blank (aborts remaining intents) |
-| `value-switch` | Switch/case on a field value |
-| `branch` | If/else with Access expression condition |
-| `error-handler` | Try/catch wrapper for a sequence of intents |
-
-**Async intents** (HTTP call, await response):
-
-| Intent | Description | Endpoint |
-|--------|-------------|----------|
-| `dlookup` | SELECT field FROM table WHERE criteria LIMIT 1 | `POST /api/queries/run` |
-| `dcount` | SELECT COUNT(field) FROM table WHERE criteria | `POST /api/queries/run` |
-| `dsum` | SELECT SUM(field) FROM table WHERE criteria | `POST /api/queries/run` |
-| `run-sql` | Execute INSERT/UPDATE/DELETE | `POST /api/queries/execute` |
-
-### Branch Conditions
-
-`:branch` intents evaluate conditions as Access expressions via the expression evaluator (`expressions.cljs`). Supported operators and functions:
-
-- **Comparisons**: `=`, `<>`, `<`, `>`, `<=`, `>=`
-- **Logical**: `And`, `Or`, `Not` (precedence: comparison → NOT → AND → OR)
-- **Functions**: `IsNull()`, `IIf()`, `Nz()`, `Format()`, `Left()`, `Right()`, `Mid()`, `Len()`, `Trim()`, etc.
-- **Field refs**: `[FieldName]` resolved from current record
-- **Literals**: strings `"..."`, numbers, dates `#mm/dd/yyyy#`, `True`/`False`/`Null`
-
-Access convention: `-1` = True, `0` = False.
-
-### Criteria Resolution
-
-Domain function criteria (DLookup, DCount, DSum) go through two-stage conversion:
-
-1. **Placeholder resolution** (`resolve-criteria-placeholders`): `{FieldName}` → actual value from current record/ctx. Numbers inline directly; strings get single-quoted with `'` escaping.
-2. **Syntax conversion** (`convert-criteria`): `[field]` → `"field"`, `#date#` → `'date'`, `True`/`False` → `true`/`false`.
-
-Field and table names are also cleaned via `strip-brackets` to handle Access-style `[Name]` → `Name`.
+Reports are read-only previews — no control-level events apply.
 
 ## Server Endpoints
 
 ### GET /api/modules/:name/handlers
 
-Extracts event handler descriptors from a module's stored intents. Returns an array of:
+Returns event handler descriptors with executable JS. Resolution order:
+1. **Stored js_handlers** — read from `shared.modules.js_handlers` (authoritative, generated at import time)
+2. **control_event_map + intents** — legacy fallback for modules imported before the JS handler system
 
+Response format:
 ```json
 [{
   "key": "btn-orders.on-click",
   "control": "btn-orders",
   "event": "on-click",
   "procedure": "btnOrders_Click",
-  "intents": [...]
+  "js": "AC.openForm(\"frmOrders\")"
 }]
 ```
 
-Parses VBA procedure names (`btnOrders_Click` → control `btnOrders`, event `click`). Maps VBA event names to kebab-case keys:
-
-| VBA Event | Handler Key |
-|-----------|-------------|
-| `Click` | `on-click` |
-| `DblClick` | `on-dblclick` |
-| `Load` | `on-load` |
-| `Open` | `on-open` |
-| `Close` | `on-close` |
-| `Current` | `on-current` |
-| `AfterUpdate` | `after-update` |
-| `BeforeUpdate` | `before-update` |
-| `Change` | `on-change` |
-| `Enter` | `on-enter` |
-| `Exit` | `on-exit` |
-| `GotFocus` | `on-gotfocus` |
-| `LostFocus` | `on-lostfocus` |
-| `NoData` | `on-no-data` |
-
-AfterUpdate handlers already covered by the reactions system are excluded.
-
 ### POST /api/queries/execute
 
-Executes INSERT, UPDATE, or DELETE SQL. Rejects SELECT, DROP, ALTER, TRUNCATE, and multi-statement SQL. Sets the schema search_path before execution. Returns `{ rowCount }`.
+Executes INSERT, UPDATE, or DELETE SQL. Rejects SELECT, DROP, ALTER, TRUNCATE, and multi-statement SQL. Used by `AC.runSQL()`.
 
-Used by `run-sql` intents for data modification operations translated from VBA `DoCmd.RunSQL`.
+## Intents — What They're For Now
+
+Intent extraction (`POST /api/chat/extract-intents`) and the intent map (`shared.modules.intents`) remain in the system. Their role is purely as **LLM reasoning context**:
+
+- The chat system prompt includes intent data when reasoning about forms/modules
+- The App Viewer's gap decisions pipeline uses intents for dependency analysis
+- `autoResolveGaps()` checks intents to verify referenced objects exist
+- Module Viewer shows the intent summary panel for human inspection
+
+Intents do NOT execute at runtime. The `intent_interpreter.cljs` file has been deleted.
 
 ## File Map
 
 | File | Role |
 |------|------|
-| `ui/src/app/intent_interpreter.cljs` | Runtime: walks intent trees, dispatches actions, async loop |
-| `ui/src/app/views/expressions.cljs` | Expression evaluator: parser + evaluator for Access expressions |
-| `ui/src/app/projection.cljs` | Data projection: field-triggers, control-state, event-handlers |
-| `ui/src/app/state_form.cljs` | Form state: `fire-form-event!`, `load-event-handlers-for-form!`, `update-record-field!` (AfterUpdate) |
-| `ui/src/app/state_report.cljs` | Report state: `fire-report-event!`, `load-event-handlers-for-report!` |
+| `server/lib/vba-to-js.js` | VBA-to-JS parser: converts VBA procedures to executable JavaScript |
+| `ui/src/app/runtime.cljs` | Runtime API: `window.AC` object with framework methods |
+| `ui/src/app/core.cljs` | App init: installs runtime via `(runtime/install!)` |
 | `ui/src/app/views/form_view.cljs` | Form rendering: button click resolution, focus event wiring |
-| `ui/src/app/flows/report.cljs` | Report flows: preview data load, on-open/on-no-data firing |
-| `ui/src/app/flows/navigation.cljs` | Tab close: fires report on-close before closing |
-| `server/routes/modules.js` | Server: handler extraction from stored intents |
-| `server/routes/metadata.js` | Server: `/api/queries/run` (SELECT) and `/api/queries/execute` (DML) |
-| `server/lib/reactions-extractor.js` | Server: extracts AfterUpdate reactions, `toKw()` control name conversion |
-| `server/lib/vba-intent-mapper.js` | Server: maps raw intents to mechanical/LLM-fallback/gap classifications |
+| `ui/src/app/state_form.cljs` | Form state: `fire-form-event!`, `load-event-handlers-for-form!`, after-update |
+| `ui/src/app/state_report.cljs` | Report state: `fire-report-event!`, `load-event-handlers-for-report!` |
+| `ui/src/app/projection.cljs` | Data projection: field-triggers, control-state, event-handlers |
+| `ui/src/app/views/expressions.cljs` | Expression evaluator: used by computed fields and conditional formatting |
+| `server/routes/modules.js` | Server: handler extraction, module save with JS generation |
+| `server/routes/metadata.js` | Server: `/api/queries/run` and `/api/queries/execute` |
+| `server/graph/schema.js` | Schema: `js_handlers JSONB` column on `shared.modules` |

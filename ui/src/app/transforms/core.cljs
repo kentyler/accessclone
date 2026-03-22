@@ -116,11 +116,9 @@
    :update-fn-name            sql-function/update-fn-name
    :track-sql-function        sql-function/track-sql-function
 
-   ;; Module domain (9)
-   :update-module-cljs-source module/update-module-cljs-source
+   ;; Module domain (7)
    :set-module-status         module/set-module-status
    :update-module-review-notes module/update-module-review-notes
-   :set-module-cljs-dirty     module/set-module-cljs-dirty
    :set-module-intents        module/set-module-intents
    :set-extracting-intents    module/set-extracting-intents
    :resolve-gap               module/resolve-gap

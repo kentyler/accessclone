@@ -14,6 +14,14 @@ param(
 
 # --- SaveAsText parser (same as export_report.ps1) ---
 
+function DimToTwips {
+    # Access SaveAsText stores geometry as twips (integers) OR inches (decimals, e.g. "0.2083").
+    # [int] cast truncates 0.2083 to 0, so detect the decimal case and convert.
+    param([string]$val)
+    if ($val -match '\.') { return [int]([double]$val * 1440) }
+    return [int]$val
+}
+
 function Parse-ReportSaveAsText {
     param([string]$textContent, [string]$reportName)
 
@@ -43,6 +51,11 @@ function Parse-ReportSaveAsText {
     $depth = 0
     $inBinary = $false
     $binaryDepth = 0
+
+    # Default control heights from top-level template blocks
+    $defaultHeights = @{}
+    $defaultTypeName = ''
+
     $context = 'none'
     $currentSection = $null
     $currentControl = $null
@@ -103,7 +116,7 @@ function Parse-ReportSaveAsText {
                         forceNewPage = 0; keepTogether = $false; controls = @()
                     }
                 }
-                else { $context = 'defaults' }
+                else { $context = 'defaults'; $defaultTypeName = $typeName }
             }
             elseif ($depth -eq 4 -and $context -eq 'section' -and -not $typeName) {
                 $context = 'section-controls'
@@ -112,7 +125,8 @@ function Parse-ReportSaveAsText {
                 $ctlType = if ($ctlTypeMap.ContainsKey($typeName)) { $ctlTypeMap[$typeName] } else { $typeName.ToLower() }
                 $context = 'control'
                 $currentControl = [ordered]@{
-                    type = $ctlType; name = ''; left = 0; top = 0; width = 0; height = 0
+                    type = $ctlType; name = ''; left = 0; top = 0; width = 0
+                    height = if ($defaultHeights.ContainsKey($typeName)) { $defaultHeights[$typeName] } else { 0 }
                 }
             }
             continue
@@ -155,7 +169,7 @@ function Parse-ReportSaveAsText {
             if ($context -eq 'report' -and $depth -eq 1) {
                 switch ($pName) {
                     'RecordSource' { $reportObj.recordSource = $pVal }
-                    'Width'        { $reportObj.reportWidth = [int]$pVal }
+                    'Width'        { $reportObj.reportWidth = DimToTwips $pVal }
                     'Caption'      { $reportObj.caption = $pVal }
                     'PageHeader'   { $reportObj.pageHeader = [int]$pVal }
                     'PageFooter'   { $reportObj.pageFooter = [int]$pVal }
@@ -174,7 +188,7 @@ function Parse-ReportSaveAsText {
             }
             elseif ($context -eq 'section' -and $currentSection -and $depth -eq 3) {
                 switch ($pName) {
-                    'Height'       { $currentSection.height = [int]$pVal }
+                    'Height'       { $currentSection.height = DimToTwips $pVal }
                     'Visible'      { if ($pVal -eq '0' -or $pVal -eq 'False') { $currentSection.visible = $false } }
                     'CanGrow'      { if ($isNotDefault) { $currentSection.canGrow = $true } }
                     'CanShrink'    { if ($isNotDefault) { $currentSection.canShrink = $true } }
@@ -183,13 +197,16 @@ function Parse-ReportSaveAsText {
                     'BackColor'    { $currentSection.backColor = [int]$pVal }
                 }
             }
+            elseif ($context -eq 'defaults') {
+                if ($pName -eq 'Height') { $defaultHeights[$defaultTypeName] = DimToTwips $pVal }
+            }
             elseif ($context -eq 'control' -and $currentControl) {
                 switch ($pName) {
                     'Name'            { $currentControl.name = $pVal }
-                    'Left'            { $currentControl.left = [int]$pVal }
-                    'Top'             { $currentControl.top = [int]$pVal }
-                    'Width'           { $currentControl.width = [int]$pVal }
-                    'Height'          { $currentControl.height = [int]$pVal }
+                    'Left'            { $currentControl.left = DimToTwips $pVal }
+                    'Top'             { $currentControl.top = DimToTwips $pVal }
+                    'Width'           { $currentControl.width = DimToTwips $pVal }
+                    'Height'          { $currentControl.height = DimToTwips $pVal }
                     'FontName'        { $currentControl.fontName = $pVal }
                     'FontSize'        { $currentControl.fontSize = [int]$pVal }
                     'FontWeight'      { if ([int]$pVal -ge 700) { $currentControl.fontBold = $true } }
@@ -219,6 +236,19 @@ function Parse-ReportSaveAsText {
     if (-not $reportObj.Contains('reportWidth')) { $reportObj.reportWidth = 10000 }
     if (-not $reportObj.Contains('pageHeader')) { $reportObj.pageHeader = 0 }
     if (-not $reportObj.Contains('pageFooter')) { $reportObj.pageFooter = 0 }
+
+    $accessControlHeightDefaults = @{
+        'text-box' = 300; 'combo-box' = 300; 'label' = 252
+        'command-button' = 360; 'check-box' = 240; 'option-button' = 240
+    }
+    foreach ($sec in $sections) {
+        foreach ($ctl in $sec.controls) {
+            if ($ctl.height -eq 0 -and $accessControlHeightDefaults.ContainsKey($ctl.type)) {
+                $ctl.height = $accessControlHeightDefaults[$ctl.type]
+            }
+        }
+    }
+
     $reportObj.grouping = $grouping
     $reportObj.sections = $sections
 

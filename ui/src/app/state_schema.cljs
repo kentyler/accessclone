@@ -597,7 +597,7 @@
    ;; --------------------------------------------------------
    :module-viewer
    {:type :map
-    :desc "State for the VBA/CLJS module viewer"
+    :desc "State for the VBA module viewer"
     :children
     {:module-id
      {:type [:or :number :nil]
@@ -610,7 +610,7 @@
       :desc "Module metadata and source code"
       :shape {:name :string
               :vba-source :string
-              :cljs-source :string
+              :js-handlers :any
               :status :string
               :review-notes :string
               :description :string
@@ -625,12 +625,7 @@
      :translating?
      {:type :boolean
       :default false
-      :desc "True while LLM translation is in progress"}
-
-     :cljs-dirty?
-     {:type :boolean
-      :default false
-      :desc "True if ClojureScript source has unsaved edits"}}}
+      :desc "True while LLM translation is in progress"}}}
 
    ;; --------------------------------------------------------
    ;; MACRO VIEWER
@@ -650,7 +645,6 @@
       :desc "Macro metadata and source"
       :shape {:name :string
               :macro-xml :string
-              :cljs-source :string
               :status :string
               :review-notes :string
               :description :string
@@ -662,10 +656,7 @@
       :default false
       :desc "True while loading macro"}
 
-     :cljs-dirty?
-     {:type :boolean
-      :default false
-      :desc "True if ClojureScript translation has unsaved edits"}}}
+}}
 
    ;; --------------------------------------------------------
    ;; SQL FUNCTION VIEWER

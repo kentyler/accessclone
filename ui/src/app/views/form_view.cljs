@@ -10,7 +10,6 @@
             [app.views.form-utils :as fu]
             [app.views.expressions :as expr]
             [app.projection :as projection]
-            [app.intent-interpreter :as intent]
             [clojure.string :as str]))
 
 (declare show-record-menu form-view-control)
@@ -51,56 +50,22 @@
 
 ;; --- Button action resolution ---
 
-(defn- resolve-action-from-prop
-  "Resolve on-click from an explicit :on-click property (map or string)."
-  [on-click-prop]
-  (cond
-    (and (map? on-click-prop) (:action on-click-prop))
-    (case (keyword (:action on-click-prop))
-      :save-record   #(f/run-fire-and-forget! form-flow/save-current-record-flow)
-      :new-record    #(t/dispatch! :new-record)
-      :delete-record #(when (js/confirm "Delete this record?") (f/run-fire-and-forget! form-flow/delete-current-record-flow))
-      :close-form    #(f/run-fire-and-forget! nav/close-current-tab-flow)
-      :refresh       #(f/run-fire-and-forget! form-flow/set-view-mode-flow {:mode :view})
-      #(js/alert (str "Unknown action: " (:action on-click-prop))))
-
-    (and (map? on-click-prop) (:function on-click-prop))
-    #(f/run-fire-and-forget! (form-flow/call-session-function-flow) {:function-name (:function on-click-prop)})
-
-    (and (string? on-click-prop) (not (str/blank? on-click-prop)))
-    #(f/run-fire-and-forget! (form-flow/call-session-function-flow) {:function-name on-click-prop})
-
-    :else nil))
-
-(defn- resolve-action-from-caption
-  "Resolve on-click from button caption text as a fallback."
-  [text-lower button-text]
-  (cond
-    (or (= text-lower "close") (str/includes? text-lower "close form"))
-    #(f/run-fire-and-forget! nav/close-current-tab-flow)
-    (or (= text-lower "save") (str/includes? text-lower "save record"))
-    #(f/run-fire-and-forget! form-flow/save-current-record-flow)
-    (or (= text-lower "new record") (= text-lower "new") (str/includes? text-lower "add new"))
-    #(t/dispatch! :new-record)
-    (or (= text-lower "delete") (= text-lower "delete record"))
-    #(when (js/confirm "Delete this record?") (f/run-fire-and-forget! form-flow/delete-current-record-flow))
-    (or (= text-lower "refresh") (= text-lower "requery"))
-    #(f/run-fire-and-forget! form-flow/set-view-mode-flow {:mode :view})
-    :else
-    #(js/alert (str "Button clicked: " button-text))))
+(defn- run-js-handler
+  "Execute a handler's :js code. Returns a fn."
+  [handler context-label]
+  (if-let [js-code (:js handler)]
+    #(try (let [f (js/Function. js-code)] (.call f))
+          (catch :default e
+            (js/console.warn "Error in event handler" context-label ":" (.-message e))))
+    #(js/console.warn "Handler has no :js code:" context-label)))
 
 (defn- resolve-button-action [ctrl]
   (let [ctrl-name (or (:name ctrl) "")
-        button-text (fu/strip-access-hotkey (or (:text ctrl) (:caption ctrl) "Button"))
-        ;; Check for registered intent handler
         projection (get-in @state/app-state [:form-editor :projection])
         handler (projection/get-event-handler projection ctrl-name "on-click")]
-    (or (when (seq (:intents handler))
-          #(try (intent/execute-intents (:intents handler))
-                (catch :default e
-                  (js/console.warn "Error in button handler:" (.-message e)))))
-        (resolve-action-from-prop (:on-click ctrl))
-        (resolve-action-from-caption (str/lower-case button-text) button-text))))
+    (if handler
+      (run-js-handler handler ctrl-name)
+      (fn []))))
 
 (defn render-button [ctrl _field _value _on-change {:keys [tab-idx]}]
   [:button.view-button
@@ -222,7 +187,7 @@
   (fn [ctrl field value on-change {:keys [allow-edits? tab-idx]}]
     [:select.view-listbox
      (cond-> {:multiple true :size (or (:list-rows ctrl) 5)
-              :value (str (or value "")) :disabled (not allow-edits?)
+              :value (if (some? value) [(str value)] []) :disabled (not allow-edits?)
               :on-change #(when (and field allow-edits?) (on-change field (.. % -target -value)))}
        tab-idx (assoc :tab-index tab-idx))
      [:option {:value ""} ""]
@@ -872,7 +837,7 @@
 ;; ============================================================
 
 (def control-renderers
-  {:label render-label, :text-box render-textbox, :button render-button
+  {:label render-label, :text-box render-textbox, :button render-button, :command-button render-button
    :check-box render-checkbox, :combo-box render-combobox, :line render-line
    :rectangle render-rectangle, :image render-image, :object-frame render-image, :list-box render-listbox
    :option-group render-option-group, :option-button render-option-button
@@ -925,10 +890,8 @@
             (fn [event-key]
               (let [projection (get-in @state/app-state [:form-editor :projection])
                     handler (projection/get-event-handler projection (str ctrl-name) (name event-key))]
-                (when (seq (:intents handler))
-                  (try (intent/execute-intents (:intents handler))
-                       (catch :default e
-                         (js/console.warn "Error in focus handler:" (.-message e)))))))
+                (when handler
+                  ((run-js-handler handler (str ctrl-name "." (name event-key)))))))
             focus-props
             (when has-focus-events?
               (cond-> {}

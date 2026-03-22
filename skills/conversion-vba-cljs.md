@@ -1,357 +1,126 @@
-# VBA to ClojureScript Translation Guide
+# VBA Translation Guide
 
-Translating Access VBA modules to ClojureScript for the AccessClone application. AccessClone runs locally as an Electron app with a local Express backend — file system access and local paths are valid, but must route through backend API endpoints. The VBA source is stored in `shared.modules` and the ClojureScript translation lives alongside it.
+Translating Access VBA modules in the AccessClone application. VBA source is stored in `shared.modules`. Two outputs are produced: (1) structured intents for LLM reasoning, and (2) JavaScript handlers for runtime execution.
 
-## Two Translation Approaches
+## Current Architecture
 
-**Intent-based (recommended)**: Uses the two-phase pipeline in the module viewer:
-1. **Extract Intents** — LLM extracts structured JSON intents from VBA (`POST /api/chat/extract-intents`)
-2. **Generate Code** — Mechanical templates produce ClojureScript from intents, with LLM fallback for complex patterns (`POST /api/chat/generate-wiring`)
+**Runtime execution uses JavaScript**, not ClojureScript. The `vba-to-js.js` parser deterministically converts VBA event procedures into JS strings that call `window.AC.*` methods. These are stored in `shared.modules.js_handlers` and executed client-side via `(js/Function. js-code)`. See `skills/event-runtime.md` for full details.
 
-See `skills/intent-extraction.md` for the 30 intent types and extraction prompt. The intent pipeline produces code that uses `t/dispatch!` and named transforms/flows, making it composable and testable.
+**Intents are for LLM reasoning only**. Intent extraction (`POST /api/chat/extract-intents`) produces structured JSON describing what VBA procedures do. The intent mapper (`vba-intent-mapper.js`) classifies 30 intent types. These are used by:
+- The chat system prompt when reasoning about modules
+- The App Viewer's gap decisions pipeline for dependency analysis
+- `autoResolveGaps()` to verify referenced objects exist
+- The Module Viewer's intent summary panel for human inspection
 
-**Direct Translate (legacy)**: One-shot LLM translation via `POST /api/chat/translate`. Still available as the "Direct Translate" button. Produces raw ClojureScript without structured intents. This guide primarily documents the patterns used by this approach.
+Intents do NOT execute at runtime.
 
 ## Prerequisites: Import All Objects First
 
-**Do NOT begin translation until ALL objects from the Access database have been imported.** This is a hard rule, not a suggestion. VBA modules reference queries, forms, tables, and other modules. If the LLM cannot see the actual definitions, it will guess at the logic and produce incorrect, insecure code.
+**Do NOT begin translation until ALL objects from the Access database have been imported.** VBA modules reference queries, forms, tables, and other modules. If the LLM cannot see the actual definitions, it will guess at the logic and produce incorrect results.
 
-The check is simple: compare the discovery scan (what `list_tables.ps1`, `list_queries.ps1`, `list_forms.ps1`, `list_reports.ps1`, `list_modules.ps1`, `list_macros.ps1` found in the Access database) against what exists in the target database (`shared.forms`, `shared.reports`, `shared.modules`, `shared.macros`, plus schema tables/views). If any objects from the source have not been imported into the target, translation should be blocked.
+Import completeness is enforced automatically -- the app checks before allowing intent extraction and shows a clear message listing what's missing.
 
-Import completeness is enforced automatically — the app checks before allowing translation (both intent extraction and direct translate) and shows a clear message listing what's missing.
+## VBA-to-JS Parser
 
-## AccessClone Architecture (for translation context)
+`server/lib/vba-to-js.js` -- deterministic parser that converts VBA event procedures into executable JavaScript strings.
 
-- **UI**: Reagent (React wrapper) with a single `app-state` atom
-- **State**: `app.state` namespace — shared helpers, tabs, database selection
-- **Form state**: `app.state-form` — form CRUD, record ops, navigation
-- **Report state**: `app.state-report` — report CRUD, preview
-- **API calls**: `cljs-http.client` with `core.async` (`go` blocks, `<!`)
-- **Backend**: Express.js REST API with PostgreSQL
+### Supported VBA Patterns
 
-## Translation Patterns
+| VBA Statement | Generated JavaScript |
+|--------------|---------------------|
+| `DoCmd.OpenForm "frmOrders"` | `AC.openForm("frmOrders")` |
+| `DoCmd.OpenReport "rptSales"` | `AC.openReport("rptSales")` |
+| `DoCmd.Close` | `AC.closeForm()` |
+| `DoCmd.GoToRecord , , acNewRec` | `AC.gotoRecord("new")` |
+| `DoCmd.RunSQL "INSERT..."` | `AC.runSQL("INSERT...")` |
+| `DoCmd.Save` | `AC.saveRecord()` |
+| `DoCmd.Requery` | `AC.requery()` |
+| `Me.ctrlName.Visible = True` | `AC.setVisible("ctrlName", true)` |
+| `Me.ctrlName.Enabled = False` | `AC.setEnabled("ctrlName", false)` |
+| `Me.ctrlName = value` | `AC.setValue("ctrlName", value)` |
+| `Me.ctrlName.SourceObject = "..."` | `AC.setSubformSource("ctrlName", "...")` |
+| `MsgBox "text"` | `alert("text")` |
+
+JS handlers are generated and stored when a module is saved (`PUT /api/modules/:name`).
+
+## Runtime API
+
+`ui/src/app/runtime.cljs` exposes `window.AC` with framework methods callable from generated JavaScript:
+
+| Method | Description |
+|--------|-------------|
+| `AC.openForm(name)` | Open a form tab by name |
+| `AC.openReport(name)` | Open a report tab by name |
+| `AC.closeForm()` | Close the active tab |
+| `AC.gotoRecord(direction)` | Navigate: "first", "last", "next", "previous", "new" |
+| `AC.saveRecord()` | Save the current record |
+| `AC.requery()` | Reload form data |
+| `AC.setVisible(ctrl, bool)` | Toggle control visibility |
+| `AC.setEnabled(ctrl, bool)` | Toggle control enabled state |
+| `AC.setValue(ctrl, value)` | Set a control's value |
+| `AC.setSubformSource(ctrl, src)` | Set a subform's source object |
+| `AC.runSQL(sql)` | Execute INSERT/UPDATE/DELETE via POST /api/queries/execute |
+
+## Intent Extraction
+
+The intent pipeline extracts structured understanding of VBA code for LLM context:
+
+1. **Extract Intents** -- LLM extracts structured JSON intents from VBA (`POST /api/chat/extract-intents`)
+2. **Map Intents** -- `vba-intent-mapper.js` maps 30 intent types deterministically
+3. **Resolve Gaps** -- `autoResolveGaps()` checks that referenced objects exist
+
+The Module Viewer's "Extract Intents" button drives this pipeline. Results are stored in `shared.modules.intents` JSONB column.
+
+## Common VBA Patterns Reference
+
+These patterns are useful context for understanding what VBA does, even though runtime execution is now handled by `vba-to-js.js`:
 
 ### DoCmd Operations
 
-| VBA | ClojureScript |
-|-----|---------------|
-| `DoCmd.OpenForm "FormName"` | `(state/open-object! :forms form-id)` |
-| `DoCmd.Close acForm, "FormName"` | `(state/close-tab! :forms form-id)` |
-| `DoCmd.Close` (current form) | `(state/close-tab! (:type active-tab) (:id active-tab))` |
-| `DoCmd.OpenForm "X", , , filter` | Open form + set filter in form-editor state |
-| `DoCmd.GoToRecord , , acNewRec` | `(state-form/new-record!)` |
-| `DoCmd.Requery` | Re-fetch records via `(state-form/load-records!)` |
-| `DoCmd.RunSQL "INSERT..."` | `(http/post (str api-base "/api/data/tablename") {:json-params data})` |
-| `DoCmd.SetWarnings False/True` | Not needed — no warning dialogs in web app |
-| `DoCmd.OpenReport "R", acViewPreview` | `(state/open-object! :reports report-id)` |
+| VBA | What it does |
+|-----|-------------|
+| `DoCmd.OpenForm "FormName"` | Opens a form |
+| `DoCmd.Close acForm, "FormName"` | Closes a specific form |
+| `DoCmd.GoToRecord , , acNewRec` | Navigates to a new record |
+| `DoCmd.RunSQL "INSERT..."` | Executes action SQL |
+| `DoCmd.Requery` | Refreshes the current form's data |
+| `DoCmd.OpenReport "R", acViewPreview` | Opens a report in preview mode |
 
 ### Form References
 
-| VBA | ClojureScript |
-|-----|---------------|
-| `Me.txtField` | `(get-in @state/app-state [:form-editor :current-record :field])` |
-| `Me.txtField = value` | `(swap! state/app-state assoc-in [:form-editor :current-record :field] value)` |
-| `Forms!FormName!ControlName` | Look up form in open tabs, get its state |
-| `Me.Dirty` | `(get-in @state/app-state [:form-editor :record-dirty?])` |
-| `Me.Requery` | `(state-form/load-records!)` |
-| `Me.RecordSource = "..."` | `(swap! state/app-state assoc-in [:form-editor :current :record-source] "...")` |
+| VBA | Meaning |
+|-----|---------|
+| `Me.txtField` | Current form's control value |
+| `Me.txtField = value` | Set a control's value |
+| `Forms!FormName!ControlName` | Cross-form reference |
+| `Me.Dirty` | Whether current record has unsaved changes |
+| `Me.Requery` | Refresh form data |
 
 ### DLookup / DCount / DSum / DMax
 
-These become API calls since the data lives in PostgreSQL:
-
-```clojure
-;; VBA: DLookup("name", "carriers", "carrier_id = " & id)
-;; → Use data API with filter (parameterized, safe):
-(go
-  (let [response (<! (http/get (str state/api-base "/api/data/carriers")
-                               {:query-params {:filter (js/JSON.stringify
-                                                        (clj->js {:carrier_id id}))
-                                               :limit 1}
-                                :headers (state/db-headers)}))]
-    (when (:success response)
-      (get-in response [:body :data 0 :name]))))
-
-;; VBA: DCount("*", "carriers", "active = True")
-;; → Use queries/run for aggregates (SELECT only):
-(go
-  (let [response (<! (http/post (str state/api-base "/api/queries/run")
-                                {:json-params {:sql "SELECT COUNT(*) as cnt FROM carriers WHERE active = true"}
-                                 :headers (state/db-headers)}))]
-    (when (:success response)
-      (get-in response [:body :data 0 :cnt]))))
-```
-
-**Response shapes:**
-- `GET /api/data/:table` returns `{:data [...records...] :pagination {...}}`
-- `POST /api/queries/run` returns `{:data [...records...] :fields [...] :rowCount N}`
-- Both use `:data` for the records array (not `:records`)
-
-### MsgBox
-
-| VBA | ClojureScript |
-|-----|---------------|
-| `MsgBox "Info", vbInformation` | `(js/alert "Info")` or `(state/set-error! "Info")` for UI banner |
-| `MsgBox "Error!", vbCritical` | `(state/log-error! "Error!")` |
-| `If MsgBox("Sure?", vbYesNo) = vbYes` | `(when (js/confirm "Sure?") ...)` |
-
-### Variables and Types
-
-| VBA | ClojureScript |
-|-----|---------------|
-| `Dim x As String` | `(let [x ""])` or just use directly |
-| `Dim x As Long` | `(let [x 0])` |
-| `Dim x As Boolean` | `(let [x false])` |
-| `Set rs = CurrentDb.OpenRecordset(...)` | API call returning records vector |
-| `Nz(value, default)` | `(or value default)` |
-| `IsNull(x)` | `(nil? x)` |
-| `x & y` (string concat) | `(str x y)` |
-
-### Conditionals and Loops
-
-```clojure
-;; VBA: If x > 0 Then ... ElseIf y Then ... Else ... End If
-(cond
-  (> x 0) (do-something)
-  y       (do-other)
-  :else   (do-default))
-
-;; VBA: For i = 1 To 10 ... Next
-(doseq [i (range 1 11)]
-  (do-something i))
-
-;; VBA: For Each item In collection ... Next
-(doseq [item collection]
-  (do-something item))
-
-;; VBA: Do While Not rs.EOF ... rs.MoveNext ... Loop
-;; (records are just a vector from the API)
-(doseq [record records]
-  (do-something record))
-```
+These are database aggregate lookups. In AccessClone, they translate to API calls since data lives in PostgreSQL. The `vba-to-js.js` parser does not currently handle these -- they appear as gaps in the intent summary.
 
 ### Error Handling
 
-```clojure
-;; VBA: On Error GoTo Handler ... Handler: MsgBox Err.Description
-(try
-  (do-something)
-  (catch js/Error e
-    (state/log-error! (.-message e) "function-name")))
-```
+VBA `On Error GoTo Handler` patterns are stripped by `vba-to-js.js`'s `stripBoilerplate()`. Web-app error handling is done through try/catch in the generated JS.
 
-### Database Operations (via API)
+## Translation Status
 
-**CRITICAL: Never build SQL by string concatenation.** VBA commonly builds SQL strings with user values spliced in. In AccessClone, use the data API which handles parameterization automatically.
+Each module has a `status` field tracking progress:
 
-#### Writes — Use `/api/data/:table` (parameterized, safe)
-
-```clojure
-;; VBA: CurrentDb.Execute "INSERT INTO tbl (col1, col2) VALUES ('val', 42)"
-(go
-  (<! (http/post (str state/api-base "/api/data/tbl")
-                 {:json-params {:col1 "val" :col2 42}
-                  :headers (state/db-headers)})))
-
-;; VBA: CurrentDb.Execute "UPDATE tbl SET col = 'val' WHERE id = " & id
-(go
-  (<! (http/put (str state/api-base "/api/data/tbl/" id)
-                {:json-params {:col "val"}
-                 :headers (state/db-headers)})))
-
-;; VBA: CurrentDb.Execute "DELETE FROM tbl WHERE id = " & id
-(go
-  (<! (http/delete (str state/api-base "/api/data/tbl/" id)
-                   {:headers (state/db-headers)})))
-
-;; VBA: DELETE + INSERT pattern (common in VBA for "upsert"):
-;;   CurrentDb.Execute "DELETE FROM tbl WHERE fk = " & id & " AND name = '" & name & "'"
-;;   CurrentDb.Execute "INSERT INTO tbl (fk, name, value) VALUES (...)"
-;; → First fetch matching record to get its PK, then delete by PK, then insert:
-(go
-  (let [response (<! (http/get (str state/api-base "/api/data/tbl")
-                               {:query-params {:filter (js/JSON.stringify
-                                                        (clj->js {:fk id :name name}))
-                                               :limit 1}
-                                :headers (state/db-headers)}))]
-    ;; Delete existing if found
-    (when-let [existing (first (get-in response [:body :data]))]
-      (<! (http/delete (str state/api-base "/api/data/tbl/" (:pk-column existing))
-                       {:headers (state/db-headers)})))
-    ;; Insert new
-    (<! (http/post (str state/api-base "/api/data/tbl")
-                   {:json-params {:fk id :name name :value value}
-                    :headers (state/db-headers)}))))
-```
-
-#### Reads — Use `/api/data/:table` with filter, or `/api/queries/run` for complex joins
-
-```clojure
-;; Simple lookup — use the data API filter:
-;; VBA: DLookup("name", "carriers", "carrier_id = " & id)
-(go
-  (let [response (<! (http/get (str state/api-base "/api/data/carriers")
-                               {:query-params {:filter (js/JSON.stringify
-                                                        (clj->js {:carrier_id id}))
-                                               :limit 1}
-                                :headers (state/db-headers)}))]
-    (get-in response [:body :data 0 :name])))
-
-;; Complex joins/searches — use /api/queries/run (SELECT only, no writes!)
-;; NOTE: /api/queries/run only accepts SELECT statements. It will reject
-;; INSERT, UPDATE, DELETE, DROP, etc. with "Only SELECT queries are allowed".
-;; NOTE: This endpoint does NOT support parameterized queries — values in the
-;; SQL string are passed directly to PostgreSQL. Sanitize or validate inputs.
-(go
-  (let [response (<! (http/post (str state/api-base "/api/queries/run")
-                                {:json-params {:sql "SELECT t.id, t.name FROM tbl t JOIN other o ON t.id = o.fk WHERE t.active = true ORDER BY t.name"}
-                                 :headers (state/db-headers)}))]
-    (get-in response [:body :data])))
-```
-
-**When to use which:**
-| Operation | Endpoint | Parameterized? |
-|-----------|----------|----------------|
-| INSERT | `POST /api/data/:table` | Yes (pass JSON body) |
-| UPDATE | `PUT /api/data/:table/:id` | Yes (pass JSON body) |
-| DELETE | `DELETE /api/data/:table/:id` | Yes (PK in URL) |
-| Simple SELECT with equality filters | `GET /api/data/:table?filter=...` | Yes (JSON filter) |
-| Complex SELECT (joins, LIKE, aggregates) | `POST /api/queries/run` | No — SELECT only, validate inputs |
-
-### TempVars (Global State)
-
-VBA TempVars are global variables. Map to keys in `app-state`:
-
-```clojure
-;; VBA: TempVars!CurrentID = 42
-(swap! state/app-state assoc :temp-current-id 42)
-
-;; VBA: x = TempVars!CurrentID
-(let [x (:temp-current-id @state/app-state)])
-```
-
-## Namespace Template
-
-Every translated module should follow this pattern:
-
-```clojure
-(ns app.modules.module-name
-  "Translated from VBA module: ModuleName"
-  (:require [app.state :as state]
-            [cljs-http.client :as http]
-            [cljs.core.async :refer [go <!]]))
-
-;; Original VBA: Public Function FunctionName(arg As String)
-(defn function-name
-  "Brief description of what this does"
-  [arg]
-  ;; implementation
-  )
-```
-
-## Common Gotchas
-
-1. **Async operations**: VBA is synchronous; ClojureScript API calls are async. Wrap in `go` blocks and use `<!` to await responses. Functions that call the API cannot return values synchronously — use callbacks or return channels.
-
-2. **String comparison**: VBA is case-insensitive by default (`Option Compare Database`). Use `clojure.string/lower-case` for comparisons: `(= (str/lower-case a) (str/lower-case b))`.
-
-3. **1-based vs 0-based**: VBA arrays and collections are 1-based. ClojureScript vectors are 0-based. Adjust indices.
-
-4. **Null vs Empty String**: VBA often treats `""` and `Null` interchangeably via `Nz()`. In ClojureScript, use `(or value "")` or `(when (seq value) ...)`.
-
-5. **Form references across forms**: VBA can read `Forms!OtherForm!Control`. In AccessClone, each form's state is independent. Cross-form communication goes through `app-state` keys or API calls.
-
-6. **Event procedures**: VBA event handlers (OnClick, BeforeUpdate, etc.) become ClojureScript functions referenced in the form definition's event properties. The form editor wires these up.
-
-7. **DoCmd.OpenForm with WhereCondition**: The filter needs to be set on the target form's state after opening it. This requires a two-step approach — open the tab, then set the filter.
-
-8. **SQL string building vs parameterized queries**: VBA commonly builds SQL by string concatenation with manual escaping (`"WHERE name = '" & EscQuote(name) & "'"`). This is **the most common translation mistake**. Rules:
-   - **INSERT/UPDATE/DELETE** → Always use `/api/data/:table` endpoints (parameterized automatically). **Never** use `/api/queries/run` for writes — it rejects non-SELECT statements.
-   - **Simple SELECT with equality filters** → Use `GET /api/data/:table?filter={"col":"val"}` (parameterized).
-   - **Complex SELECT (joins, LIKE, aggregates)** → Use `/api/queries/run` but build the SQL with only safe, validated values. Never splice raw user input into SQL strings.
-   - **SQL escaping helpers** (e.g. functions that double single quotes) → Mark `needs-review`. Callers should use the data API instead of building escaped SQL.
-   - **VBA "delete then insert" upsert pattern** → Translate to: fetch by filter to get PK, delete by PK, then insert via data API.
-
-9. **Forward references**: ClojureScript requires functions to be defined before use. If function A calls function B which is defined later in the file, add a `(declare B)` at the top of the namespace. The VBA had no such requirement.
-
-## Runtime Capabilities
-
-AccessClone can run locally (Electron + Express) or as a web app. The server exposes capabilities via `/api/config`. Two helpers are available:
-
-- `(state/has-capability? :file-system)` — silent check, returns true/false
-- `(state/require-local! :file-system)` — checks and **alerts the user** if unavailable: *"This feature requires a local installation and can't run from the web. Visit accessclone.com for help converting your application to run on the web."* Returns true if available.
-
-Available capabilities:
-- `:file-system` — Local file read/write/copy via backend API
-- `:powershell` — PowerShell available (Windows/WSL)
-- `:database-import` — Access database import via COM
-
-**Use `require-local!` to guard local-only operations.** This ensures web users get a clear message with a path to get help.
-
-## File System & Path Operations
-
-Guard all file system operations with `require-local!`. When running on the web, the user sees the accessclone.com message and the operation is skipped:
-
-```clojure
-;; VBA: Open "C:\path\file.txt" For Input As #1
-;;      Line Input #1, strLine
-;;      Close #1
-(when (state/require-local! :file-system)
-  (go
-    (let [response (<! (http/post (str state/api-base "/api/files/read")
-                                  {:json-params {:path file-path}
-                                   :headers (state/db-headers)}))]
-      (when (:success response)
-        (:body response)))))
-
-;; VBA: FileCopy source, dest
-(when (state/require-local! :file-system)
-  (go
-    (<! (http/post (str state/api-base "/api/files/copy")
-                   {:json-params {:source source-path :dest dest-path}
-                    :headers (state/db-headers)}))))
-
-;; VBA: Dir("C:\path\*.*")  (check file existence)
-(when (state/require-local! :file-system)
-  (go
-    (let [response (<! (http/post (str state/api-base "/api/files/exists")
-                                  {:json-params {:path file-path}
-                                   :headers (state/db-headers)}))]
-      (get-in response [:body :exists]))))
-```
-
-**Path handling**: Keep Windows-style paths as configuration values or derive them from backend settings. Don't hardcode paths — make them configurable or relative to a base directory.
-
-**Revision/backup logic**: VBA modules that copy files for version control or backups should translate to backend API calls that perform the same operations server-side.
-
-## Translation Status & Review Notes
-
-Each module has a `status` field tracking translation progress:
-
-- **pending** — VBA imported, no translation yet
-- **translated** — First-pass translation done, may have issues
-- **needs-review** — Translation exists but depends on other modules or has known issues
-- **complete** — Translation verified and ready for use
-
-**When to mark "needs-review"**: If the translated code includes functions or patterns that may become unnecessary once *other* modules are translated, set status to `needs-review` and explain why in `review_notes`. Common examples:
-
-- **SQL string escaping** (e.g. `escape-single-quotes`): VBA builds SQL by concatenation, but AccessClone uses parameterized queries via the API. These helper functions may be unnecessary once callers are translated to use API calls instead of string-built SQL. Mark as `needs-review` with a note like: "escape-single-quotes may be unnecessary — callers should use parameterized API queries instead of string concatenation."
-- **Cross-module dependencies**: If module A calls functions from module B that hasn't been translated yet, mark A as `needs-review` with a note listing the dependencies.
-- **Hardcoded paths or constants**: If the VBA has hardcoded file paths or configuration that should come from app config, mark for review.
-
-When generating a translation, **end your response with a recommended status** and review notes if applicable:
-
-```
-;; STATUS: needs-review
-;; REVIEW: escape-single-quotes may be unnecessary if callers use parameterized API queries
-```
+- **pending** -- VBA imported, no translation yet
+- **translated** -- Intent extraction done, JS handlers generated
+- **needs-review** -- Has known gaps or dependencies on other modules
+- **complete** -- Verified and ready for use
 
 ## What NOT to Translate
 
-Some VBA patterns are truly inapplicable and should be noted as comments:
+Some VBA patterns are truly inapplicable in a web context:
 
-- `CreateObject("Outlook.Application")` — External COM automation (use backend email API instead)
-- `SendKeys` — Keyboard simulation (not applicable in web UI)
-- `DoCmd.TransferSpreadsheet` — Translate to backend API file import/export endpoint
-- `DoCmd.OutputTo` — Report export (future feature, backend API)
-- `Shell` — Running external processes (translate to backend API endpoint if needed)
+- `CreateObject("Outlook.Application")` -- External COM automation
+- `SendKeys` -- Keyboard simulation
+- `DoCmd.TransferSpreadsheet` -- File import/export
+- `DoCmd.OutputTo` -- Report export
+- `Shell` -- Running external processes
+
+These appear as gaps in the intent summary for human review.

@@ -150,28 +150,6 @@ const graphTools = [
   }
 ];
 
-// Module translation tools — available when viewing a module
-const moduleTools = [
-  {
-    name: 'update_translation',
-    description: 'Update the ClojureScript translation with revised code. Use this when the user asks you to fix issues, apply suggestions, or make changes to the translation. Always return the COMPLETE updated source, not just the changed parts.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        cljs_source: {
-          type: 'string',
-          description: 'The complete updated ClojureScript source code'
-        },
-        summary: {
-          type: 'string',
-          description: 'Brief summary of what was changed'
-        }
-      },
-      required: ['cljs_source', 'summary']
-    }
-  }
-];
-
 // Query/function DDL tools — available when viewing a query or SQL function
 const queryTools = [
   {
@@ -217,4 +195,4 @@ const designCheckTools = [
   }
 ];
 
-module.exports = { dataTools, graphTools, moduleTools, queryTools, designCheckTools };
+module.exports = { dataTools, graphTools, queryTools, designCheckTools };

@@ -76,9 +76,6 @@ module.exports = function(pool, secrets) {
         case 'resolve-gaps':
           input = { mapped: intentsData.mapped };
           break;
-        case 'generate':
-          input = { mapped: intentsData.mapped, moduleName: module_name, vbaSource: mod.vba_source };
-          break;
       }
 
       const context = { apiKey: apiKey(), pool, databaseId };
@@ -282,16 +279,6 @@ async function persistStepResult(pool, moduleName, databaseId, stepName, stepRes
     case 'resolve-gaps': {
       intentsData.mapped = result.mapped;
       updated = true;
-      break;
-    }
-    case 'generate': {
-      // Save cljs_source directly on the module record
-      await pool.query(
-        `UPDATE shared.modules SET cljs_source = $1
-         WHERE name = $2 AND database_id = $3
-         AND version = (SELECT MAX(version) FROM shared.modules WHERE name = $2 AND database_id = $3)`,
-        [result.cljsSource, moduleName, databaseId]
-      );
       break;
     }
   }

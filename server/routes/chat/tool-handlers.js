@@ -17,7 +17,7 @@ const {
  * @param {string} toolName - Name of the tool to execute
  * @param {Object} input - Tool input parameters
  * @param {Object} ctx - Context: { pool, database_id, form_context, module_context, query_context, sql_function_context, req }
- * @returns {{ toolResult: Object|null, navigationCommand: Object|null, updateTranslation: Object|null, updateQuery: Object|null }}
+ * @returns {{ toolResult: Object|null, navigationCommand: Object|null, updateQuery: Object|null }}
  */
 async function executeTool(toolName, input, ctx) {
   const { pool, database_id, form_context, module_context, query_context, sql_function_context, req } = ctx;
@@ -175,12 +175,6 @@ async function executeTool(toolName, input, ctx) {
     navigationCommand = { action: 'navigate', record_id };
     toolResult = { success: true, navigating_to: record_id };
 
-  } else if (toolName === 'update_translation' && module_context?.module_name) {
-    // Handled specially — returns earlyReturn function
-    const { cljs_source, summary } = input;
-    toolResult = { success: true, summary };
-    return { toolResult, navigationCommand, updateTranslation: { cljs_source, summary } };
-
   } else if (toolName === 'update_query') {
     const { query_name, sql, ddl_type } = input;
     const client = await pool.connect();
@@ -190,7 +184,7 @@ async function executeTool(toolName, input, ctx) {
       await client.query(sql);
       await client.query('COMMIT');
       toolResult = { success: true, query_name, ddl_type, message: `Successfully created/updated ${ddl_type} "${query_name}"` };
-      return { toolResult, navigationCommand, updateTranslation: null, updateQuery: { query_name, ddl_type } };
+      return { toolResult, navigationCommand, updateQuery: { query_name, ddl_type } };
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
       logEvent(pool, 'warning', 'POST /api/chat/tool', `Chat tool error: update_query`, { databaseId: req.databaseId, details: { tool: 'update_query', error: err.message } });
@@ -248,7 +242,7 @@ async function executeTool(toolName, input, ctx) {
     }
   }
 
-  return { toolResult, navigationCommand, updateTranslation: null };
+  return { toolResult, navigationCommand };
 }
 
 module.exports = { executeTool };

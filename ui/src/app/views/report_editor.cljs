@@ -60,12 +60,12 @@
       [:button.toolbar-btn
        {:class (when (= view-mode :design) "active")
         :title "Design View"
-        :on-click #(f/run-fire-and-forget! (report-flow/set-report-view-mode-flow) {:mode :design})}
+        :on-click #(f/run-fire-and-forget! report-flow/set-report-view-mode-flow {:mode :design})}
        "Design"]
       [:button.toolbar-btn
        {:class (when (= view-mode :preview) "active")
         :title "Preview"
-        :on-click #(f/run-fire-and-forget! (report-flow/set-report-view-mode-flow) {:mode :preview})}
+        :on-click #(f/run-fire-and-forget! report-flow/set-report-view-mode-flow {:mode :preview})}
        "Preview"]
       (when (= view-mode :design)
         [:<>

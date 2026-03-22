@@ -6,7 +6,24 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 
 ## Current State
 
-### Just Shipped (2026-03-18)
+### Just Shipped (2026-03-21)
+- **Dead CLJS translation pipeline removed**: Cleaned up ~24 files removing the old LLM intent→mechanical CLJS generation pipeline. Deleted: `vba-wiring-generator.js` + tests, `intent_interpreter.cljs`. Removed: `POST /api/chat/generate-wiring` endpoint, `update_translation` chat tool, CLJS panel in Module Viewer (replaced with JS Handlers panel), "Generate All Code" step in App Viewer (now 2-step: Extract Intents → Resolve Gaps), `translate-module!`/`save-macro-cljs!` functions, `cljs-source`/`cljs-dirty?` state paths. Pipeline steps reduced from 5→4 (extract→map→gap-questions→resolve-gaps). Module Viewer now shows VBA source + JS handlers. Intent extraction preserved for LLM reasoning.
+- **Event handlers now use JavaScript, not intents**: Complete architectural change to how VBA event handlers execute at runtime.
+  - **VBA-to-JS parser** (`server/lib/vba-to-js.js`): Parses VBA procedures (`Sub btnSave_Click()`) into executable JavaScript strings calling `AC.*` runtime API. Handles DoCmd.OpenForm/OpenReport/Close/GoToRecord/RunSQL/Save/Quit/Requery, MsgBox, Me.Requery, Me.Refresh, Me.control.Visible/Enabled/value, control.SourceObject/Caption.
+  - **JS handlers stored at import time**: `js_handlers JSONB` column on `shared.modules`. Auto-generated when modules are saved (PUT /api/modules/:name). All 511 existing modules backfilled.
+  - **Runtime API** (`ui/src/app/runtime.cljs`): `window.AC` object with methods: `openForm`, `openReport`, `closeForm`, `gotoRecord`, `saveRecord`, `requery`, `setVisible`, `setEnabled`, `setValue`, `setSubformSource`, `runSQL`. Installed at app init.
+  - **No fallback chains**: If a handler exists but has no `:js`, log a warning — don't silently fall through to caption-based guessing or intent execution. Fallbacks mask bugs.
+  - **Intents are for LLM reasoning only**: Intent extraction and the intent map stay for LLM context when reasoning about forms during translation. They play no part in runtime event execution.
+  - **Intent interpreter removed from event paths**: `intent_interpreter.cljs` is no longer imported in `form_view.cljs`, `state_form.cljs`, or `state_report.cljs`. All event handlers (button clicks, form events, report events, focus events, after-update) use JS execution via `(js/Function. js-code)`.
+  - **Handlers endpoint**: `GET /api/modules/:name/handlers` reads stored `js_handlers` first, falls back to `control_event_map` + intents only for legacy data.
+- **Button click fixes**: Fixed three layered issues preventing command buttons from working:
+  - Labels had no `pointer-events: none` in view mode — positioned labels captured mouse events from buttons underneath
+  - `control-renderers` map had `:button` but not `:command-button` — Access exports `command-button`, so buttons fell through to default `<span>` renderer
+  - SQL record-sources (SELECT statements) were sent to `/api/data/` instead of `/api/queries/run`
+- Cache buster bumped to `?v=17`.
+- Files: `vba-to-js.js` (new), `runtime.cljs` (new), `form_view.cljs`, `state_form.cljs`, `state_report.cljs`, `core.cljs`, `modules.js`, `schema.js`, `style.css`, `index.html`
+
+### Previously Shipped (2026-03-18)
 - **SaveAsText rewrite of all export scripts**: Rewrote all 4 PowerShell export scripts from COM design-view to `Application.SaveAsText` parsing:
   - `export_form.ps1` / `export_forms_batch.ps1` — context stack parser handling nested labels, tab controls with pages
   - `export_report.ps1` / `export_reports_batch.ps1` — simpler parser (all controls at same depth)
@@ -33,18 +50,10 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
   - Pages render in the center pane via standard form rendering. Chat pane has Three Horse context. Left nav shows the three pages.
 
 ### Previously Shipped (2026-03-13)
-- **Event Runtime — Forms & Reports**: Full intent interpreter for executing translated VBA event handlers client-side.
-  - **Expression evaluator**: Added `And`, `Or`, `Not` logical operators and `IsNull()` function to `expressions.cljs`. Precedence: comparison → NOT → AND → OR. Access convention: -1 = True, 0 = False.
-  - **Async intent interpreter**: Rewrote `intent_interpreter.cljs` from sync `doseq` to async `go` loop. `execute-single-intent` returns nil (sync) or channel (async). Context map (`ctx`) threads `:last-result` and named `result_var` through the loop.
-  - **Domain functions**: `dlookup`, `dcount`, `dsum` via `POST /api/queries/run`; `run-sql` via new `POST /api/queries/execute` (INSERT/UPDATE/DELETE only, rejects SELECT/DROP/ALTER/TRUNCATE).
-  - **Criteria resolution**: Two-stage — `resolve-criteria-placeholders` replaces `{FieldName}` with actual values (numbers inline, strings single-quoted), then `convert-criteria` converts `[field]` → `"field"`, `#date#` → `'date'`, `True`/`False` → `true`/`false`.
-  - **Report events**: `on-open` (after preview data loads with data), `on-close` (leaving preview or closing tab), `on-no-data` (0 rows). `load-event-handlers-for-report!` fetches `Report_{name}` handlers; `fire-report-event!` dispatches.
-  - **Focus events**: `on-enter`, `on-gotfocus`, `on-exit`, `on-lostfocus` wired to `.view-control` wrapper div via React `onFocus`/`onBlur` bubbling. Only controls with focus event flags in `field-triggers` get handlers attached.
-  - **New endpoint**: `POST /api/queries/execute` in `metadata.js` — executes DML SQL with schema search_path.
-  - **New doc**: `skills/event-runtime.md` — comprehensive reference for the event runtime system.
-  - **Server**: Added `'nodata': 'on-no-data'` to event map in `modules.js`.
-  - Cache buster bumped to `?v=14`.
-  - Files modified: `expressions.cljs`, `intent_interpreter.cljs`, `state_report.cljs`, `form_view.cljs`, `flows/report.cljs`, `flows/navigation.cljs`, `modules.js`, `metadata.js`, `index.html`, `CLAUDE.md`
+- **Event Runtime — Forms & Reports**: Event handler infrastructure for executing translated VBA event handlers client-side. Originally used an intent interpreter; replaced with JS execution on 2026-03-21 (see above).
+  - **Expression evaluator**: `And`, `Or`, `Not` logical operators and `IsNull()` function in `expressions.cljs`. Used by computed fields and conditional formatting (still active).
+  - **Report events**: `on-open`, `on-close`, `on-no-data`. Focus events: `on-enter`, `on-gotfocus`, `on-exit`, `on-lostfocus`.
+  - **DML endpoint**: `POST /api/queries/execute` in `metadata.js` — executes INSERT/UPDATE/DELETE SQL with schema search_path. Used by `AC.runSQL()` in the JS runtime.
 - **Three Horse business concept**: Preliminary business plan in `THREE-HORSE-PRELIMINARY.md`. Three entry points (legacy migration, spreadsheet extraction, app builder), flat-fee revenue model, qualifying analysis, LLM-powered self-service modification. Next platform targets: FoxPro, then Paradox. Domain: three.horse.
 
 ### Previously Shipped (2026-03-10)
@@ -59,7 +68,7 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
   - Files modified: `style.css`, `form_view.cljs`, `editor_utils.cljs`, `access_database_viewer.cljs`, `index.html`, `export_form.ps1`, `export_forms_batch.ps1`
 
 ### Previously Shipped (2026-03-09)
-- **Server-side module translation during import**: New `POST /api/database-import/translate-modules` endpoint does the full extract→map→resolve→generate pipeline for all modules in one server call. Replaces the old fragile frontend orchestration (`batch-extract-intents!` → `auto-resolve-gaps!` → `batch-generate-code!`) which made N sequential LLM HTTP calls per module and silently failed. The new endpoint handles errors per-module so one failure doesn't abort the chain.
+- **Server-side module translation during import**: New `POST /api/database-import/translate-modules` endpoint does the full extract→map→resolve pipeline for all modules in one server call. Replaces the old fragile frontend orchestration which made N sequential LLM HTTP calls per module and silently failed. The new endpoint handles errors per-module so one failure doesn't abort the chain.
   - New file: `server/routes/database-import/translate-modules.js`
   - Extracted `autoResolveGapsLLM()` from inline chat handler into `server/routes/chat/context.js` for reuse
   - `import-all!` now calls the endpoint after the queries phase (`:translating` phase)
@@ -161,11 +170,9 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 - **capability-ontology.md**: Full rewrite documenting three-layer model, graph node types, edge types, API endpoints, chat tools.
 
 ### Previously Shipped (2026-02-17)
-- **Batch pipeline: Extract → Resolve → Generate**: App Viewer's Gap Decisions pane restructured as a 3-step pipeline. Batch extract intents from all modules, auto-resolve gaps whose referenced objects exist, batch generate code with multi-pass dependency retry (max 20 passes). Same retry pattern as query imports.
-- **Intent dependency checking**: `checkIntentDependencies()` and `autoResolveGaps()` in `server/routes/chat/context.js`. `POST /api/chat/generate-wiring` accepts `check_deps: true` to skip generation when deps unsatisfied.
-- **3 new transforms**: `set-batch-generating`, `set-batch-gen-progress`, `set-batch-gen-results` (registered in core.cljs, domain count 11→14).
-- **`batch-generate-code-flow`** in `flows/app.cljs` — loads all modules with intents, multi-pass generation with dependency retry, saves CLJS back to each module.
-- **Pipeline UI**: `app_viewer.cljs` gap-decisions-pane now shows numbered step headers (Extract Intents → Resolve Gaps → Generate Code) with progress bars and color-coded results summary.
+- **Batch pipeline: Extract → Resolve**: App Viewer's Gap Decisions pane restructured as a 2-step pipeline. Batch extract intents from all modules, auto-resolve gaps whose referenced objects exist.
+- **Intent dependency checking**: `checkIntentDependencies()` and `autoResolveGaps()` in `server/routes/chat/context.js`.
+- **Pipeline UI**: `app_viewer.cljs` gap-decisions-pane now shows numbered step headers (Extract Intents → Resolve Gaps) with progress bars and color-coded results summary.
 - **PRODUCT.md**: Full product description covering import pipeline, intent extraction, transform architecture as prelude to AI automation, three-phase trajectory (migration → AI-assisted → AI-automated).
 - **Automatic .mdb → .accdb conversion**: `convert_mdb.ps1` converts Access 97-2003 .mdb files to .accdb via `Access.Application.SaveAsNewDatabase`. Wired into `GET /api/database-import/database` — user selects an .mdb, pipeline silently converts and runs unchanged. Response includes `convertedFrom` field.
 - **Automatic AutoExec disabling**: `disable_autoexec.ps1` renames AutoExec → xAutoExec via `DAO.DBEngine.120` (engine-level, no macro trigger). Called before/after listing scripts in the `/database` endpoint. No more manual renaming needed.
@@ -183,6 +190,15 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 - **Import order**: tables → forms/reports → queries → macros → modules. Forms must be imported before queries so control_column_map exists.
 - **Tested against two databases**: Northwind and a second Access database both import fully (tables, forms, reports, queries, modules, macros) without errors.
 
+### Session Notes (2026-03-20)
+- **Import UX flow fix**: The March 19 session added "New Database" and "Import" buttons to the header, but the UX was confusing — Import could be clicked without a source database (silently failed), and "New Database" was a separate button instead of being part of the dropdown.
+  - Moved "New Database" into the database dropdown as a `-- New Database --` option at the top. Selecting it opens the create dialog. Removed the standalone button.
+  - Import button now disabled when no source database is scanned/selected OR no target database exists.
+  - `trigger-import!` shows specific error messages instead of silently doing nothing: "Select an Access database first" or "Select a target database from the dropdown".
+  - Added `source-selected?` predicate in `access_database_viewer.cljs`.
+  - Suppressed "Failed to load tables" error banner when in import mode (empty target database is expected before import).
+- **Northwind re-import verified**: Forms are well-proportioned after the zero-height control fix from March 19.
+
 ### Session Notes (2026-03-19)
 - **Unbound forms showing "no records"**: `record-source` stored as `""` (empty string) was truthy in ClojureScript, bypassing the unbound-form render path. Fixed with `not-empty` in `form_view.cljs`, `state_form.cljs` (2 sites), and `flows/form.cljs`.
 - **Division by zero in converted queries**: Added blanket `NULLIF(denominator, 0)` transform to `syntax.js` (`withStringLiteralsMasked` protects string literals). Applies to simple identifier denominators only. Design note in `skills/conversion-queries.md`.
@@ -190,7 +206,10 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 - **`server/rebuild.bat`**: New script — compiles ClojureScript then starts the server (`set PGPASSWORD=7297`). Lives in `server/` folder, run directly when server is stopped.
 
 ### In Progress / Uncommitted
-Working tree has uncommitted changes for: SaveAsText rewrite of all 4 export scripts (forms/reports single+batch), macro export Visible fix + timeout change, business intent extraction, lint test updates, schema updates, event-mapping module, wire-events module, and various route/frontend updates. SaveAsText now exports BackStyle so newly imported forms get correct transparency values.
+Working tree has uncommitted changes spanning multiple sessions:
+- Dead CLJS translation pipeline removal (March 21): ~27 files modified, 3 deleted. All server+frontend tests pass. Frontend compiles with 3 warnings (all `:redef`, no `:undeclared-var`).
+- VBA-to-JS event handler architecture (March 21): `vba-to-js.js`, `runtime.cljs`, `js_handlers` JSONB column.
+- SaveAsText rewrite of all 4 export scripts, macro export fixes, business intent extraction, schema updates, and various route/frontend updates from prior sessions.
 
 ### Next Up — Image Import Test
 With the server running, test the full image import pipeline for Northwind:
@@ -208,7 +227,7 @@ Check results with: `GET /api/database-import/image-status?targetDatabaseId=nort
 - Place `.accdb` source files in `databases/accessclone/source/` and `databases/threehorse/source/`
 - Start importing into the new databases
 - Clean up stale feature branches (22 listed)
-- Test server-side module translation end-to-end: re-run auto-import and verify modules have intents + CLJS translations afterward
+- Test server-side module translation end-to-end: re-run auto-import and verify modules have intents + JS handlers afterward
 - Test .mdb → .accdb conversion end-to-end with a real .mdb file
 - Test runtime form state sync end-to-end
 - OpenClaw skill prototype: export intent graph + form definitions in a format an OpenClaw agent can consume

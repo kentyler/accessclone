@@ -9,7 +9,6 @@
 
 const { extractIntents, validateIntents, collectGaps, generateGapQuestions, applyGapQuestions } = require('../vba-intent-extractor');
 const { mapIntentsToTransforms, countClassifications, assignGapIds } = require('../vba-intent-mapper');
-const { generateWiring, generateMechanical } = require('../vba-wiring-generator');
 
 // ============================================================
 // STEP 1: EXTRACT — VBA source → structured intents
@@ -173,68 +172,6 @@ const resolveGapsStrategies = {
 };
 
 // ============================================================
-// STEP 5: GENERATE — mapped intents → ClojureScript source
-// ============================================================
-
-const generateStrategies = {
-  /**
-   * Full generation: mechanical templates + LLM fallback.
-   * Input:  { mapped, moduleName, vbaSource }
-   * Context: { apiKey, pool, databaseId }
-   * Output: { cljsSource, stats }
-   */
-  full: async (input, context) => {
-    const { mapped, moduleName, vbaSource } = input;
-    const { apiKey, pool, databaseId } = context;
-
-    // Build graph context for accurate object references
-    let graphCtx = null;
-    if (pool && databaseId) {
-      const { buildGraphContext } = require('../../routes/chat/context');
-      graphCtx = await buildGraphContext(pool, databaseId);
-    }
-
-    const result = await generateWiring(mapped, moduleName, {
-      vbaSource,
-      apiKey,
-      useFallback: !!apiKey,
-      graphContext: graphCtx
-    });
-
-    return { cljsSource: result.cljs_source, stats: result.stats };
-  },
-
-  /**
-   * Mechanical-only generation — no LLM calls.
-   * Input:  { mapped, moduleName }
-   * Output: { cljsSource, stats }
-   */
-  mechanical: async (input) => {
-    const { mapped, moduleName } = input;
-    const result = generateMechanical(mapped, moduleName);
-
-    // Build stats from mapped data
-    let totalMechanical = 0, totalFallback = 0, totalGap = 0;
-    for (const proc of (mapped?.procedures || [])) {
-      totalMechanical += proc.stats?.mechanical || 0;
-      totalFallback += proc.stats?.llm_fallback || 0;
-      totalGap += proc.stats?.gap || 0;
-    }
-
-    return {
-      cljsSource: result.cljs_source,
-      stats: {
-        total_procedures: (mapped?.procedures || []).length,
-        mechanical_count: totalMechanical,
-        fallback_count: totalFallback,
-        gap_count: totalGap,
-        fallback_procedures: result.fallback_procedures
-      }
-    };
-  }
-};
-
-// ============================================================
 // STEP REGISTRY
 // ============================================================
 
@@ -258,11 +195,6 @@ const steps = {
     name: 'resolve-gaps',
     strategies: resolveGapsStrategies,
     defaultStrategy: 'auto'
-  },
-  generate: {
-    name: 'generate',
-    strategies: generateStrategies,
-    defaultStrategy: 'full'
   }
 };
 

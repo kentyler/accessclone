@@ -324,34 +324,7 @@
            :else
            [:div.app-gaps-empty "Click Re-extract All to load gap questions."])]])
 
-     ;; ── Step 3: Generate Code ──
-     (when has-intents?
-       [:<>
-        [pipeline-step-header 3 "Generate Code"
-         (and gaps-resolved? (not gen-results))
-         (some? gen-results)]
-        [:div.app-pipeline-body
-         [:div.app-gaps-actions
-          [:button.primary-btn
-           {:disabled (or (not gaps-resolved?) generating? extracting?)
-            :on-click #(f/run-fire-and-forget! app-flow/batch-generate-code-flow)}
-           (cond
-             generating? "Generating..."
-             gen-results "Regenerate All Code"
-             :else "Generate All Code")]]
-         (when generating?
-           [:div.app-gaps-progress
-            [:div.app-progress-bar
-             [:div.app-progress-fill
-              {:style {:width (str (if (pos? (:total gen-progress 0))
-                                     (Math/round (* 100 (/ (:generated gen-progress 0)
-                                                           (:total gen-progress))))
-                                     0) "%")}}]]
-            [:div.app-gaps-current
-             (str "Pass " (:pass gen-progress 1)
-                  " \u2014 " (:current-module gen-progress "")
-                  " (" (:generated gen-progress 0) "/" (:total gen-progress 0) ")")]])
-         [gen-results-summary gen-results]]])]))
+     ]))
 
 ;; ============================================================
 ;; Dependencies Pane — Phase 5 (stub)
@@ -491,7 +464,6 @@
    "map" "Map"
    "gap-questions" "Gap Q's"
    "resolve-gaps" "Resolve"
-   "generate" "Generate"
    "complete" "Complete"
    "failed" "Failed"})
 
@@ -511,7 +483,6 @@
   (let [step (or (:step mod-status) "extract")
         status (or (:status mod-status) "pending")
         has-vba (:has_vba mod-status)
-        has-cljs (:has_cljs mod-status)
         is-running (= "running" status)]
     [:tr {:class (str (when is-running "running ")
                       (when (= step "complete") "complete ")
@@ -519,8 +490,7 @@
      [:td.module-name mod-name]
      [:td.module-step [step-badge step status]]
      [:td.module-flags
-      (when has-vba [:span.flag-vba "VBA"])
-      (when has-cljs [:span.flag-cljs "CLJS"])]
+      (when has-vba [:span.flag-vba "VBA"])]
      [:td.module-actions
       (when (and has-vba (not= step "complete") (not is-running))
         [:<>

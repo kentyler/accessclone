@@ -106,8 +106,12 @@ function createApp({
       next();
     } catch (err) {
       console.error('Error setting search_path:', err.message);
-      // Fall back to public schema
-      await pool.query('SET search_path = public, shared');
+      // Fall back to public schema — but don't crash if pool is exhausted
+      try {
+        await pool.query('SET search_path = public, shared');
+      } catch (fallbackErr) {
+        console.error('Fallback search_path also failed:', fallbackErr.message);
+      }
       next();
     }
   });

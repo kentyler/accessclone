@@ -7,7 +7,7 @@ const router = express.Router();
 const path = require('path');
 const fs = require('fs');
 const { logError } = require('../../lib/events');
-const { dataTools, graphTools, moduleTools, queryTools, designCheckTools } = require('./tools');
+const { dataTools, graphTools, queryTools, designCheckTools } = require('./tools');
 const { summarizeDefinition, checkImportCompleteness, formatMissingList, buildAppInventory, buildGraphContext, formatGraphContext, checkIntentDependencies, autoResolveGaps, autoResolveGapsLLM, loadObjectIntents, formatObjectIntents } = require('./context');
 const { executeTool } = require('./tool-handlers');
 const { deriveCapabilities } = require('../../lib/capability-deriver');
@@ -156,26 +156,11 @@ Use these when users ask about dependencies, impact of changes, or what structur
       if (module_context?.module_name) {
         const appInventory = buildAppInventory(module_context.app_objects);
 
-        moduleContext = `\n\nThe user is viewing VBA module "${module_context.module_name}". You are helping with the VBA-to-ClojureScript translation.${appInventory}`;
-        if (module_context.cljs_source) {
-          moduleContext += `\n\nCurrent ClojureScript translation:\n${module_context.cljs_source}`;
-        }
+        moduleContext = `\n\nThe user is viewing VBA module "${module_context.module_name}".${appInventory}`;
         if (module_context.vba_source) {
           moduleContext += `\n\nOriginal VBA source:\n${module_context.vba_source}`;
         }
-        moduleContext += `\n\nYou have a tool available:
-- update_translation: Use this to provide revised ClojureScript code when the user asks for changes. Always include the COMPLETE updated source.
-
-IMPORTANT — AccessClone architecture context for reviews:
-- Forms carry their own configuration: popup, modal, dimensions, record-source, default-view, etc. are properties in the form definition JSON. The framework renders them accordingly.
-- state/open-object! handles opening any object type — it reads the form definition and renders popups, modals, continuous forms, etc. automatically based on the form's properties.
-- Do NOT suggest adding modal handling, z-index management, positioning, focus trapping, or other rendering concerns — the framework already does this.
-- Do NOT suggest adding error handling, input validation, or extra functions that weren't in the original VBA. A correct translation that delegates to the framework is complete.
-- A simple translation that correctly maps VBA operations to existing framework functions IS the right answer. Fewer lines is better.
-- Focus reviews on: incorrect API usage, SQL injection, wrong state paths, missing forward declarations, async issues, wrong response shape access. These are real bugs.
-- Do NOT flag: missing features the VBA didn't have, missing error handling the VBA didn't have, "assumed state functions" (they exist), or suggest expanding simple correct translations.
-
-When the user asks you to make changes, use the update_translation tool to apply them.`;
+        moduleContext += `\n\nVBA event handlers are compiled to JavaScript at import time (vba-to-js.js) and executed via the window.AC runtime API. Help the user understand the VBA code, its extracted intents, and the generated JS handlers.`;
       }
 
       // SQL function context (when viewing an imported query/function)
@@ -205,10 +190,7 @@ This function was imported from a Microsoft Access query and converted to Postgr
         if (macro_context.macro_xml) {
           macroContext += `\n\nMacro XML definition:\n${macro_context.macro_xml}`;
         }
-        if (macro_context.cljs_source) {
-          macroContext += `\n\nCurrent ClojureScript translation:\n${macro_context.cljs_source}`;
-        }
-        macroContext += `\n\nThis is a Microsoft Access macro exported as XML. Help the user understand the macro's actions, conditions, and flow. If asked, translate the macro logic to ClojureScript event handlers that work with the AccessClone framework.`;
+        macroContext += `\n\nThis is a Microsoft Access macro exported as XML. Help the user understand the macro's actions, conditions, and flow.`;
 
         const macroInventory = buildAppInventory(macro_context.app_objects);
         if (macroInventory) macroContext += macroInventory;
@@ -303,7 +285,6 @@ You can see all objects in this application. Help the user understand cross-obje
       // Combine all available tools
       const availableTools = [
         ...(form_context?.record_source ? dataTools : []),
-        ...(module_context?.module_name ? moduleTools : []),
         ...((query_context?.query_name || sql_function_context?.function_name) ? queryTools : []),
         ...graphTools,
         ...designCheckTools
@@ -367,39 +348,10 @@ Keep responses concise and helpful. When discussing code or SQL, use markdown co
       const toolUse = data.content.find(c => c.type === 'tool_use');
 
       if (toolUse) {
-        const { toolResult, navigationCommand, updateTranslation, updateQuery } = await executeTool(
+        const { toolResult, navigationCommand, updateQuery } = await executeTool(
           toolUse.name, toolUse.input,
           { pool, database_id, form_context, module_context, query_context, sql_function_context, req }
         );
-
-        // Special handling for update_translation — needs followup API call
-        if (updateTranslation) {
-          const followupResponse2 = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-api-key': apiKey,
-              'anthropic-version': '2023-06-01'
-            },
-            body: JSON.stringify({
-              model: 'claude-sonnet-4-20250514',
-              max_tokens: 1024,
-              system: `You are a helpful assistant. The user asked for changes to a code translation and you've applied them. Briefly confirm what you changed.`,
-              messages: [
-                ...(history || []).map(m => ({ role: m.role, content: m.content })),
-                { role: 'user', content: message },
-                { role: 'assistant', content: data.content },
-                { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUse.id, content: JSON.stringify(toolResult) }] }
-              ]
-            })
-          });
-          const followupData2 = await followupResponse2.json();
-          const assistantMsg = followupData2.content?.find(c => c.type === 'text')?.text || `Updated: ${updateTranslation.summary}`;
-          return res.json({
-            message: assistantMsg,
-            updated_code: updateTranslation.cljs_source
-          });
-        }
 
         // Special handling for update_query — needs followup API call
         if (updateQuery) {
@@ -588,7 +540,6 @@ Return ONLY the ClojureScript code, no markdown code fences, no explanations. In
   // Load intent extraction dependencies
   const { extractIntents, validateIntents, collectGaps, generateGapQuestions, applyGapQuestions } = require('../../lib/vba-intent-extractor');
   const { mapIntentsToTransforms, countClassifications } = require('../../lib/vba-intent-mapper');
-  const { generateWiring } = require('../../lib/vba-wiring-generator');
 
   /**
    * POST /api/chat/extract-intents
@@ -717,53 +668,6 @@ Return ONLY the ClojureScript code, no markdown code fences, no explanations. In
     } catch (err) {
       console.error('Error extracting intents:', err);
       logError(pool, 'POST /api/chat/extract-intents', 'Intent extraction failed', err, { databaseId });
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  /**
-   * POST /api/chat/generate-wiring
-   * Generate ClojureScript wiring from mapped intents
-   */
-  router.post('/generate-wiring', async (req, res) => {
-    const { mapped_intents, module_name, vba_source, database_id, check_deps } = req.body;
-
-    if (!mapped_intents) {
-      return res.status(400).json({ error: 'mapped_intents is required' });
-    }
-
-    const apiKey = secrets.anthropic?.api_key || process.env.ANTHROPIC_API_KEY;
-
-    try {
-      // Build graph context so generated code references real objects
-      let graphCtx = null;
-      const databaseId = database_id || req.headers['x-database-id'];
-      if (databaseId) {
-        graphCtx = await buildGraphContext(pool, databaseId);
-      }
-
-      // Dependency check: if check_deps is true, verify all referenced objects exist
-      if (check_deps && graphCtx) {
-        const depCheck = checkIntentDependencies(mapped_intents, graphCtx);
-        if (!depCheck.satisfied) {
-          return res.json({ skipped: true, missing_deps: depCheck.missing });
-        }
-      }
-
-      const result = await generateWiring(mapped_intents, module_name || 'unknown', {
-        vbaSource: vba_source,
-        apiKey,
-        useFallback: !!apiKey,
-        graphContext: graphCtx
-      });
-
-      res.json({
-        cljs_source: result.cljs_source,
-        stats: result.stats
-      });
-    } catch (err) {
-      console.error('Error generating wiring:', err);
-      logError(pool, 'POST /api/chat/generate-wiring', 'Wiring generation failed', err, { databaseId: database_id });
       res.status(500).json({ error: err.message });
     }
   });

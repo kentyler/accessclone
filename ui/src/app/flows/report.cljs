@@ -133,13 +133,20 @@
                   (let [record-source (get-in @app-state [:report-editor :current :record-source])]
                     (when record-source
                       (go
-                        (let [query-params (build-data-query-params
+                        (let [sql-source? (clojure.string/starts-with?
+                                            (clojure.string/lower-case record-source) "select ")
+                              query-params (build-data-query-params
                                              (get-in @app-state [:report-editor :current :order-by])
                                              (get-in @app-state [:report-editor :current :filter]))
-                              response (<! (http/get!
-                                             (str api-base "/api/data/" record-source)
-                                             :headers (db-headers)
-                                             :query-params query-params))]
+                              response (<! (if sql-source?
+                                             (http/post!
+                                               (str api-base "/api/queries/run")
+                                               :headers (db-headers)
+                                               :json-body {:sql record-source})
+                                             (http/get!
+                                               (str api-base "/api/data/" record-source)
+                                               :headers (db-headers)
+                                               :query-params query-params)))]
                           (if (:ok? response)
                             (let [data (vec (get-in response [:data :data]))]
                               (swap! app-state assoc-in [:report-editor :records] data)

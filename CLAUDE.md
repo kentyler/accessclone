@@ -76,47 +76,40 @@ This is AccessClone, a platform for converting MS Access databases to web applic
 - Only SELECT queries allowed for safety
 
 ### Module Viewer (ui/src/app/views/module_viewer.cljs)
-- Split view: VBA source (left) + ClojureScript translation (right)
-- Two-phase intent-based translation (recommended):
-  1. **Extract Intents** — LLM extracts structured JSON intents from VBA (POST /api/chat/extract-intents)
-  2. **Generate Code** — Mechanical templates + LLM fallback produce ClojureScript (POST /api/chat/generate-wiring)
-- Legacy **Direct Translate** button preserved for one-shot LLM translation
+- Split view: VBA source (left) + JS Handlers panel (right)
+- **Extract Intents** button — LLM extracts structured JSON intents from VBA (POST /api/chat/extract-intents)
 - Intent summary panel: collapsible, shows procedures with color-coded stats (green=mechanical, yellow=LLM-assisted, red=gap)
+- JS Handlers panel: read-only display of generated JavaScript handlers (from `vba-to-js.js`)
 - Info panel: Name, version, imported date, status dropdown
-- `shared.modules` has `intents` JSONB column to persist extracted intent structure
-- Server libs: `vba-intent-mapper.js` (30 intent types, deterministic mapping), `vba-intent-extractor.js` (LLM extraction), `vba-wiring-generator.js` (22 mechanical CLJS templates)
-- Transforms: `set-module-intents`, `set-extracting-intents`; Flows: `extract-intents-flow`, `generate-wiring-flow`
+- `shared.modules` has `intents` JSONB column (LLM reasoning) and `js_handlers` JSONB column (runtime execution)
+- Server libs: `vba-intent-mapper.js` (30 intent types, deterministic mapping), `vba-intent-extractor.js` (LLM extraction), `vba-to-js.js` (VBA→JS parser)
+- Transforms: `set-module-intents`, `set-extracting-intents`; Flows: `extract-intents-flow`
 
-### Intent Interpreter (ui/src/app/intent_interpreter.cljs)
-Client-side runtime that walks structured intent trees (from VBA module translation) and dispatches to framework functions. Intents fire from button clicks, form events (OnLoad, OnCurrent), AfterUpdate handlers, and focus events.
+### Event Handlers — VBA-to-JS Runtime
+VBA event handlers execute as JavaScript at runtime, NOT via intent tree walking. See `skills/event-runtime.md` for full details.
 
-- **Async execution**: `execute-intents` returns a `core.async` channel (`go` block). Sync intents execute immediately; async intents (`dlookup`, `dcount`, `dsum`, `run-sql`) await HTTP responses before continuing.
-- **Context threading**: A `ctx` map passes through the intent loop. Async intents store results in `:last-result`; subsequent intents can read it via `"{last-result}"` in `resolve-intent-value`.
-- **Branch conditions**: `:branch` intents evaluate conditions as Access expressions via `expressions.cljs`. Supports `And`, `Or`, `Not` operators and `IsNull()` function. Precedence: comparison → NOT → AND → OR.
-- **Domain functions**: `dlookup`/`dcount`/`dsum` build SQL and call `POST /api/queries/run`. `run-sql` (INSERT/UPDATE/DELETE) calls `POST /api/queries/execute`.
-- **convert-criteria helper**: Transforms Access criteria to PG WHERE — `[field]` → `"field"`, `#date#` → `'date'`, `True`/`False` → `true`/`false`.
-- **Report events**: `state_report.cljs` loads handlers from `GET /api/modules/Report_{name}/handlers`. Fires `:on-open` when entering preview with data, `:on-no-data` when preview query returns 0 rows, `:on-close` when leaving preview or closing the report tab. Handler map stored in `[:report-editor :event-handlers]`.
+- **VBA-to-JS parser** (`server/lib/vba-to-js.js`): Deterministic parser converts VBA procedures into JS strings calling `window.AC.*` methods. Runs at module save time; results stored in `shared.modules.js_handlers` JSONB column.
+- **Runtime API** (`ui/src/app/runtime.cljs`): `window.AC` object with methods: `openForm`, `openReport`, `closeForm`, `gotoRecord`, `saveRecord`, `requery`, `setVisible`, `setEnabled`, `setValue`, `setSubformSource`, `runSQL`. Installed at app init.
+- **Execution**: All event paths (button clicks, form events, report events, focus events, after-update) use `(js/Function. js-code)` to eval the stored JS. No intent interpreter in the execution path.
+- **No fallbacks**: If a handler has no `:js` code, a warning is logged. No silent degradation to caption guessing or intent execution.
+- **Intents are for LLM reasoning only**: Intent extraction and the intent map remain for LLM context during translation and the App Viewer's gap decisions pipeline. They do not participate in runtime event dispatch.
+- **Report events**: `state_report.cljs` loads handlers from `GET /api/modules/Report_{name}/handlers`. Fires `:on-open` when entering preview with data, `:on-no-data` when preview query returns 0 rows, `:on-close` when leaving preview or closing the report tab.
 - **Focus events**: `form_view.cljs` attaches `:on-focus`/`:on-blur` to the `.view-control` wrapper div when `field-triggers` has `:has-enter-event`, `:has-exit-event`, `:has-gotfocus-event`, or `:has-lostfocus-event`. Access semantics: Enter before GotFocus, Exit before LostFocus.
-- **Expression evaluator** (`expressions.cljs`): Recursive descent parser with tokenizer. Supports field refs `[Name]`, math, string concat `&`, comparisons, `And`/`Or`/`Not`, built-in functions (IIf, Nz, IsNull, Format, Left/Right/Mid, Len, Trim, etc.), aggregates, conditional formatting. `truthy?` is public.
+- **Expression evaluator** (`expressions.cljs`): Recursive descent parser with tokenizer. Used by computed fields and conditional formatting (NOT by event handlers). Supports field refs `[Name]`, math, string concat `&`, comparisons, `And`/`Or`/`Not`, built-in functions (IIf, Nz, IsNull, Format, Left/Right/Mid, Len, Trim, etc.), aggregates. `truthy?` is public.
 
 ### Macro Viewer (ui/src/app/views/macro_viewer.cljs)
-- Left panel: Raw macro definition (SaveAsText format, read-only)
-- Right panel: ClojureScript translation (initially empty, populated via chat)
+- Single panel: Raw macro definition (SaveAsText format, read-only)
 - Info panel: Name, version, imported date, status dropdown
 - Auto-analyze fires on first open, LLM describes structure/purpose
 - Macros stored in `shared.macros` table with append-only versioning
 
 ### App Viewer (ui/src/app/views/app_viewer.cljs)
 - Whole-application dashboard with tabbed panes: Overview, Gap Decisions, Dependencies, API Surface
-- **Gap Decisions pane**: 3-step pipeline UI:
+- **Gap Decisions pane**: 2-step pipeline UI:
   1. **Extract All Intents** — batch extract from all modules (`batch-extract-intents-flow`)
   2. **Resolve Gaps** — auto-resolved gaps pre-selected where graph context satisfies the reference; remaining gaps presented to user with radio buttons + "Submit All Decisions"
-  3. **Generate All Code** — multi-pass batch generation (`batch-generate-code-flow`) with dependency retry (max 20 passes, same pattern as query imports)
 - Server-side helpers in `context.js`: `checkIntentDependencies(mappedIntents, graphContext)` validates intent references exist; `autoResolveGaps(mappedIntents, graphContext)` auto-resolves gaps when objects exist
-- `POST /api/chat/generate-wiring` accepts `check_deps: true` — returns `{skipped: true, missing_deps}` if dependencies unsatisfied
-- Transforms: `set-batch-generating`, `set-batch-gen-progress`, `set-batch-gen-results`
-- Results summary: color-coded (green=generated, amber=skipped with missing deps, red=failed)
-- Post-pipeline: users can refine individual modules in Module Viewer — by that point all endpoints exist in the graph
+- Post-pipeline: users can refine individual modules in Module Viewer
 
 ### Access Import — AutoExec Handling
 AutoExec macros are now handled automatically by the import pipeline:
@@ -137,7 +130,7 @@ AutoExec macros are now handled automatically by the import pipeline:
 ### Graph Primitives (server/graph/populate.js — seedPrimitives)
 Four architectural primitives seeded as capability nodes in the graph:
 - **Boundary** — Enclosure (schema isolation, tab workspaces, form/report sections)
-- **Transduction** — Isomorphism (SQL conversion, VBA→CLJS, intent extraction, graph population)
+- **Transduction** — Isomorphism (SQL conversion, VBA→JS, intent extraction, graph population)
 - **Resolution** — Gradient descent (multi-pass retry, gap decisions, LLM fallback, lint)
 - **Trace** (invariant) — Lineage (append-only versioning, event logging, transcript persistence)
 - 21 potential nodes (manifestations) linked via `actualizes` edges, Trace linked to other 3 via `refines`
@@ -215,7 +208,7 @@ LLM tools in chat: `query_dependencies`, `query_potential`, `propose_potential`
 The chat system prompt includes context based on the active tab:
 - **Forms**: `form_context` with `record_source` + full definition → `summarizeDefinition()` renders compact text (sections, controls with type/field/position)
 - **Reports**: `report_context` with `report_name`, `record_source` + full definition → same `summarizeDefinition()` helper
-- **Modules**: `module_context` with VBA source, CLJS translation, app object inventory. Also: `POST /api/chat/extract-intents` for structured intent extraction, `POST /api/chat/generate-wiring` for CLJS generation from intents
+- **Modules**: `module_context` with VBA source, app object inventory. Also: `POST /api/chat/extract-intents` for structured intent extraction
 - **Graph tools**: Always available for dependency/intent queries
 - **Three Horse**: When `database_id === 'threehorse'`, the entire system prompt is replaced with `skills/three-horse-chat.md` (loaded at startup). Page-specific context appended based on which form is open. Uses `claude-haiku-4-5` (cheap model) with no tools (pure conversation).
 
@@ -266,7 +259,6 @@ All other files: consult the manifest summary, read in full only when working on
 | VBA stubs (`server/lib/vba-stub-generator.js`) | `npm test` | `server/__tests__/vba-stub-generator.test.js` |
 | VBA intent mapper (`server/lib/vba-intent-mapper.js`) | `npm test` | `server/__tests__/vba-intent-mapper.test.js` (~24 tests) |
 | VBA intent extractor (`server/lib/vba-intent-extractor.js`) | `npm test` | `server/__tests__/vba-intent-extractor.test.js` (~12 tests) |
-| VBA wiring generator (`server/lib/vba-wiring-generator.js`) | `npm test` | `server/__tests__/vba-wiring-generator.test.js` (~35 tests) |
 | Schema routing / multi-DB middleware | `npm run test:db` | `server/__tests__/db.schema-routing.test.js` (needs PostgreSQL) |
 | Electron utilities (`electron/lib/`) | `npm test` | `electron/__tests__/*.test.js` |
 

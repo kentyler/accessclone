@@ -58,22 +58,79 @@
             "Save"]]]]))))
 
 (defn database-selector
-  "Dropdown to select active database"
+  "Dropdown to select active database, with New Database option"
   []
   (let [databases (:available-databases @state/app-state)
         current (:current-database @state/app-state)
-        loading? (:loading-objects? @state/app-state)]
-    [:div.database-selector
-     [:select.database-dropdown
-      {:value (or (:database_id current) "")
-       :disabled loading?
-       :on-change #(f/run-fire-and-forget! (nav/switch-database-flow) {:database-id (.. % -target -value)})}
-      (for [db databases]
-        ^{:key (:database_id db)}
-        [:option {:value (:database_id db)}
-         (:name db)])]
-     (when loading?
-       [:span.loading-indicator "Loading..."])]))
+        loading? (:loading-objects? @state/app-state)
+        new-db-open? (r/atom false)
+        new-name (r/atom "")
+        error (r/atom nil)
+        do-create (fn []
+                    (when-not (str/blank? @new-name)
+                      (state/create-database!
+                        (str/trim @new-name) nil
+                        (fn [new-db]
+                          (state/switch-database! (:database_id new-db))
+                          (reset! new-db-open? false))
+                        (fn [err-msg]
+                          (reset! error err-msg)))))]
+    (fn []
+      (let [databases (:available-databases @state/app-state)
+            current (:current-database @state/app-state)
+            loading? (:loading-objects? @state/app-state)]
+        [:<>
+         [:div.database-selector
+          [:select.database-dropdown
+           {:value (or (:database_id current) "")
+            :disabled loading?
+            :on-change (fn [e]
+                         (let [v (.. e -target -value)]
+                           (if (= v "__new__")
+                             (do (reset! new-db-open? true)
+                                 (reset! new-name "")
+                                 (reset! error nil)
+                                 ;; Reset dropdown to current value (don't stay on __new__)
+                                 (set! (.. e -target -value) (or (:database_id current) "")))
+                             (f/run-fire-and-forget! (nav/switch-database-flow) {:database-id v}))))}
+           [:option {:value "__new__"} "-- New Database --"]
+           (for [db databases]
+             ^{:key (:database_id db)}
+             [:option {:value (:database_id db)}
+              (:name db)])]
+          (when loading?
+            [:span.loading-indicator "Loading..."])]
+         (when @new-db-open?
+           [:div.dialog-overlay
+            {:on-click #(reset! new-db-open? false)}
+            [:div.dialog
+             {:on-click #(.stopPropagation %)}
+             [:div.dialog-header
+              [:h3 "New Database"]
+              [:button.dialog-close {:on-click #(reset! new-db-open? false)} "\u00D7"]]
+             [:div.dialog-body
+              [:div.option-row
+               [:label "Database Name"]
+               [:input.text-input
+                {:type "text"
+                 :value @new-name
+                 :auto-focus true
+                 :placeholder "e.g. Cranbrook"
+                 :on-change #(do (reset! new-name (.. % -target -value))
+                                 (reset! error nil))
+                 :on-key-down (fn [e]
+                                (case (.-key e)
+                                  "Enter" (do-create)
+                                  "Escape" (reset! new-db-open? false)
+                                  nil))}]]
+              (when @error
+                [:div {:style {:color "red" :font-size "12px" :margin-top "4px"}} @error])]
+             [:div.dialog-footer
+              [:button.secondary-btn {:on-click #(reset! new-db-open? false)} "Cancel"]
+              [:button.primary-btn
+               {:disabled (str/blank? @new-name)
+                :on-click do-create}
+               "Create"]]]])]))))
 
 (defn mode-toggle
   "Radio buttons to switch between Import, Run, and Logs modes"
@@ -107,6 +164,13 @@
   [:header.header
    [:div.header-content
     [database-selector]
+    (when (= :import (:app-mode @state/app-state))
+      [:button.btn-primary.header-import-btn
+       {:on-click #(access-db-viewer/trigger-import!)
+        :disabled (or (access-db-viewer/import-busy?)
+                      (not (access-db-viewer/source-selected?))
+                      (not (:database_id (:current-database @state/app-state))))}
+       "Import"])
     [mode-toggle]
     [:nav.header-nav
      [:div.menu-bar

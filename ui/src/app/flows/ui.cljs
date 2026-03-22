@@ -136,7 +136,6 @@
                                            {:id (inc idx)
                                             :name mod-name
                                             :has-vba-source (:has_vba_source detail)
-                                            :has-cljs-source (:has_cljs_source detail)
                                             :description (:description detail)}))
                                        module-names))]
                     (t/dispatch! :set-objects :modules modules)
@@ -184,7 +183,6 @@
                                           {:id (inc idx)
                                            :name macro-name
                                            :has-macro-xml (:has_macro_xml detail)
-                                           :has-cljs-source (:has_cljs_source detail)
                                            :description (:description detail)}))
                                       macro-names))]
                     (t/dispatch! :set-objects :macros macros)

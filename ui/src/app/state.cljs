@@ -7,7 +7,7 @@
 
 (def api-base (str (.-protocol js/location) "//" (.-host js/location)))
 
-;; Late-bound function registry — breaks circular deps between state_form and intent_interpreter
+;; Late-bound function registry — breaks circular deps between state modules and runtime
 (defonce ^:private -callbacks (atom {}))
 (defn register-callback! [k f] (swap! -callbacks assoc k f))
 (defn invoke-callback [k & args] (when-let [f (get @-callbacks k)] (apply f args)))
@@ -16,7 +16,8 @@
 (declare load-tables! load-queries! load-functions! load-sql-functions! load-macros! load-access-databases!
          save-ui-state! load-forms! load-reports! filename->display-name
          save-chat-transcript! add-chat-message! set-chat-input! send-chat-message!
-         maybe-auto-analyze! load-import-completeness! load-log-entries!)
+         maybe-auto-analyze! load-import-completeness! load-log-entries!
+         load-chat-transcript!)
 
 ;; Application state atom
 (defonce app-state
@@ -608,7 +609,7 @@
                  {:module-id (:id module)
                   :module-info (merge module
                                       {:vba-source (:vba_source data)
-                                       :cljs-source (:cljs_source data)
+                                       :js-handlers (:js_handlers data)
                                        :description (:description data)
                                        :status (or (:status data) "pending")
                                        :review-notes (:review_notes data)
@@ -639,81 +640,12 @@
         (when (:success response)
           (swap! app-state assoc :import-completeness (:body response)))))))
 
-(defn translate-module!
-  "Send VBA source to LLM for translation to ClojureScript.
-   Translation appears in the chat panel, not in a separate editor."
-  []
-  (let [module-info (get-in @app-state [:module-viewer :module-info])
-        vba-source (:vba-source module-info)]
-    (when vba-source
-      (swap! app-state assoc-in [:module-viewer :translating?] true)
-      ;; Open chat panel if closed
-      (when-not (:chat-panel-open? @app-state)
-        (swap! app-state assoc :chat-panel-open? true))
-      (go
-        (let [response (<! (http/post (str api-base "/api/chat/translate")
-                                      {:json-params {:vba_source vba-source
-                                                     :module_name (:name module-info)
-                                                     :app_objects (get-app-objects)
-                                                     :database_id (:database_id (:current-database @app-state))}
-                                       :headers (db-headers)}))]
-          (swap! app-state assoc-in [:module-viewer :translating?] false)
-          (if (:success response)
-            (let [cljs-source (get-in response [:body :cljs_source])]
-              ;; Store the translation
-              (swap! app-state assoc-in [:module-viewer :module-info :cljs-source] cljs-source)
-              (swap! app-state assoc-in [:module-viewer :cljs-dirty?] true)
-              ;; Show translation in chat and auto-submit for review
-              (when cljs-source
-                (add-chat-message! "assistant" (str "Here is the ClojureScript translation:\n\n" cljs-source))
-                (set-chat-input! "Please review this translation for issues.")
-                (send-chat-message!)))
-            ;; Handle blocked translation (incomplete import)
-            (let [missing (get-in response [:body :missing])
-                  error-msg (get-in response [:body :error] "Unknown error")]
-              (if missing
-                (let [parts (keep (fn [[type-key names]]
-                                    (when (seq names)
-                                      (str (name type-key) ": " (str/join ", " names))))
-                                  missing)]
-                  (set-error! (str "Translation blocked — import these objects first: "
-                                   (str/join "; " parts))))
-                (log-error! (str "Translation failed: " error-msg)
-                            "translate-module")))))))))
-
-(defn save-module-cljs!
-  "Save the ClojureScript translation to the database"
-  []
-  (let [module-info (get-in @app-state [:module-viewer :module-info])
-        cljs-source (:cljs-source module-info)]
-    (when (and (:name module-info) cljs-source)
-      (go
-        (let [response (<! (http/put (str api-base "/api/modules/" (js/encodeURIComponent (:name module-info)))
-                                     {:json-params {:vba_source (:vba-source module-info)
-                                                    :cljs_source cljs-source
-                                                    :status (:status module-info)
-                                                    :review_notes (:review-notes module-info)}
-                                      :headers (db-headers)}))]
-          (if (:success response)
-            (do
-              (swap! app-state assoc-in [:module-viewer :cljs-dirty?] false)
-              (swap! app-state assoc-in [:module-viewer :module-info :version]
-                     (get-in response [:body :version])))
-            (log-error! "Failed to save module translation" "save-module-cljs")))))))
-
-(defn update-module-cljs-source!
-  "Update the ClojureScript source in the editor (marks dirty)"
-  [new-source]
-  (swap! app-state assoc-in [:module-viewer :module-info :cljs-source] new-source)
-  (swap! app-state assoc-in [:module-viewer :cljs-dirty?] true))
-
 (defn set-module-status!
   "Set the translation status and optional review notes for the current module"
   [status & [review-notes]]
   (swap! app-state assoc-in [:module-viewer :module-info :status] status)
   (when review-notes
-    (swap! app-state assoc-in [:module-viewer :module-info :review-notes] review-notes))
-  (swap! app-state assoc-in [:module-viewer :cljs-dirty?] true))
+    (swap! app-state assoc-in [:module-viewer :module-info :review-notes] review-notes)))
 
 ;; ============================================================
 ;; MODULE CREATION
@@ -725,15 +657,13 @@
         mod-name (str "Module" new-id)
         new-module {:id new-id
                     :name mod-name
-                    :has-vba-source false
-                    :has-cljs-source false}]
+                    :has-vba-source false}]
     (add-object! :modules new-module)
     (open-object! :modules new-id)
     ;; Create on server immediately with draft status
     (go
       (let [response (<! (http/put (str api-base "/api/modules/" (js/encodeURIComponent mod-name))
-                                   {:json-params {:cljs_source ""
-                                                  :status "draft"}
+                                   {:json-params {:status "draft"}
                                     :headers (db-headers)}))]
         (when-not (:success response)
           (log-error! "Failed to create new module on server" "create-new-module"))))))
@@ -777,7 +707,6 @@
                  {:macro-id (:id macro)
                   :macro-info (merge macro
                                      {:macro-xml (:macro_xml data)
-                                      :cljs-source (:cljs_source data)
                                       :description (:description data)
                                       :status (or (:status data) "pending")
                                       :review-notes (:review_notes data)
@@ -786,32 +715,6 @@
                   :loading? false})
           (maybe-auto-analyze!))
         (swap! app-state assoc-in [:macro-viewer :loading?] false)))))
-
-(defn save-macro-cljs!
-  "Save the ClojureScript translation for a macro"
-  []
-  (let [macro-info (get-in @app-state [:macro-viewer :macro-info])
-        cljs-source (:cljs-source macro-info)]
-    (when (and (:name macro-info) cljs-source)
-      (go
-        (let [response (<! (http/put (str api-base "/api/macros/" (js/encodeURIComponent (:name macro-info)))
-                                     {:json-params {:macro_xml (:macro-xml macro-info)
-                                                    :cljs_source cljs-source
-                                                    :status (:status macro-info)
-                                                    :review_notes (:review-notes macro-info)}
-                                      :headers (db-headers)}))]
-          (if (:success response)
-            (do
-              (swap! app-state assoc-in [:macro-viewer :cljs-dirty?] false)
-              (swap! app-state assoc-in [:macro-viewer :macro-info :version]
-                     (get-in response [:body :version])))
-            (log-error! "Failed to save macro translation" "save-macro-cljs")))))))
-
-(defn set-macro-status!
-  "Set the translation status for the current macro"
-  [status]
-  (swap! app-state assoc-in [:macro-viewer :macro-info :status] status)
-  (swap! app-state assoc-in [:macro-viewer :cljs-dirty?] true))
 
 ;; ============================================================
 ;; LOGS MODE
@@ -1048,7 +951,8 @@
           (swap! app-state assoc-in [:objects :tables] tables-with-ids)
           (object-load-complete!))
         (do
-          (log-error! "Failed to load tables from database" "load-tables" {:response (:body response)})
+          (when-not (= :import (:app-mode @app-state))
+            (log-error! "Failed to load tables from database" "load-tables" {:response (:body response)}))
           (object-load-complete!))))))
 
 ;; Load queries (views) from database API
@@ -1090,7 +994,6 @@
                                           {:id (inc idx)
                                            :name mod-name
                                            :has-vba-source (:has_vba_source detail)
-                                           :has-cljs-source (:has_cljs_source detail)
                                            :description (:description detail)}))
                                       module-names))]
           (swap! app-state assoc-in [:objects :modules] modules-with-ids)
@@ -1139,7 +1042,6 @@
                                          {:id (inc idx)
                                           :name macro-name
                                           :has-macro-xml (:has_macro_xml detail)
-                                          :has-cljs-source (:has_cljs_source detail)
                                           :description (:description detail)}))
                                      macro-names))]
           (swap! app-state assoc-in [:objects :macros] macros-with-ids)
@@ -1261,7 +1163,6 @@
               module-context (when (and (= (:type active-tab) :modules)
                                        (:name module-info))
                                {:module_name (:name module-info)
-                                :cljs_source (:cljs-source module-info)
                                 :vba_source (:vba-source module-info)
                                 :app_objects (get-app-objects)})
               ;; Query context when viewing a query/view
@@ -1298,7 +1199,6 @@
                                        (:name macro-info))
                               {:macro_name (:name macro-info)
                                :macro_xml (:macro-xml macro-info)
-                               :cljs_source (:cljs-source macro-info)
                                :app_objects (get-app-objects)})
               ;; App context when viewing the Application dashboard
               app-context (when (= (:type active-tab) :app)
@@ -1347,10 +1247,6 @@
           (if (:success response)
             (do
               (add-chat-message! "assistant" (get-in response [:body :message]))
-              ;; Handle updated code from LLM edits
-              (when-let [updated-code (get-in response [:body :updated_code])]
-                (swap! app-state assoc-in [:module-viewer :module-info :cljs-source] updated-code)
-                (swap! app-state assoc-in [:module-viewer :cljs-dirty?] true))
               ;; Handle updated query/function from LLM DDL execution
               (when-let [uq (get-in response [:body :updated_query])]
                 (load-queries!)

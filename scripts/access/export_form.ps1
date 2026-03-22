@@ -16,6 +16,14 @@ param(
 
 # --- SaveAsText parser for forms ---
 
+function DimToTwips {
+    # Access SaveAsText stores geometry as twips (integers) OR inches (decimals, e.g. "0.2083").
+    # [int] cast truncates 0.2083 to 0, so detect the decimal case and convert.
+    param([string]$val)
+    if ($val -match '\.') { return [int]([double]$val * 1440) }
+    return [int]$val
+}
+
 function Parse-FormSaveAsText {
     param([string]$textContent, [string]$formName)
 
@@ -46,6 +54,10 @@ function Parse-FormSaveAsText {
     $depth = 0
     $inBinary = $false
     $binaryDepth = 0
+
+    # Default control heights from top-level template blocks
+    $defaultHeights = @{}
+    $defaultTypeName = ''
 
     # Context stack
     $ctxStack = [System.Collections.ArrayList]::new()
@@ -93,7 +105,8 @@ function Parse-FormSaveAsText {
                     $currentSection = $sectionMap[$typeName]
                     $ctx = 'section'
                 } else {
-                    $ctx = 'defaults'  # default control settings (Label, TextBox blocks before sections)
+                    $ctx = 'defaults'
+                    $defaultTypeName = $typeName
                 }
             }
             elseif ($ctx -eq 'section' -and -not $typeName) {
@@ -104,7 +117,8 @@ function Parse-FormSaveAsText {
                 $ctlType = if ($ctlTypeMap.ContainsKey($typeName)) { $ctlTypeMap[$typeName] } else { $typeName.ToLower() }
                 $currentControl = [ordered]@{
                     type = $ctlType; name = ''; section = $currentSection
-                    left = 0; top = 0; width = 0; height = 0
+                    left = 0; top = 0; width = 0
+                    height = if ($defaultHeights.ContainsKey($typeName)) { $defaultHeights[$typeName] } else { 0 }
                 }
                 if ($currentTabPage) { $currentControl.parentPage = $currentTabPage }
                 $ctx = 'control'
@@ -125,14 +139,16 @@ function Parse-FormSaveAsText {
                         # Tab page — create page control, will set tab page name from Name property
                         $currentControl = [ordered]@{
                             type = 'page'; name = ''; section = $currentSection
-                            left = 0; top = 0; width = 0; height = 0
+                            left = 0; top = 0; width = 0
+                            height = if ($defaultHeights.ContainsKey($typeName)) { $defaultHeights[$typeName] } else { 0 }
                         }
                         $ctx = 'tabPage'
                     } else {
                         # Attached label or other child
                         $currentControl = [ordered]@{
                             type = $ctlType; name = ''; section = $currentSection
-                            left = 0; top = 0; width = 0; height = 0
+                            left = 0; top = 0; width = 0
+                            height = if ($defaultHeights.ContainsKey($typeName)) { $defaultHeights[$typeName] } else { 0 }
                         }
                         if ($currentTabPage) { $currentControl.parentPage = $currentTabPage }
                         $ctx = 'control'
@@ -206,7 +222,7 @@ function Parse-FormSaveAsText {
             if ($ctx -eq 'form') {
                 switch ($pName) {
                     'RecordSource'      { $formObj.recordSource = $pVal }
-                    'Width'             { $formObj.formWidth = [int]$pVal }
+                    'Width'             { $formObj.formWidth = DimToTwips $pVal }
                     'Caption'           { $formObj.caption = $pVal }
                     'DefaultView'       { $formObj.defaultView = [int]$pVal }
                     'ScrollBars'        { $formObj.scrollBars = [int]$pVal }
@@ -241,7 +257,7 @@ function Parse-FormSaveAsText {
                 switch ($pName) {
                     'Height' {
                         $heightKey = switch ($currentSection) { 0 {'detailHeight'} 1 {'headerHeight'} 2 {'footerHeight'} }
-                        $sectionHeights[$heightKey] = [int]$pVal
+                        $sectionHeights[$heightKey] = DimToTwips $pVal
                     }
                     'BackColor' { $sectionProps["${secPfx}BackColor"] = [long]$pVal }
                     'Name' { }  # internal name, skip
@@ -261,14 +277,18 @@ function Parse-FormSaveAsText {
                 elseif ($pName -eq 'PageIndex' -and $currentControl) { $currentControl.pageIndex = [int]$pVal }
                 elseif ($pName -eq 'Caption' -and $currentControl) { $currentControl.caption = $pVal }
             }
+            # Default control template blocks
+            elseif ($ctx -eq 'defaults') {
+                if ($pName -eq 'Height') { $defaultHeights[$defaultTypeName] = DimToTwips $pVal }
+            }
             # Control properties
             elseif ($ctx -eq 'control' -and $currentControl) {
                 switch ($pName) {
                     'Name'              { $currentControl.name = $pVal }
-                    'Left'              { $currentControl.left = [int]$pVal }
-                    'Top'               { $currentControl.top = [int]$pVal }
-                    'Width'             { $currentControl.width = [int]$pVal }
-                    'Height'            { $currentControl.height = [int]$pVal }
+                    'Left'              { $currentControl.left = DimToTwips $pVal }
+                    'Top'               { $currentControl.top = DimToTwips $pVal }
+                    'Width'             { $currentControl.width = DimToTwips $pVal }
+                    'Height'            { $currentControl.height = DimToTwips $pVal }
                     'FontName'          { $currentControl.fontName = $pVal }
                     'FontSize'          { $currentControl.fontSize = [int]$pVal }
                     'FontWeight'        { if ([int]$pVal -ge 700) { $currentControl.fontBold = $true } }
@@ -325,6 +345,20 @@ function Parse-FormSaveAsText {
                     'OnLostFocus'   { if ($pVal -eq '[Event Procedure]') { $currentControl.hasLostFocusEvent = $true } }
                 }
             }
+        }
+    }
+
+    # Apply Access internal defaults for controls whose height was never written to SaveAsText.
+    # Access omits Height when it matches the built-in default, so 0 here means "use the default".
+    # Lines legitimately have height=0 (horizontal strokes) and are excluded.
+    $accessControlHeightDefaults = @{
+        'text-box' = 252; 'combo-box' = 252; 'list-box' = 252
+        'command-button' = 360; 'check-box' = 240; 'option-button' = 240; 'toggle-button' = 360
+        'attachment' = 252
+    }
+    foreach ($ctl in $controls) {
+        if ($ctl.height -eq 0 -and $accessControlHeightDefaults.ContainsKey($ctl.type)) {
+            $ctl.height = $accessControlHeightDefaults[$ctl.type]
         }
     }
 

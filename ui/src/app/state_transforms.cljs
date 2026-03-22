@@ -585,17 +585,8 @@
     :desc    "Set the pending name for a new query"}
 
    ;; ----------------------------------------------------------
-   ;; Module domain (2) — from state.cljs
+   ;; Module domain (1) — from state.cljs
    ;; ----------------------------------------------------------
-   :update-module-cljs-source!
-   {:name    :update-module-cljs-source!
-    :fn-ref  'app.state/update-module-cljs-source!
-    :domain  :module
-    :args    [{:name 'new-source :type :string}]
-    :reads   []
-    :writes  [[:module-viewer :module-info] [:module-viewer :cljs-dirty?]]
-    :desc    "Update the ClojureScript source in the module editor (marks dirty)"}
-
    :set-module-status!
    {:name    :set-module-status!
     :fn-ref  'app.state/set-module-status!
@@ -603,7 +594,7 @@
     :args    [{:name 'status :type :string}
               {:name 'review-notes :type [:or :string :nil] :optional true}]
     :reads   []
-    :writes  [[:module-viewer :module-info] [:module-viewer :cljs-dirty?]]
+    :writes  [[:module-viewer :module-info]]
     :desc    "Set translation status and optional review notes for current module"}
 
    ;; ----------------------------------------------------------
@@ -611,12 +602,12 @@
    ;; ----------------------------------------------------------
    :set-macro-status!
    {:name    :set-macro-status!
-    :fn-ref  'app.state/set-macro-status!
+    :fn-ref  'app.transforms.macro/set-macro-status
     :domain  :macro
     :args    [{:name 'status :type :string}]
     :reads   []
-    :writes  [[:macro-viewer :macro-info] [:macro-viewer :cljs-dirty?]]
-    :desc    "Set the translation status for the current macro"}
+    :writes  [[:macro-viewer :macro-info]]
+    :desc    "Set the translation status for the current macro (via transform dispatch)"}
 
    ;; ----------------------------------------------------------
    ;; Logs domain (1) — from state.cljs

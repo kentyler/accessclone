@@ -9,10 +9,10 @@
                                          coerce-yes-no coerce-to-number coerce-to-keyword
                                          yes-no-control-props yes-no-control-defaults number-control-props
                                          maybe-auto-analyze!]]
-            [app.intent-interpreter :as intent]))
+))
 
 ;; Forward declarations
-(declare save-report! save-report-to-file!)
+(declare save-report! save-report-to-file! fire-report-event!)
 
 ;; ============================================================
 ;; REPORT NORMALIZATION
@@ -120,12 +120,17 @@
       (let [record-source (get-in @app-state [:report-editor :current :record-source])]
         (when record-source
           (go
-            (let [query-params (build-data-query-params
+            (let [sql-source? (str/starts-with? (str/lower-case record-source) "select ")
+                  query-params (build-data-query-params
                                  (get-in @app-state [:report-editor :current :order-by])
                                  (get-in @app-state [:report-editor :current :filter]))
-                  response (<! (http/get (str api-base "/api/data/" record-source)
-                                         {:query-params query-params
-                                          :headers (db-headers)}))]
+                  response (<! (if sql-source?
+                                 (http/post (str api-base "/api/queries/run")
+                                            {:json-params {:sql record-source}
+                                             :headers (db-headers)})
+                                 (http/get (str api-base "/api/data/" record-source)
+                                           {:query-params query-params
+                                            :headers (db-headers)})))]
               (if (:success response)
                 (let [data (get-in response [:body :data])]
                   (swap! app-state assoc-in [:report-editor :records] (vec data))
@@ -196,19 +201,17 @@
             (swap! app-state assoc-in [:report-editor :event-handlers] handler-map)))))))
 
 (defn fire-report-event!
-  "Fire a report-level event by looking up the handler in event-handlers.
-   event-key is a keyword like :on-open, :on-close."
+  "Fire a report-level event handler."
   [event-key]
   (let [event-str (name event-key)
-        ;; Report-level events use 'report' as control name
-        ;; Handler key format from server: "report.on-open"
         key (str "report." event-str)
         handler (get-in @app-state [:report-editor :event-handlers key])]
-    (when (seq (:intents handler))
-      (try
-        (intent/execute-intents (:intents handler))
-        (catch :default e
-          (js/console.warn "Error in report event handler" event-str ":" (.-message e)))))))
+    (when handler
+      (if-let [js-code (:js handler)]
+        (try (let [f (js/Function. js-code)] (.call f))
+             (catch :default e
+               (js/console.warn "Error in report event handler" event-str ":" (.-message e))))
+        (js/console.warn "Report handler has no :js code:" event-str)))))
 
 (defn- parse-report-body
   "Parse API response body into a normalized report definition."

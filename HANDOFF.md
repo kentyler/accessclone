@@ -156,7 +156,7 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 - **Standalone architecture page**: `ui/resources/public/architecture.html` — self-contained HTML page with the full explanation (three layers + four primitives + bidirectional movement + reflexivity). Linked from hub home with "Read the full explanation →".
 - **Four architectural primitives seeded into graph**: `seedPrimitives()` in `server/graph/populate.js` creates 4 capability nodes and 21 potential nodes (manifestations) with `actualizes` edges, plus 3 `refines` edges (Trace as invariant-of the other three):
   - **Boundary** — Enclosure (schema isolation, tab workspaces, module namespaces, form/report sections)
-  - **Transduction** — Isomorphism (SQL conversion, VBA→CLJS, intent extraction, form normalization, graph population)
+  - **Transduction** — Isomorphism (SQL conversion, VBA→JavaScript, intent extraction, form normalization, graph population)
   - **Resolution** — Gradient descent (multi-pass retry, batch code gen, gap decisions, LLM fallback, lint validation)
   - **Trace** (invariant) — Lineage (append-only versioning, event logging, transcript persistence, import history, edge provenance)
   - Endpoints: `POST /api/graph/seed-primitives` (standalone), also runs automatically on `POST /api/graph/populate`

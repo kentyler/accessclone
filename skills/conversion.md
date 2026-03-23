@@ -205,7 +205,7 @@ Inputs needed:
 Outputs:
 - Macros stored in `shared.macros` with raw XML definitions
 - LLM auto-analysis of each macro's structure and purpose
-- Optional ClojureScript translations (via chat panel)
+- LLM auto-analysis of each macro's structure and purpose
 
 ## Error Handling
 

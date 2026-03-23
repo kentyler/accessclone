@@ -45,7 +45,7 @@ Beneath the three layers, the system operates on three topological primitives an
 | Primitive | Topological Action | Manifestations |
 |-----------|-------------------|----------------|
 | **Boundary** | Enclosure. Creating a "here" vs "there" where local rules apply. | Schema isolation, tab workspaces, module namespaces, form sections, report bands. |
-| **Transduction** | Isomorphism. Carrying shape across a boundary into a new medium. | SQL conversion, VBA→ClojureScript, intent extraction, form normalization, graph population. |
+| **Transduction** | Isomorphism. Carrying shape across a boundary into a new medium. | SQL conversion, VBA→JavaScript, intent extraction, form normalization, graph population. |
 | **Resolution** | Gradient descent. Using failure as signal to find the path of least resistance. | Multi-pass retry loops, dependency resolution, gap decisions, LLM fallback, lint validation. |
 | **Trace** (invariant) | Lineage. Ensuring the "whence" is never lost during the "what." | Append-only versioning, event logging, transcript persistence, import history, edge provenance. |
 

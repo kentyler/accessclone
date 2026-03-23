@@ -83,15 +83,15 @@ Common transformation categories that recur across platforms:
 - **Coordinate conversion** — every platform has its own unit system
 - **Color format conversion** — BGR vs RGB, integer vs hex, named colors
 - **Event model mapping** — platform events → our event handlers
-- **Expression/formula translation** — platform-specific functions → SQL or ClojureScript
+- **Expression/formula translation** — platform-specific functions → SQL or JavaScript
 - **Reference resolution** — how objects refer to each other (by name, by ID, by path)
 
 ### Storage Destination (generic)
 Our normalized storage is always the same:
 - `shared.forms` — form/layout definitions as JSON
 - `shared.reports` — report definitions as JSON
-- `shared.modules` — code (VBA, LotusScript, etc.) + optional ClojureScript translation
-- `shared.macros` — automation definitions (XML, script text, etc.) + optional ClojureScript translation
+- `shared.modules` — code (VBA, LotusScript, etc.) + intents (JSONB) + JS handlers (JSONB)
+- `shared.macros` — automation definitions (XML, script text, etc.)
 - Database tables — actual data in PostgreSQL schemas
 
 New platforms should map into these existing tables. Only create new shared tables if the platform has a genuinely new object type with no equivalent.

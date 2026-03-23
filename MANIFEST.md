@@ -35,7 +35,7 @@ Read in order for the full import workflow.
 | `skills/conversion-queries.md` | Phase 3: Query→view/function conversion, regex pipeline, LLM fallback, retry loop, form-state cross-joins. |
 | `skills/conversion-forms.md` | Phase 4: Form import — twips→pixels, control type mapping, section organization, property normalization. |
 | `skills/conversion-vba.md` | Phase 5: VBA→PostgreSQL functions — session-state pattern, validator/executor/orchestrator. |
-| `skills/conversion-vba-cljs.md` | VBA→ClojureScript translation patterns — DoCmd mapping, DLookup→API, MsgBox→confirm, event wiring. |
+| `skills/conversion-vba-js.md` | VBA translation guide — VBA-to-JS parser patterns, runtime API (`window.AC`), intent extraction pipeline, common VBA patterns reference. |
 | `skills/conversion-macros.md` | Phase 6: Macro import — LoadFromText format, XML macros, action mapping, translation strategy. |
 
 ## Skills — Architecture & Design

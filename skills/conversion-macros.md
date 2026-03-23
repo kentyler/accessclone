@@ -1,6 +1,6 @@
 # Conversion Macros Skill
 
-Phase 6 of the conversion process. Imports Access macros into AccessClone for viewing, analysis, and translation to ClojureScript.
+Phase 6 of the conversion process. Imports Access macros into AccessClone for viewing and analysis.
 
 ## Prerequisites
 
@@ -140,7 +140,7 @@ CREATE TABLE IF NOT EXISTS shared.macros (
     database_id VARCHAR(100) NOT NULL,
     name VARCHAR(255) NOT NULL,
     macro_xml TEXT,           -- Raw definition from SaveAsText
-    cljs_source TEXT,         -- ClojureScript translation (via chat)
+    cljs_source TEXT,         -- Legacy column, no longer used (was ClojureScript translation)
     description TEXT,
     status VARCHAR(20) NOT NULL DEFAULT 'pending',
     review_notes TEXT,
@@ -178,17 +178,16 @@ Headers: X-Database-ID: <database_id>
 # Save a macro
 PUT /api/macros/:name
 Headers: X-Database-ID: <database_id>
-Body: { macro_xml, cljs_source, description, status, review_notes }
+Body: { macro_xml, description, status, review_notes }
 ```
 
 ## Viewing and Translation
 
 The macro viewer (`ui/src/app/views/macro_viewer.cljs`) displays:
-- **Left panel**: Raw macro XML (read-only)
-- **Right panel**: ClojureScript translation (initially empty)
+- **Main panel**: Raw macro definition (read-only)
 - **Info panel**: Name, version, imported date, status dropdown
 
-Translation is done via the chat panel — the LLM receives the macro XML as context and can generate ClojureScript equivalents. Auto-analyze fires when a macro is first opened, producing a structural analysis.
+Auto-analyze fires when a macro is first opened — the LLM receives the macro definition as context and produces a structural analysis via the chat panel.
 
 ## Infrastructure Actions — Log and Skip
 
@@ -235,20 +234,20 @@ This ensures nothing is silently lost — users can review skipped actions in th
 
 ## Translation Strategy
 
-Access macros map to ClojureScript event handler functions. General approach:
+Access macro actions map to JavaScript runtime calls via `window.AC` (same API used by VBA→JS event handlers). See `skills/event-runtime.md` for the full runtime API.
 
-| Access Pattern | ClojureScript Equivalent |
-|----------------|--------------------------|
-| OpenForm | `state/open-tab!` with form type |
-| OpenReport | `state/open-tab!` with report type |
-| MessageBox | `js/alert` or custom modal component |
-| SetTempVar | `swap! app-state assoc-in` |
-| RunSQL | API call to server endpoint |
-| SetProperty | `swap! app-state update-in` on control property |
-| If/ElseIf/Else | `cond` / `if` expressions |
-| SubMacro | Named functions |
-| OnError | `try`/`catch` blocks |
-| GoToRecord | `state/navigate-to-record!` |
+| Access Pattern | JavaScript Equivalent |
+|----------------|----------------------|
+| OpenForm | `AC.openForm("FormName")` |
+| OpenReport | `AC.openReport("ReportName")` |
+| MessageBox | `alert("message")` |
+| RunSQL | `AC.runSQL("INSERT...")` |
+| GoToRecord | `AC.gotoRecord("new")` |
+| CloseWindow | `AC.closeForm()` |
+| SetProperty (Visible) | `AC.setVisible("ctrl", true/false)` |
+| SetProperty (Enabled) | `AC.setEnabled("ctrl", true/false)` |
+
+Note: Macro translation is not yet automated. The table above shows the conceptual mapping. Standalone macros are currently stored as raw definitions for viewing and analysis.
 
 ## Sample Macros for Testing
 

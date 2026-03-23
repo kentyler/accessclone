@@ -1,6 +1,6 @@
 # Conversion VBA Skill
 
-> **Note**: For frontend VBA→ClojureScript translation, the preferred approach is now the **intent extraction pipeline** — see `skills/intent-extraction.md` and `skills/conversion-vba-cljs.md`. This file documents the **server-side PostgreSQL function** patterns used when VBA logic maps to database-level functions rather than frontend transforms.
+> **Note**: For frontend VBA event handling, VBA is now parsed into JavaScript by `vba-to-js.js` and executed client-side via `window.AC` — see `skills/event-runtime.md` and `skills/conversion-vba-js.md`. This file documents the **server-side PostgreSQL function** patterns used when VBA logic maps to database-level functions rather than frontend event handlers.
 
 Translates VBA code from Access to PostgreSQL functions using the session-state pattern.
 

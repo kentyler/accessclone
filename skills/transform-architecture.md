@@ -167,11 +167,11 @@ Example — `load-form-for-editing!` decomposes into:
 
 ### Previous Approach (v1, still available as "Direct Translate")
 
-VBA code → LLM translates line-by-line → PostgreSQL function → ClojureScript wrapper
+VBA code → LLM translates line-by-line → PostgreSQL function → frontend wrapper
 
 Problems:
-- LLM generates imperative PG/CLJS code that may not match the app's patterns
-- Translation errors are hard to diagnose (is the PG function wrong, or the CLJS wiring?)
+- LLM generates imperative PG code that may not match the app's patterns
+- Translation errors are hard to diagnose across the LLM-generated chain
 - Each Access database requires unique translation work
 
 ### v2 Approach (implemented)

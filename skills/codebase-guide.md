@@ -215,9 +215,9 @@ ClojureScript with Reagent (a React wrapper). Single-page app.
 | `report_editor.cljs`, `report_design.cljs`, `report_properties.cljs`, `report_view.cljs`, `report_utils.cljs` | Reports | **Banded** layout — 5 standard bands + dynamic group bands. Preview shows live data with group-break detection. |
 | `table_viewer.cljs` | Tables | Datasheet View (editable grid) + Design View (Access-style split pane with property sheet). |
 | `query_viewer.cljs` | Queries | Results grid + SQL editor. SELECT only. |
-| `module_viewer.cljs` | Modules | VBA source + CLJS translation. Two-phase intent extraction (Extract Intents → Generate Code) with legacy Direct Translate. Intent summary panel with color-coded stats. |
-| `macro_viewer.cljs` | Macros | Left: raw macro definition. Right: ClojureScript translation. |
-| `app_viewer.cljs` | App dashboard | Whole-application view: overview, 3-step batch pipeline (Extract → Resolve Gaps → Generate Code), dependencies, API surface. |
+| `module_viewer.cljs` | Modules | VBA source (left) + JS Handlers panel (right). Intent extraction with color-coded stats (green=mechanical, yellow=LLM-assisted, red=gap). |
+| `macro_viewer.cljs` | Macros | Raw macro definition (read-only) + info panel. Auto-analyze via chat on first open. |
+| `app_viewer.cljs` | App dashboard | Whole-application view: overview, 2-step batch pipeline (Extract Intents → Resolve Gaps), dependencies, API surface. |
 | `access_database_viewer.cljs` | Import UI | Scans Access DB, shows objects, drives import workflow. |
 | `sidebar.cljs` | Navigation | Object tree grouped by type. Database switcher. |
 | `tabs.cljs` | Tab bar | Manages open tabs, reactivation, close. |

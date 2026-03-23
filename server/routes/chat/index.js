@@ -456,13 +456,13 @@ Keep responses concise and helpful. When discussing code or SQL, use markdown co
     }
   });
 
-  // Load VBA-to-ClojureScript translation guide for the translate endpoint
+  // Load VBA-to-JS translation guide for the translate endpoint
   let translationGuide = '';
   try {
-    const guidePath = path.join(__dirname, '..', '..', '..', 'skills', 'conversion-vba-cljs.md');
+    const guidePath = path.join(__dirname, '..', '..', '..', 'skills', 'conversion-vba-js.md');
     translationGuide = fs.readFileSync(guidePath, 'utf8');
   } catch (err) {
-    console.log('Could not load conversion-vba-cljs.md skill file');
+    console.log('Could not load conversion-vba-js.md skill file');
   }
 
   // Load Three Horse chat context for the threehorse database

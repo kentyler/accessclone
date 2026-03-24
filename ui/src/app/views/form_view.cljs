@@ -35,10 +35,24 @@
         password? (= "password" (some-> (:input-mask ctrl) str/lower-case str/trim))
         placeholder (when mask (fu/mask-placeholder (:pattern mask) (:placeholder-char mask)))
         max-len (when placeholder (count placeholder))
-        rich? (or (= 1 (:text-format ctrl)) (html-content? (str value)))]
-    (if rich?
+        rich? (or (= 1 (:text-format ctrl)) (html-content? (str value)))
+        ;; Detect multi-line: tall controls (> 40px) or values containing newlines
+        multi-line? (or (and (:height ctrl) (> (:height ctrl) 40))
+                        (and (string? value) (str/includes? value "\n")))]
+    (cond
+      rich?
       [:div.view-input.view-rich-text
        {:dangerouslySetInnerHTML {:__html (str value)}}]
+
+      multi-line?
+      [:textarea.view-input.view-textarea
+       (cond-> {:value (str value) :read-only (not allow-edits?)
+                :auto-focus (and is-new? auto-focus?)
+                :on-change #(when (and field allow-edits?) (on-change field (.. % -target -value)))}
+         tab-idx (assoc :tab-index tab-idx)
+         placeholder (assoc :placeholder placeholder))]
+
+      :else
       [:input.view-input
        (cond-> {:type (if password? "password" "text")
                 :value value :read-only (not allow-edits?)
@@ -60,12 +74,13 @@
     #(js/console.warn "Handler has no :js code:" context-label)))
 
 (defn- resolve-button-action [ctrl]
-  (let [ctrl-name (or (:name ctrl) "")
-        projection (get-in @state/app-state [:form-editor :projection])
-        handler (projection/get-event-handler projection ctrl-name "on-click")]
-    (if handler
-      (run-js-handler handler ctrl-name)
-      (fn []))))
+  (let [ctrl-name (or (:name ctrl) "")]
+    (fn []
+      (let [projection (get-in @state/app-state [:form-editor :projection])
+            handler (projection/get-event-handler projection ctrl-name "on-click")]
+        (if handler
+          ((run-js-handler handler ctrl-name))
+          (js/console.warn "No handler found for button:" ctrl-name))))))
 
 (defn render-button [ctrl _field _value _on-change {:keys [tab-idx]}]
   [:button.view-button
@@ -706,6 +721,10 @@
             link-child (split-link-fields (or (:link-child-fields ctrl) (:link_child_fields ctrl)))
             link-master (split-link-fields (or (:link-master-fields ctrl) (:link_master_fields ctrl)))
             current-record (or (get-in @state/app-state [:form-editor :projection :record]) {})
+            ;; Fetch definition if not cached (handles runtime source swaps via AC.setSubformSource)
+            _ (when (and source-form
+                        (not (get-in @state/app-state [:form-editor :subform-cache source-form :definition])))
+                (f/run-fire-and-forget! (form-flow/fetch-subform-definition-flow) {:source-form source-form}))
             definition (when source-form
                          (get-in @state/app-state [:form-editor :subform-cache source-form :definition]))
             {:keys [allow-edits? allow-additions? allow-deletions? show-nav-buttons? show-selectors? child-rs]}
@@ -820,6 +839,8 @@
                                           (close-combo!))}
                              display])))))]]))]
         [:div.view-subform
+         (when (and (map? definition) (seq (get-in definition [:header :controls])))
+           [form-view-section :header definition {} (fn [& _]) {:allow-edits? false}])
          (when source-form
            [subform-records-view definition records cols
             allow-additions? allow-edits? selected editing edit-value commit-edit! show-selectors?

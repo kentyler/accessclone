@@ -345,7 +345,8 @@
   "Look up an event handler by control name and event key.
    Returns the handler map or nil."
   [projection control-name event]
-  (let [key (str (ctrl->kw control-name) "." event)]
+  (let [kw (ctrl->kw control-name)
+        key (str (when kw (name kw)) "." event)]
     (get (:event-handlers projection) key)))
 
 (defn build-projection

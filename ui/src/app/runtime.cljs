@@ -28,8 +28,16 @@
       (state/open-object! :reports (:id report-obj))
       (js/console.warn "AC.openReport: report not found:" report-name))))
 
-(defn close-form []
-  (state/invoke-callback :close-current-tab))
+(defn close-form [& [form-name]]
+  (if form-name
+    ;; Close a specific form by name
+    (let [form-obj (find-object-by-name :forms form-name)]
+      (if form-obj
+        (state/close-tab! :forms (:id form-obj))
+        (do (js/console.warn "AC.closeForm: form not found:" form-name)
+            (state/invoke-callback :close-current-tab))))
+    ;; No name — close the current tab
+    (state/invoke-callback :close-current-tab)))
 
 (defn goto-record [target]
   (let [records (get-in @app-state [:form-editor :projection :records] [])
@@ -74,7 +82,7 @@
     (when ctrl-kw
       (swap! app-state assoc-in
              [:form-editor :projection :subform-sources ctrl-kw] source-object)
-      ;; Also update the control definition so the subform re-renders
+      ;; Update :source-form on the control definition so render-subform picks it up
       (swap! app-state update-in [:form-editor :current]
              (fn [form-def]
                (reduce (fn [fd section-key]
@@ -82,7 +90,7 @@
                                     (fn [ctrls]
                                       (mapv (fn [c]
                                               (if (= (projection/ctrl->kw (:name c)) ctrl-kw)
-                                                (assoc c :source-object source-object)
+                                                (assoc c :source-form source-object)
                                                 c))
                                             ctrls))))
                        form-def

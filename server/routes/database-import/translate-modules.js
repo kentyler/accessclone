@@ -15,7 +15,7 @@ module.exports = function(router, pool, secrets) {
   router.post('/translate-modules', async (req, res) => {
     // This endpoint processes all modules sequentially (LLM calls) — can take 5-10 minutes
     req.setTimeout(600000);
-    const { database_id, run_id } = req.body;
+    const { database_id, run_id, module_names } = req.body;
 
     if (!database_id) {
       return res.status(400).json({ error: 'database_id is required' });
@@ -33,12 +33,20 @@ module.exports = function(router, pool, secrets) {
 
     activeTranslations.add(database_id);
     try {
-      // 1. Load all modules with VBA source
-      const modulesResult = await pool.query(
-        `SELECT name, vba_source, intents FROM shared.modules
-         WHERE database_id = $1 AND is_current = true AND vba_source IS NOT NULL`,
-        [database_id]
-      );
+      // 1. Load modules with VBA source (optionally filtered by name)
+      const modulesQuery = module_names?.length
+        ? {
+            text: `SELECT name, vba_source, intents FROM shared.modules
+                   WHERE database_id = $1 AND is_current = true AND vba_source IS NOT NULL
+                   AND name = ANY($2)`,
+            values: [database_id, module_names]
+          }
+        : {
+            text: `SELECT name, vba_source, intents FROM shared.modules
+                   WHERE database_id = $1 AND is_current = true AND vba_source IS NOT NULL`,
+            values: [database_id]
+          };
+      const modulesResult = await pool.query(modulesQuery);
 
       const modules = modulesResult.rows;
       if (modules.length === 0) {

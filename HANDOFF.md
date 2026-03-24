@@ -6,8 +6,33 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 
 ## Current State
 
-### Just Shipped (2026-03-21)
-- **Dead CLJS translation pipeline removed**: Cleaned up ~24 files removing the old LLM intent→mechanical CLJS generation pipeline. Deleted: `vba-wiring-generator.js` + tests, `intent_interpreter.cljs`. Removed: `POST /api/chat/generate-wiring` endpoint, `update_translation` chat tool, CLJS panel in Module Viewer (replaced with JS Handlers panel), "Generate All Code" step in App Viewer (now 2-step: Extract Intents → Resolve Gaps), `translate-module!`/`save-macro-cljs!` functions, `cljs-source`/`cljs-dirty?` state paths. Pipeline steps reduced from 5→4 (extract→map→gap-questions→resolve-gaps). Module Viewer now shows VBA source + JS handlers. Intent extraction preserved for LLM reasoning.
+### Just Shipped (2026-03-23)
+- **React/TypeScript frontend migration complete (10 waves)**: Created `ui-react/` — a full React 18 + TypeScript + Zustand + Vite frontend alongside the existing ClojureScript UI. Both share the same server API (port 3001) and CSS.
+  - **81 modules, 327KB/95KB gzipped** — built in ~2 seconds (vs 22-second CLJS compile)
+  - **Stack**: React 18, TypeScript, Zustand + Immer, Vite, fetch + async/await
+  - **What's ported**: All 7 viewer types (table, query, form, report, module, macro, sql-function), form editor with 12 control types + drag-drop design + property sheet, report editor with banded sections + group break detection + paginated preview, import pipeline with batch/retry orchestration, app viewer dashboard, window.AC runtime for generated JS handlers
+  - **Key files**: `ui-react/src/store/` (6 Zustand stores), `ui-react/src/views/` (all viewers/editors), `ui-react/src/lib/` (expressions parser, projection builder, utils, normalize, runtime)
+  - **Server toggle**: Set `USE_REACT_UI=1` env var to serve React build instead of CLJS. `server/rebuild-react.bat` builds and starts with React UI.
+  - **All 72 server tests pass** — no server changes needed except the UI directory toggle in `index.js`
+
+### Previously Shipped (2026-03-22)
+- **Re-Import enhanced with query re-conversion, module translation, and validation**: The Re-Import button in form/report editors now runs 3 additional steps after re-exporting from Access:
+  - Step A: Fetches the saved definition via `GET /api/forms/:name` (or `/reports/`), reads `record-source`. If it's not a SQL SELECT, calls `import-query!` with `force? true` to re-convert the backing query.
+  - Step B: Calls `POST /api/database-import/translate-modules` with new `module_names` filter to re-translate only the class module (`Form_{name}` or `Report_{name}`).
+  - Step C: Runs repair pass + validation pass (`/api/database-import/repair-pass`, `/api/database-import/validation-pass`).
+  - Server change: `translate-modules.js` accepts optional `module_names` array in request body — adds `AND name = ANY($2)` filter to the SQL query.
+  - Files: `ui/src/app/views/access_database_viewer.cljs` (`reimport-object!`), `server/routes/database-import/translate-modules.js`
+- **VBA stub generator: ParamArray and enum type fixes**: Three issues in `server/lib/vba-stub-generator.js`:
+  1. `ParamArray params() As Variant` was included as a required parameter in stub signatures. Now excluded — ParamArray is variadic/optional in VBA.
+  2. VBA `Enum` types (e.g. `enumStrings`) mapped to `text` instead of `integer`. New `collectEnumNames()` scans VBA source for `Enum` declarations. Enum type names now map to `integer`.
+  3. Declaration regex `\([^)]*\)` failed on `ParamArray params()` — the inner `()` caused premature paren-matching. Fixed with nested-paren-aware pattern.
+  - Result: `getstring(41)` now matches `getstring(integer)` instead of failing with "function does not exist". `frmAbout` loads correctly.
+  - 7 new tests added (19 total in `vba-stub-generator.test.js`).
+  - Manually fixed existing `getstring` stub in `db_northwind_15` (had to DROP and recreate — `createStubFunctions` skips existing functions).
+- **Data cleanup**: Deleted 16 orphan rows from `shared.forms` and `shared.reports` where `database_id = '[object Object]'`. Root cause untraced — some code path is passing a JS object where a string database_id slug is expected.
+
+### Previously Shipped (2026-03-21)
+- **Dead CLJS translation pipeline removed**: Cleaned up ~24 files removing the old LLM intent→mechanical CLJS generation pipeline. Pipeline steps reduced from 5→4. Module Viewer now shows VBA source + JS handlers. Intent extraction preserved for LLM reasoning.
 - **Event handlers now use JavaScript, not intents**: Complete architectural change to how VBA event handlers execute at runtime.
   - **VBA-to-JS parser** (`server/lib/vba-to-js.js`): Parses VBA procedures (`Sub btnSave_Click()`) into executable JavaScript strings calling `AC.*` runtime API. Handles DoCmd.OpenForm/OpenReport/Close/GoToRecord/RunSQL/Save/Quit/Requery, MsgBox, Me.Requery, Me.Refresh, Me.control.Visible/Enabled/value, control.SourceObject/Caption.
   - **JS handlers stored at import time**: `js_handlers JSONB` column on `shared.modules`. Auto-generated when modules are saved (PUT /api/modules/:name). All 511 existing modules backfilled.
@@ -263,7 +288,7 @@ Check results with: `GET /api/database-import/image-status?targetDatabaseId=nort
 ### Query Converter Pipeline
 - **Regex converter** (`server/lib/query-converter/`): deterministic, fast, free — handles ~90% of queries. Split into modules: `index.js` (entry), `syntax.js` (brackets, operators, schema prefixing), `functions.js` (Access→PG function map), `ddl.js` (view/function DDL generation), `form-state.js` (form/TempVar ref resolution), `utils.js` (sanitizeName).
 - **LLM fallback** (`server/lib/query-converter/llm-fallback.js`): called when regex output fails PG execution. Sends original Access SQL + failed PG SQL + error + full schema context (tables, views, columns, functions) to Claude Sonnet. Response parsed, executed in transaction.
-- **VBA stubs** (`server/lib/vba-stub-generator.js`): creates placeholder PG functions from VBA module declarations so views referencing UDFs can be created before full VBA translation.
+- **VBA stubs** (`server/lib/vba-stub-generator.js`): creates placeholder PG functions from VBA module declarations so views referencing UDFs can be created before full VBA translation. Handles `ParamArray` (excluded from stubs — optional in VBA) and enum types (mapped to `integer` via `collectEnumNames`). Skips functions that already exist — bad stubs must be manually dropped.
 
 ### Test Coverage
 - `server/__tests__/query-converter.test.js` — 95 tests, comprehensive. Touch the converter? Run these.

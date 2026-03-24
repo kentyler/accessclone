@@ -324,4 +324,4 @@ Fix the SQL and return a valid CREATE OR REPLACE VIEW or CREATE OR REPLACE FUNCT
   return { statements, pgObjectType, warnings };
 }
 
-module.exports = { convertQueryWithLLM };
+module.exports = { convertQueryWithLLM, buildSchemaContext };

@@ -391,50 +391,12 @@
     (str (:value ast))))
 
 (defn- rewrite-server-fn-controls
-  "Scan form def for control-sources with server-side function calls.
-   For forms with no record-source, creates a synthetic record-source SELECT.
-   For forms with an existing record-source, wraps it to add the function columns.
-   Returns the updated form definition."
-  [form-def schema]
-  (let [rewrites (atom [])
-        rewrite-controls
-        (fn [controls]
-          (mapv (fn [ctrl]
-                  (if-let [cs (:control-source ctrl)]
-                    (if (str/starts-with? cs "=")
-                      (try
-                        (let [expr-str (subs cs 1)
-                              tokens (expr/tokenize expr-str)
-                              ast (expr/parse tokens)]
-                          (if (server-fn-call? ast)
-                            (let [col-alias (str/lower-case (:name ctrl))
-                                  sql-expr (ast->sql ast schema)]
-                              (swap! rewrites conj {:col-alias col-alias :sql-expr sql-expr})
-                              (-> ctrl (dissoc :control-source) (assoc :field col-alias)))
-                            ctrl))
-                        (catch :default _ ctrl))
-                      ctrl)
-                    ctrl))
-                controls))
-        updated-def (cond-> form-def
-                      (:header form-def)
-                      (update-in [:header :controls] rewrite-controls)
-                      (:detail form-def)
-                      (update-in [:detail :controls] rewrite-controls)
-                      (:footer form-def)
-                      (update-in [:footer :controls] rewrite-controls))]
-    (if (seq @rewrites)
-      (let [select-cols (str/join ", " (map #(str (:sql-expr %) " AS " (:col-alias %))
-                                            @rewrites))
-            existing-rs (:record-source updated-def)]
-        (if existing-rs
-          ;; Wrap existing record-source to add function columns
-          (assoc updated-def :record-source
-                 (str "SELECT sub.*, " select-cols " FROM (" existing-rs ") sub"))
-          ;; No record-source — create synthetic
-          (assoc updated-def :record-source
-                 (str "SELECT " select-cols))))
-      updated-def)))
+  "No-op — previously rewrote VBA function calls in control-sources into synthetic
+   SQL record-sources, but this assumed the functions existed as PG functions.
+   Now we keep control-source expressions as-is; the expression evaluator or
+   JS runtime handles them at display time."
+  [form-def _schema]
+  form-def)
 
 ;; Local state for the viewer
 (defonce viewer-state
@@ -1307,7 +1269,9 @@
 (defn reimport-object!
   "Re-import a single form or report from the Access source database.
    Reads the Access DB path from viewer-state (falls back to server-saved import state).
-   Uses the current database as target. Returns a channel yielding true or {:error msg}."
+   Uses the current database as target. Returns a channel yielding true or {:error msg}.
+   On success, also re-converts the record-source query, re-translates the class module,
+   and runs repair + validation passes."
   [object-type object-name]
   (go
     (let [;; Try viewer-state first, then fall back to saved import state on the server
@@ -1315,7 +1279,7 @@
                              (let [resp (<! (http/get (str api-base "/api/session/import-state")))]
                                (first (or (seq (:selected_paths (:body resp)))
                                           (when-let [p (:loaded_path (:body resp))] [p])))))
-          target-db-id (:current-database @state/app-state)]
+          target-db-id (:database_id (:current-database @state/app-state))]
       (if (and access-db-path target-db-id)
         (let [result (case object-type
                        :forms (<! (import-form! access-db-path object-name target-db-id))
@@ -1330,7 +1294,47 @@
                   img-resp (<! (http/post (str api-base "/api/database-import/import-images")
                                           {:json-params img-params}))]
               (when (and (:success img-resp) (pos? (get-in img-resp [:body :imageCount] 0)))
-                (println (str "[REIMPORT] Imported images for " object-name)))))
+                (println (str "[REIMPORT] Imported images for " object-name))))
+
+            ;; Step A: Re-convert record-source query (if not a raw SELECT or table)
+            (let [api-type (if (= object-type :forms) "forms" "reports")
+                  def-resp (<! (http/get (str api-base "/api/" api-type "/" object-name)
+                                         {:headers {"X-Database-ID" target-db-id}}))
+                  record-source (when (:success def-resp)
+                                  (get-in def-resp [:body :record-source]))]
+              (when (and record-source
+                         (not (re-find #"(?i)^\s*SELECT\s" record-source)))
+                (println (str "[REIMPORT] Re-converting query: " record-source))
+                (let [q-result (<! (import-query! access-db-path record-source target-db-id {:force? true}))]
+                  (if (true? q-result)
+                    (println (str "[REIMPORT] Query re-converted: " record-source))
+                    (println (str "[REIMPORT] Query re-conversion skipped: " record-source))))))
+
+            ;; Step B: Re-translate class module (Form_X or Report_X)
+            (let [module-prefix (if (= object-type :forms) "Form_" "Report_")
+                  module-name (str module-prefix object-name)
+                  translate-resp (<! (http/post (str api-base "/api/database-import/translate-modules")
+                                                {:json-params {:database_id target-db-id
+                                                               :module_names [module-name]}}))]
+              (when (:success translate-resp)
+                (println (str "[REIMPORT] Module translated: " module-name))))
+
+            ;; Step B2: Resolve VBA UDF expressions for this specific object
+            (let [resolve-resp (<! (http/post (str api-base "/api/database-import/resolve-expressions")
+                                              {:json-params {:database_id target-db-id}
+                                               :headers {"X-Database-ID" target-db-id}
+                                               :timeout 300000}))]
+              (when (and (:success resolve-resp)
+                         (seq (get-in resolve-resp [:body :translated])))
+                (println (str "[REIMPORT] Expressions resolved: "
+                              (count (get-in resolve-resp [:body :translated])) " functions"))))
+
+            ;; Step C: Run repair + validation passes
+            (<! (http/post (str api-base "/api/database-import/repair-pass")
+                           {:json-params {:database_id target-db-id}}))
+            (<! (http/post (str api-base "/api/database-import/validation-pass")
+                           {:json-params {:database_id target-db-id}}))
+            (println "[REIMPORT] Repair + validation complete"))
           result)
         {:error "No Access database configured. Visit the Import tab first."}))))
 
@@ -1474,6 +1478,27 @@
             (.log js/console "[IMPORT] Module translation:" (clj->js (:body resp)))))
         (catch js/Error e
           (.warn js/console "[IMPORT] Module translation failed (non-fatal):" (.-message e)))))))
+
+(defn- resolve-expressions-phase!
+  "Translate VBA UDFs referenced in form/report expressions from stubs to real PG implementations."
+  [{:keys [target-database-id]}]
+  (go
+    (try
+      (swap! viewer-state assoc-in [:import-all-status :phase] :resolving-expressions)
+      (swap! viewer-state assoc-in [:import-all-status :current] "Resolving VBA expressions...")
+      (let [resp (<! (http/post (str api-base "/api/database-import/resolve-expressions")
+                                {:json-params {:database_id target-database-id}
+                                 :headers {"X-Database-ID" target-database-id}
+                                 :timeout 300000}))]
+        (when (:success resp)
+          (let [body (:body resp)]
+            (.log js/console "[IMPORT] Expression resolution:"
+                  (count (:translated body)) "translated,"
+                  (count (:failed body)) "failed,"
+                  (:formsUpdated body) "forms updated,"
+                  (:reportsUpdated body) "reports updated"))))
+      (catch js/Error e
+        (.warn js/console "[IMPORT] Expression resolution failed (non-fatal):" (.-message e))))))
 
 (defn- import-macros-phase!
   "Import macros."
@@ -1643,6 +1668,7 @@
       (<! (import-ui-phase! ctx))
       (<! (import-modules-phase! ctx))
       (<! (import-queries-phase! ctx))
+      (<! (resolve-expressions-phase! ctx))
       (<! (import-macros-phase! ctx))
       (<! (extract-object-intents-phase! ctx))
       (<! (wire-events-phase! ctx))

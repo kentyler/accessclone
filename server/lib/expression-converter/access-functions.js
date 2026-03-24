@@ -141,6 +141,21 @@ function translateAccessFunctions(sql) {
     sql = sql.replace(/\bTrue\b/gi, 'true').replace(/\bFalse\b/gi, 'false');
     if (sql !== prev) { changed = true; continue; }
 
+    // Access Date/Time/Now functions → PG equivalents (before schema-prefix phase)
+    sql = sql.replace(/\bDate\s*\(\s*\)/gi, 'CURRENT_DATE');
+    if (sql !== prev) { changed = true; continue; }
+    sql = sql.replace(/\bTime\s*\(\s*\)/gi, 'CURRENT_TIME');
+    if (sql !== prev) { changed = true; continue; }
+    sql = sql.replace(/\bNow\s*\(\s*\)/gi, 'CURRENT_TIMESTAMP');
+    if (sql !== prev) { changed = true; continue; }
+
+    // Access double-quoted strings → PG single-quoted strings
+    sql = sql.replace(/"([^"]*?)"/g, (match, inner) => {
+      if (/^[a-zA-Z_]\w*$/.test(inner)) return `'${inner}'`;
+      return `'${inner.replace(/'/g, "''")}'`;
+    });
+    if (sql !== prev) { changed = true; continue; }
+
     sql = sql.replace(/\s*&\s*/g, ' || ');
     if (sql !== prev) { changed = true; continue; }
   }

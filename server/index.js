@@ -16,7 +16,9 @@ const PORT = config.server.port;
 
 // Directories
 const SETTINGS_DIR = path.join(__dirname, '..', 'settings');
-const UI_PUBLIC_DIR = path.join(__dirname, '..', 'ui', 'resources', 'public');
+const UI_PUBLIC_DIR = process.env.USE_REACT_UI
+  ? path.join(__dirname, '..', 'ui-react', 'dist')
+  : path.join(__dirname, '..', 'ui', 'resources', 'public');
 
 // Database connection pool
 const pool = new Pool({

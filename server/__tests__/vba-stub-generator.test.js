@@ -1,4 +1,4 @@
-const { parseVbaDeclarations, mapVbaTypeToPg, buildStubDDL } = require('../lib/vba-stub-generator');
+const { parseVbaDeclarations, mapVbaTypeToPg, buildStubDDL, collectEnumNames } = require('../lib/vba-stub-generator');
 
 // ============================================================
 // mapVbaTypeToPg
@@ -22,6 +22,16 @@ describe('mapVbaTypeToPg', () => {
     expect(mapVbaTypeToPg('SomeCustomType')).toBe('text');
     expect(mapVbaTypeToPg(null)).toBe('text');
     expect(mapVbaTypeToPg(undefined)).toBe('text');
+  });
+
+  test('maps enum types to integer when enumNames provided', () => {
+    const enumNames = new Set(['enumstrings', 'enumcolors']);
+    expect(mapVbaTypeToPg('enumStrings', enumNames)).toBe('integer');
+    expect(mapVbaTypeToPg('EnumColors', enumNames)).toBe('integer');
+    // Known types still take precedence
+    expect(mapVbaTypeToPg('Long', enumNames)).toBe('bigint');
+    // Unknown types without enum match stay text
+    expect(mapVbaTypeToPg('SomeClass', enumNames)).toBe('text');
   });
 });
 
@@ -115,6 +125,58 @@ End Function
     expect(decls).toHaveLength(1);
     expect(decls[0].name).toBe('Counter');
   });
+
+  test('handles ParamArray parameter', () => {
+    const source = `
+Public Function GetString(ByVal ID As enumStrings, ParamArray params() As Variant) As String
+End Function
+`;
+    const decls = parseVbaDeclarations(source);
+    expect(decls).toHaveLength(1);
+    expect(decls[0].name).toBe('GetString');
+    expect(decls[0].returnType).toBe('String');
+    expect(decls[0].params).toHaveLength(2);
+    expect(decls[0].params[0]).toEqual({ name: 'ID', type: 'enumStrings' });
+    expect(decls[0].params[1]).toEqual({ name: 'params', type: 'Variant', isParamArray: true });
+  });
+});
+
+// ============================================================
+// collectEnumNames
+// ============================================================
+
+describe('collectEnumNames', () => {
+  test('collects public and private enum names', () => {
+    const source = `
+Public Enum enumStrings
+    sHelloWorld = 1
+    sGoodbye = 2
+End Enum
+
+Private Enum enumColors
+    Red = 1
+    Blue = 2
+End Enum
+`;
+    const enums = collectEnumNames(source);
+    expect(enums.has('enumstrings')).toBe(true);
+    expect(enums.has('enumcolors')).toBe(true);
+  });
+
+  test('returns empty set for null/empty source', () => {
+    expect(collectEnumNames(null).size).toBe(0);
+    expect(collectEnumNames('').size).toBe(0);
+  });
+
+  test('collects enum without access modifier', () => {
+    const source = `
+Enum SimpleEnum
+    A = 1
+End Enum
+`;
+    const enums = collectEnumNames(source);
+    expect(enums.has('simpleenum')).toBe(true);
+  });
 });
 
 // ============================================================
@@ -160,5 +222,37 @@ describe('buildStubDDL', () => {
     expect(sql).toContain('"x" anyelement');
     expect(sql).toContain('RETURNS text');
     expect(sql).toContain('LANGUAGE sql');
+  });
+
+  test('excludes ParamArray params from stub signature', () => {
+    const decl = {
+      name: 'GetString',
+      params: [
+        { name: 'ID', type: 'enumStrings' },
+        { name: 'params', type: 'Variant', isParamArray: true }
+      ],
+      returnType: 'String',
+      isSub: false
+    };
+    const sql = buildStubDDL('db_northwind', decl);
+    // Should only have the ID param, not the ParamArray param
+    expect(sql).toContain('"id"');
+    expect(sql).not.toContain('"params"');
+    expect(sql).toContain('RETURNS text');
+  });
+
+  test('maps enum type to integer when enumNames provided', () => {
+    const decl = {
+      name: 'GetString',
+      params: [{ name: 'ID', type: 'enumStrings' }],
+      returnType: 'String',
+      isSub: false
+    };
+    const enumNames = new Set(['enumstrings']);
+    const sql = buildStubDDL('db_northwind', decl, enumNames);
+    expect(sql).toContain('"id" integer');
+    expect(sql).toContain('RETURNS text');
+    // integer param means no anyelement, so should use plpgsql
+    expect(sql).toContain('LANGUAGE plpgsql');
   });
 });

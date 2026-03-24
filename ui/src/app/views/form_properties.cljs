@@ -313,6 +313,9 @@
                     is-control? #(cond
                                    (event-flag-keys %) (resolve-event-value selected-control %)
                                    (link-field-keys %) (link-fields->str (get selected-control %))
+                                   ;; Control Source falls back to :field when :control-source is absent
+                                   (= % :control-source) (or (get selected-control :control-source)
+                                                              (get selected-control :field))
                                    :else (get selected-control %))
                     is-section? #(if (event-flag-keys %)
                                    (resolve-event-value section-data %)

@@ -26,7 +26,14 @@
       "Bash(powershell:*)",
       "Bash(\"C:/Program Files/PostgreSQL/18/bin/psql.exe\":*)",
       "Bash(mv:*)",
-      "Bash(taskkill:*)"
+      "Bash(taskkill:*)",
+      "Bash(PGPASSWORD=7297 \"C:/Program Files/PostgreSQL/18/bin/psql\":*)",
+      "Bash(xargs wc:*)",
+      "Bash(\"C:/Program Files/PostgreSQL/18/bin/psql\":*)",
+      "Bash(\"/c/Program Files/PostgreSQL/18/bin/psql\":*)",
+      "Bash(PGPASSWORD=7297 \"/c/Program Files/PostgreSQL/18/bin/psql\":*)",
+      "Bash(set PGPASSWORD=7297:*)",
+      "Bash(PGPASSWORD=7297 psql:*)"
     ]
   }
 }

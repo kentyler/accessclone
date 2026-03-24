@@ -1312,6 +1312,15 @@ header.header {
   border-color: var(--primary);
 }
 
+.view-textarea {
+  resize: none;
+  overflow: auto;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+  font-family: inherit;
+  background-color: #fff;
+}
+
 .view-rich-text {
   overflow: auto;
   word-wrap: break-word;

@@ -925,7 +925,7 @@
           (let [response (<! (http/get (str api-base "/api/forms/" source-form-name)
                                         {:headers (db-headers)}))]
             (if (:success response)
-              (let [def (:body response)]
+              (let [def (normalize-form-definition (:body response))]
                 (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :definition] def)
                 (swap! app-state assoc-in [:form-editor :subform-cache source-form-name :projection]
                        (projection/build-projection def)))

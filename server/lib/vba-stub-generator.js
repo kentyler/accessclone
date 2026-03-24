@@ -27,10 +27,14 @@ const VBA_TYPE_MAP = {
 /**
  * Map a VBA type name to a PostgreSQL type.
  * Returns 'text' for unknown or missing types.
+ * If enumNames set is provided, maps enum types to integer (VBA enums are Long integers).
  */
-function mapVbaTypeToPg(vbaType) {
+function mapVbaTypeToPg(vbaType, enumNames) {
   if (!vbaType) return 'text';
-  return VBA_TYPE_MAP[vbaType.toLowerCase()] || 'text';
+  const mapped = VBA_TYPE_MAP[vbaType.toLowerCase()];
+  if (mapped) return mapped;
+  if (enumNames && enumNames.has(vbaType.toLowerCase())) return 'integer';
+  return 'text';
 }
 
 /**
@@ -42,7 +46,8 @@ function parseVbaDeclarations(vbaSource) {
 
   const declarations = [];
   // Match: [Public|Private] [Static] Function|Sub Name(params) [As Type]
-  const pattern = /(?:^|\n)\s*(?:(?:Public|Private)\s+)?(?:Static\s+)?(?:Function|Sub)\s+(\w+)\s*\(([^)]*)\)(?:\s+As\s+(\w+))?/gi;
+  // Uses [^()]* with optional nested parens to handle ParamArray params() syntax
+  const pattern = /(?:^|\n)\s*(?:(?:Public|Private)\s+)?(?:Static\s+)?(?:Function|Sub)\s+(\w+)\s*\(([^()]*(?:\([^)]*\)[^()]*)*)\)(?:\s+As\s+(\w+))?/gi;
 
   let match;
   while ((match = pattern.exec(vbaSource)) !== null) {
@@ -51,7 +56,7 @@ function parseVbaDeclarations(vbaSource) {
     const returnType = match[3] || null;
     const isSub = /\bSub\b/i.test(match[0]);
 
-    // Parse parameters: "ByVal x As Long, Optional y As String = """
+    // Parse parameters: "ByVal x As Long, Optional y As String = "", ParamArray p() As Variant"
     const params = [];
     if (paramStr) {
       const paramParts = paramStr.split(',');
@@ -59,16 +64,18 @@ function parseVbaDeclarations(vbaSource) {
         const trimmed = part.trim();
         if (!trimmed) continue;
 
-        // Remove Optional, ByVal, ByRef prefixes
-        const cleaned = trimmed.replace(/^(Optional\s+|ByVal\s+|ByRef\s+)+/i, '');
+        // Detect ParamArray before stripping prefixes
+        const isParamArray = /^ParamArray\s+/i.test(trimmed);
 
-        // Match: paramName [As Type] [= default]
-        const paramMatch = cleaned.match(/^(\w+)(?:\s+As\s+(\w+))?/i);
+        // Remove Optional, ByVal, ByRef, ParamArray prefixes
+        const cleaned = trimmed.replace(/^(Optional\s+|ByVal\s+|ByRef\s+|ParamArray\s+)+/i, '');
+
+        // Match: paramName[()][As Type] [= default]  (ParamArray uses () after name)
+        const paramMatch = cleaned.match(/^(\w+)(?:\(\))?(?:\s+As\s+(\w+))?/i);
         if (paramMatch) {
-          params.push({
-            name: paramMatch[1],
-            type: paramMatch[2] || null
-          });
+          const param = { name: paramMatch[1], type: paramMatch[2] || null };
+          if (isParamArray) param.isParamArray = true;
+          params.push(param);
         }
       }
     }
@@ -82,16 +89,21 @@ function parseVbaDeclarations(vbaSource) {
 /**
  * Build a CREATE OR REPLACE FUNCTION statement for a stub.
  * Subs become void functions. Functions return NULL of the appropriate type.
+ * ParamArray params are excluded (they're optional/variadic in VBA).
+ * Optional enumNames set maps VBA enum types to integer.
  */
-function buildStubDDL(schemaName, decl) {
+function buildStubDDL(schemaName, decl, enumNames) {
   const pgName = sanitizeName(decl.name);
-  const pgReturnType = decl.isSub ? 'void' : mapVbaTypeToPg(decl.returnType);
+  const pgReturnType = decl.isSub ? 'void' : mapVbaTypeToPg(decl.returnType, enumNames);
 
-  const hasVariant = decl.params.some(p => !p.type || p.type.toLowerCase() === 'variant');
+  // Filter out ParamArray params — they're variadic/optional in VBA
+  const stubParams = decl.params.filter(p => !p.isParamArray);
 
-  const pgParams = decl.params.map(p => {
+  const hasVariant = stubParams.some(p => !p.type || p.type.toLowerCase() === 'variant');
+
+  const pgParams = stubParams.map(p => {
     const pName = sanitizeName(p.name);
-    const pType = (!p.type || p.type.toLowerCase() === 'variant') ? 'anyelement' : mapVbaTypeToPg(p.type);
+    const pType = (!p.type || p.type.toLowerCase() === 'variant') ? 'anyelement' : mapVbaTypeToPg(p.type, enumNames);
     return `"${pName}" ${pType}`;
   }).join(', ');
 
@@ -106,6 +118,21 @@ function buildStubDDL(schemaName, decl) {
 
   const body = 'BEGIN\n  RETURN NULL;\nEND;';
   return `CREATE OR REPLACE FUNCTION "${schemaName}"."${pgName}"(${pgParams}) RETURNS ${pgReturnType} AS $$\n${body}\n$$ LANGUAGE plpgsql;`;
+}
+
+/**
+ * Collect Enum type names from VBA source code.
+ * VBA enums are always Long integers, so their names should map to integer in PG.
+ */
+function collectEnumNames(vbaSource) {
+  const enums = new Set();
+  if (!vbaSource) return enums;
+  const pattern = /(?:^|\n)\s*(?:Public\s+|Private\s+)?Enum\s+(\w+)/gi;
+  let match;
+  while ((match = pattern.exec(vbaSource)) !== null) {
+    enums.add(match[1].toLowerCase());
+  }
+  return enums;
 }
 
 /**
@@ -141,6 +168,14 @@ async function createStubFunctions(pool, schemaName, databaseId) {
   );
   const existingFunctions = new Set(existingResult.rows.map(r => r.routine_name));
 
+  // 2b. Collect enum names across all modules (VBA enums → integer in PG)
+  const enumNames = new Set();
+  for (const mod of modulesResult.rows) {
+    for (const name of collectEnumNames(mod.vba_source)) {
+      enumNames.add(name);
+    }
+  }
+
   // 3. Parse declarations from each module
   const allDeclarations = [];
   for (const mod of modulesResult.rows) {
@@ -169,7 +204,7 @@ async function createStubFunctions(pool, schemaName, databaseId) {
 
       try {
         await client.query(`SAVEPOINT stub_${pgName.replace(/\W/g, '_')}`);
-        const ddl = buildStubDDL(schemaName, decl);
+        const ddl = buildStubDDL(schemaName, decl, enumNames);
         await client.query(ddl);
         await client.query(`RELEASE SAVEPOINT stub_${pgName.replace(/\W/g, '_')}`);
         created.push(pgName);
@@ -287,6 +322,7 @@ module.exports = {
   parseVbaDeclarations,
   mapVbaTypeToPg,
   buildStubDDL,
+  collectEnumNames,
   createStubFunctions,
   ensureStubsForSQL
 };

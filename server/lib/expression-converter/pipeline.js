@@ -8,6 +8,7 @@ const { sanitizeName, formStateSubquery, translateTempVars, translateFormRefs, r
 const { quoteIdent } = require('../access-types');
 const { DOMAIN_FN_RE, hasDomainFunctions, translateDomainFunction } = require('./domain-functions');
 const { parseArguments, findCloseParen, translateAccessFunctions } = require('./access-functions');
+const { addSchemaFunctionPrefix } = require('../query-converter/syntax');
 
 /**
  * Translate Form!controlName (self-reference within the current form) to
@@ -38,6 +39,9 @@ function translateFormSelfRefs(sql, formName, controlMapping) {
 function translateExpression(expression, schemaName, columnTypes, formName, controlMapping) {
   let expr = expression.trim();
   if (expr.startsWith('=')) expr = expr.substring(1);
+
+  // Strip import-artifact backslash-escaped quotes (PowerShell serialization)
+  expr = expr.replace(/\\"/g, '"');
 
   // Phase 0: Translate Form!/Forms!/TempVars references
   expr = translateTempVars(expr);
@@ -95,6 +99,11 @@ function translateExpression(expression, schemaName, columnTypes, formName, cont
 
   // Phase 4: Translate remaining Access functions
   sql = translateAccessFunctions(sql);
+
+  // Phase 4.5: Schema-prefix user-defined function calls so getstring(41) becomes "schema"."getstring"(41)
+  if (schemaName) {
+    sql = addSchemaFunctionPrefix(sql, schemaName);
+  }
 
   // Phase 5: Build parameter list with types
   const colTypes = columnTypes instanceof Map ? columnTypes : new Map(Object.entries(columnTypes || {}));

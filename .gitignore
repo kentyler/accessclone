@@ -9,6 +9,7 @@ node_modules/
 # Build output
 ui/resources/public/js/
 ui/.shadow-cljs/
+ui-react/dist/
 electron/dist/
 
 # Access database files

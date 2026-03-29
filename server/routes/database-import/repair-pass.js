@@ -5,6 +5,7 @@
 
 const { logError } = require('../../lib/events');
 const { getSchemaInfo } = require('../lint');
+const { sanitizeName } = require('../../lib/query-converter/utils');
 
 module.exports = function(router, pool) {
 
@@ -31,8 +32,8 @@ module.exports = function(router, pool) {
 
       // 1. Load all current forms and reports
       const [formsRes, reportsRes] = await Promise.all([
-        pool.query(`SELECT id, name, definition, record_source FROM shared.forms WHERE database_id = $1 AND is_current = true AND owner = 'standard'`, [database_id]),
-        pool.query(`SELECT id, name, definition, record_source FROM shared.reports WHERE database_id = $1 AND is_current = true AND owner = 'standard'`, [database_id])
+        pool.query(`SELECT id, name, definition, record_source FROM shared.objects WHERE database_id = $1 AND type = 'form' AND is_current = true AND owner = 'standard'`, [database_id]),
+        pool.query(`SELECT id, name, definition, record_source FROM shared.objects WHERE database_id = $1 AND type = 'report' AND is_current = true AND owner = 'standard'`, [database_id])
       ]);
 
       // 2. Check and repair form bindings
@@ -79,11 +80,78 @@ module.exports = function(router, pool) {
 
         if (modified) {
           await pool.query(
-            'UPDATE shared.forms SET definition = $1 WHERE id = $2',
+            'UPDATE shared.objects SET definition = $1 WHERE id = $2',
             [def, form.id]
           );
           fixed++;
         }
+      }
+
+      // 2b. Convert VBA expression control-sources to record-source queries
+      // Pattern: form has no record-source, control has =FuncName(args) calling a UDF
+      // Fix: build SELECT schema.funcname(args) AS controlname, set as record-source, rebind control
+      for (const form of formsRes.rows) {
+        const def = form.definition;
+        if (!def || typeof def !== 'object') continue;
+
+        const existingRS = form.record_source || def['record-source'] || '';
+        if (existingRS) continue; // already has a record source
+
+        // Collect expression control-sources that call functions
+        const exprControls = [];
+        for (const [sectionKey, section] of Object.entries(def)) {
+          if (!section || !Array.isArray(section.controls)) continue;
+          for (const ctrl of section.controls) {
+            const cs = ctrl['control-source'] || '';
+            if (typeof cs === 'string' && cs.startsWith('=')) {
+              const funcMatch = cs.substring(1).match(/^([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*$/);
+              if (funcMatch) {
+                exprControls.push({ ctrl, sectionKey, funcName: funcMatch[1], args: funcMatch[2], expression: cs });
+              }
+            }
+          }
+        }
+
+        if (exprControls.length === 0) continue;
+
+        // Check which functions exist in the PG schema
+        const existingFuncs = await pool.query(
+          `SELECT routine_name FROM information_schema.routines WHERE routine_schema = $1`,
+          [schemaName]
+        );
+        const funcSet = new Set(existingFuncs.rows.map(r => r.routine_name));
+
+        const selectParts = [];
+        const rebinds = []; // { ctrl, alias }
+        for (const ec of exprControls) {
+          const pgFuncName = sanitizeName(ec.funcName);
+          if (!funcSet.has(pgFuncName)) continue; // function doesn't exist in PG
+
+          const alias = sanitizeName(ec.ctrl.name || ec.ctrl.id || pgFuncName);
+          selectParts.push(`"${schemaName}"."${pgFuncName}"(${ec.args}) AS ${alias}`);
+          rebinds.push({ ctrl: ec.ctrl, alias });
+        }
+
+        if (selectParts.length === 0) continue;
+
+        const newRecordSource = `SELECT ${selectParts.join(', ')}`;
+        def['record-source'] = newRecordSource;
+
+        for (const { ctrl, alias } of rebinds) {
+          delete ctrl['control-source'];
+          ctrl.field = alias;
+        }
+
+        // Save updated definition
+        await pool.query(
+          'UPDATE shared.objects SET definition = $1, record_source = $2 WHERE id = $3',
+          [def, newRecordSource, form.id]
+        );
+        fixed++;
+
+        await logIssue(pool, run_id, database_id, form.name, 'form', 'info',
+          'expression-to-recordsource',
+          `Converted ${rebinds.length} VBA expression control-source(s) to record-source query: ${newRecordSource}`);
       }
 
       // 3. Check report bindings (same logic)

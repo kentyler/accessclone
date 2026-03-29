@@ -99,8 +99,8 @@ module.exports = function(router, pool, secrets) {
       if (translateResult.translated.length > 0) {
         // Re-process forms
         const formsResult = await pool.query(
-          `SELECT name, definition FROM shared.forms
-           WHERE database_id = $1 AND is_current = true AND definition IS NOT NULL`,
+          `SELECT name, definition FROM shared.objects
+           WHERE database_id = $1 AND type = 'form' AND is_current = true AND definition IS NOT NULL`,
           [database_id]
         );
         for (const form of formsResult.rows) {
@@ -113,8 +113,8 @@ module.exports = function(router, pool, secrets) {
             );
             if (functions.length > 0) {
               await pool.query(
-                `UPDATE shared.forms SET definition = $1
-                 WHERE name = $2 AND database_id = $3 AND is_current = true`,
+                `UPDATE shared.objects SET definition = $1
+                 WHERE type = 'form' AND name = $2 AND database_id = $3 AND is_current = true`,
                 [JSON.stringify(updated), form.name, database_id]
               );
               formsUpdated++;
@@ -127,8 +127,8 @@ module.exports = function(router, pool, secrets) {
 
         // Re-process reports
         const reportsResult = await pool.query(
-          `SELECT name, definition FROM shared.reports
-           WHERE database_id = $1 AND is_current = true AND definition IS NOT NULL`,
+          `SELECT name, definition FROM shared.objects
+           WHERE database_id = $1 AND type = 'report' AND is_current = true AND definition IS NOT NULL`,
           [database_id]
         );
         for (const report of reportsResult.rows) {
@@ -141,8 +141,8 @@ module.exports = function(router, pool, secrets) {
             );
             if (functions.length > 0) {
               await pool.query(
-                `UPDATE shared.reports SET definition = $1
-                 WHERE name = $2 AND database_id = $3 AND is_current = true`,
+                `UPDATE shared.objects SET definition = $1
+                 WHERE type = 'report' AND name = $2 AND database_id = $3 AND is_current = true`,
                 [JSON.stringify(updated), report.name, database_id]
               );
               reportsUpdated++;
@@ -175,8 +175,8 @@ async function scanForUDFCalls(pool, databaseId) {
   const allUDFs = new Set();
 
   const formsResult = await pool.query(
-    `SELECT definition FROM shared.forms
-     WHERE database_id = $1 AND is_current = true AND definition IS NOT NULL`,
+    `SELECT definition FROM shared.objects
+     WHERE database_id = $1 AND type = 'form' AND is_current = true AND definition IS NOT NULL`,
     [databaseId]
   );
   for (const row of formsResult.rows) {
@@ -185,8 +185,8 @@ async function scanForUDFCalls(pool, databaseId) {
   }
 
   const reportsResult = await pool.query(
-    `SELECT definition FROM shared.reports
-     WHERE database_id = $1 AND is_current = true AND definition IS NOT NULL`,
+    `SELECT definition FROM shared.objects
+     WHERE database_id = $1 AND type = 'report' AND is_current = true AND definition IS NOT NULL`,
     [databaseId]
   );
   for (const row of reportsResult.rows) {

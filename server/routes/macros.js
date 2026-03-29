@@ -1,6 +1,7 @@
 /**
  * Macro routes with append-only versioning
- * Handles reading/writing Access macros from shared.macros table
+ * Handles reading/writing Access macros from shared.objects table (type='macro')
+ * Macro-specific data (macro_xml, cljs_source, review_notes) stored in definition JSONB
  * Each save creates a new version; old versions are preserved
  */
 
@@ -18,11 +19,11 @@ function createRouter(pool) {
       const databaseId = req.databaseId;
 
       const result = await pool.query(
-        `SELECT name, description, status, review_notes, version, created_at,
-                (macro_xml IS NOT NULL) as has_macro_xml,
-                (cljs_source IS NOT NULL) as has_cljs_source
-         FROM shared.macros
-         WHERE database_id = $1 AND is_current = true
+        `SELECT name, description, status, definition->>'review_notes' as review_notes, version, created_at,
+                (definition->>'macro_xml' IS NOT NULL) as has_macro_xml,
+                (definition->>'cljs_source' IS NOT NULL) as has_cljs_source
+         FROM shared.objects
+         WHERE database_id = $1 AND type = 'macro' AND is_current = true
          ORDER BY name`,
         [databaseId]
       );
@@ -39,15 +40,16 @@ function createRouter(pool) {
   /**
    * GET /api/macros/:name
    * Read the current version of a macro
+   * Returns a flat object with macro_xml, etc. extracted from definition JSONB
    */
   router.get('/:name', async (req, res) => {
     try {
       const databaseId = req.databaseId;
 
       const result = await pool.query(
-        `SELECT name, macro_xml, cljs_source, description, status, review_notes, version, created_at
-         FROM shared.macros
-         WHERE database_id = $1 AND name = $2 AND is_current = true`,
+        `SELECT name, definition, description, status, version, created_at
+         FROM shared.objects
+         WHERE database_id = $1 AND type = 'macro' AND name = $2 AND is_current = true`,
         [databaseId, req.params.name]
       );
 
@@ -55,7 +57,19 @@ function createRouter(pool) {
         return res.status(404).json({ error: 'Macro not found' });
       }
 
-      res.json(result.rows[0]);
+      // Flatten definition fields into the response to maintain API compatibility
+      const row = result.rows[0];
+      const def = row.definition || {};
+      res.json({
+        name: row.name,
+        macro_xml: def.macro_xml || null,
+        cljs_source: def.cljs_source || null,
+        description: row.description,
+        status: row.status,
+        review_notes: def.review_notes || null,
+        version: row.version,
+        created_at: row.created_at
+      });
     } catch (err) {
       console.error('Error reading macro:', err);
       logError(pool, 'GET /api/macros/:name', 'Failed to read macro', err, { databaseId: req.databaseId });
@@ -79,26 +93,33 @@ function createRouter(pool) {
       // Get current max version for this macro
       const versionResult = await client.query(
         `SELECT COALESCE(MAX(version), 0) as max_version
-         FROM shared.macros
-         WHERE database_id = $1 AND name = $2`,
+         FROM shared.objects
+         WHERE database_id = $1 AND type = 'macro' AND name = $2`,
         [databaseId, macroName]
       );
       const newVersion = versionResult.rows[0].max_version + 1;
 
       // Mark all existing versions as not current
       await client.query(
-        `UPDATE shared.macros
+        `UPDATE shared.objects
          SET is_current = false
-         WHERE database_id = $1 AND name = $2 AND is_current = true`,
+         WHERE database_id = $1 AND type = 'macro' AND name = $2 AND is_current = true`,
         [databaseId, macroName]
       );
 
+      // Build definition JSONB
+      const definition = {
+        macro_xml: macro_xml || null,
+        cljs_source: cljs_source || null,
+        review_notes: review_notes || null
+      };
+
       // Insert new version as current
       await client.query(
-        `INSERT INTO shared.macros (database_id, name, macro_xml, cljs_source, description, status, review_notes, version, is_current)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)`,
-        [databaseId, macroName, macro_xml || null, cljs_source || null, description || null,
-         status || 'pending', review_notes || null, newVersion]
+        `INSERT INTO shared.objects (database_id, type, name, definition, description, status, version, is_current)
+         VALUES ($1, 'macro', $2, $3, $4, $5, $6, true)`,
+        [databaseId, macroName, JSON.stringify(definition), description || null,
+         status || 'pending', newVersion]
       );
 
       await client.query('COMMIT');

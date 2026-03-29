@@ -132,6 +132,56 @@ function stripBoilerplate(body) {
 }
 
 /**
+ * Translate the right-hand side of a VBA variable assignment to JS.
+ * Returns a JS expression string or null if untranslatable.
+ * @param {string} rhs - The RHS of the assignment (already trimmed)
+ */
+function translateAssignmentRHS(rhs) {
+  if (!rhs) return null;
+  const s = rhs.trim();
+
+  // String literal: "text"
+  if (/^"[^"]*"$/.test(s)) return s;
+
+  // Numeric literal: 123, 3.14
+  if (/^\d+(\.\d+)?$/.test(s)) return s;
+
+  // Boolean literals
+  if (/^True$/i.test(s)) return 'true';
+  if (/^False$/i.test(s)) return 'false';
+
+  // Me.OpenArgs
+  if (/^Me\.OpenArgs$/i.test(s)) return 'AC.getOpenArgs()';
+
+  // Me.ControlName (simple property read — value)
+  const meCtrl = s.match(/^Me\.(\w+)$/i);
+  if (meCtrl) {
+    const name = meCtrl[1];
+    // Skip known non-control properties
+    if (/^(Name|Caption|RecordSource|Filter|OrderBy|Section|Hwnd|HasModule|CurrentView|DefaultView)$/i.test(name)) {
+      return null;
+    }
+    return `AC.getValue(${JSON.stringify(name)})`;
+  }
+
+  // Nz(Me.OpenArgs, default) or Nz(Me.OpenArgs)
+  const nzMatch = s.match(/^Nz\s*\(\s*(.+?)\s*(?:,\s*(.+?))?\s*\)$/i);
+  if (nzMatch) {
+    const inner = translateAssignmentRHS(nzMatch[1]);
+    if (!inner) return null;
+    if (nzMatch[2] !== undefined) {
+      const def = translateAssignmentRHS(nzMatch[2].trim());
+      if (!def) return null;
+      return `AC.nz(${inner}, ${def})`;
+    }
+    return `AC.nz(${inner})`;
+  }
+
+  // Anything else — untranslatable
+  return null;
+}
+
+/**
  * Translate a single VBA statement to a JS expression calling AC.*.
  * Returns a JS string or null if unrecognized.
  * @param {string} stmt - VBA statement
@@ -272,8 +322,10 @@ function translateStatement(stmt, formName) {
  * Translate a VBA boolean expression to a JS condition string.
  * Returns null if the condition is untranslatable (conservative — better to
  * skip than to execute the wrong branch).
+ * @param {string} vbaCond - VBA condition expression
+ * @param {Set<string>} [assignedVars] - Variables that have been assigned translatable values
  */
-function translateCondition(vbaCond) {
+function translateCondition(vbaCond, assignedVars) {
   if (!vbaCond) return null;
   const cond = vbaCond.trim();
 
@@ -284,7 +336,7 @@ function translateCondition(vbaCond) {
   // Not <condition> — recursive
   const notMatch = cond.match(/^Not\s+(.+)$/i);
   if (notMatch) {
-    const inner = translateCondition(notMatch[1]);
+    const inner = translateCondition(notMatch[1], assignedVars);
     return inner ? `!(${inner})` : null;
   }
 
@@ -296,7 +348,7 @@ function translateCondition(vbaCond) {
   ]) {
     const parts = cond.split(vbaOp);
     if (parts.length >= 2) {
-      const translated = parts.map(p => translateCondition(p.trim()));
+      const translated = parts.map(p => translateCondition(p.trim(), assignedVars));
       if (translated.every(t => t !== null)) {
         return translated.join(jsOp);
       }
@@ -304,22 +356,40 @@ function translateCondition(vbaCond) {
     }
   }
 
-  // IsNull(Me.OpenArgs) — no web equivalent for OpenArgs
-  if (/^IsNull\s*\(\s*Me\.OpenArgs\s*\)$/i.test(cond)) return null;
+  // Me.NewRecord → AC.isNewRecord()
+  if (/^Me\.NewRecord$/i.test(cond)) return 'AC.isNewRecord()';
 
-  // IsNull(expr) → expr == null
-  const isNullMatch = cond.match(/^IsNull\s*\(\s*(.+)\s*\)$/i);
-  if (isNullMatch) {
-    const inner = isNullMatch[1].trim();
-    // If it references Me.something or a local variable, still try
-    if (/^Me\.\w+$/i.test(inner)) {
-      return null; // Can't read control values at runtime yet
-    }
-    return null; // Conservative — most IsNull args reference runtime state
+  // Me.Dirty → AC.isDirty()
+  if (/^Me\.Dirty$/i.test(cond)) return 'AC.isDirty()';
+
+  // IsNull(Me.OpenArgs) → AC.getOpenArgs() == null
+  if (/^IsNull\s*\(\s*Me\.OpenArgs\s*\)$/i.test(cond)) return 'AC.getOpenArgs() == null';
+
+  // IsNull(Me.ctrl) → AC.getValue("ctrl") == null
+  const isNullMeMatch = cond.match(/^IsNull\s*\(\s*Me\.(\w+)\s*\)$/i);
+  if (isNullMeMatch) {
+    return `AC.getValue(${JSON.stringify(isNullMeMatch[1])}) == null`;
   }
 
-  // Me.NewRecord, Me.Dirty — no JS equivalent
-  if (/^Me\.(NewRecord|Dirty)$/i.test(cond)) return null;
+  // IsNull(variable) where variable is assigned
+  const isNullVarMatch = cond.match(/^IsNull\s*\(\s*(\w+)\s*\)$/i);
+  if (isNullVarMatch && assignedVars && assignedVars.has(isNullVarMatch[1].toLowerCase())) {
+    return `${isNullVarMatch[1]} == null`;
+  }
+
+  // Me.ctrl.Visible = True/False
+  const visCheck = cond.match(/^Me\.(\w+)\.Visible\s*=\s*(True|False|-1|0)\b/i);
+  if (visCheck) {
+    const val = /true|-1/i.test(visCheck[2]);
+    return val ? `AC.getVisible(${JSON.stringify(visCheck[1])})` : `!(AC.getVisible(${JSON.stringify(visCheck[1])}))`;
+  }
+
+  // Me.ctrl.Enabled = True/False
+  const enCheck = cond.match(/^Me\.(\w+)\.Enabled\s*=\s*(True|False|-1|0)\b/i);
+  if (enCheck) {
+    const val = /true|-1/i.test(enCheck[2]);
+    return val ? `AC.getEnabled(${JSON.stringify(enCheck[1])})` : `!(AC.getEnabled(${JSON.stringify(enCheck[1])}))`;
+  }
 
   // MsgBox("text"...) = vbYes → confirm("text")
   const msgBoxYesMatch = cond.match(/^MsgBox\s*\(\s*"([^"]+)".*\)\s*=\s*vbYes$/i);
@@ -331,20 +401,37 @@ function translateCondition(vbaCond) {
   const cmpMatch = cond.match(/^(.+?)\s*(=|<>|<|>|<=|>=)\s*(.+)$/);
   if (cmpMatch) {
     const [, lhs, op, rhs] = cmpMatch;
-    // Only translate if both sides are simple literals or known patterns
     const jsOp = op === '=' ? '===' : op === '<>' ? '!==' : op;
-
-    // Check if lhs/rhs reference local VBA variables or runtime state
     const lhsTrimmed = lhs.trim();
     const rhsTrimmed = rhs.trim();
 
-    // Simple literal on the right: "string", number, True/False
     const isLiteral = (s) => /^"[^"]*"$/.test(s) || /^\d+(\.\d+)?$/.test(s) || /^(True|False)$/i.test(s);
+    const toLiteral = (s) => {
+      if (/^True$/i.test(s)) return 'true';
+      if (/^False$/i.test(s)) return 'false';
+      return s;
+    };
 
-    // We can't translate comparisons involving local VBA variables
-    if (!isLiteral(lhsTrimmed) && !isLiteral(rhsTrimmed)) return null;
+    // Variable comparison: x = "Add" where x is in assignedVars
+    if (assignedVars && assignedVars.has(lhsTrimmed.toLowerCase()) && isLiteral(rhsTrimmed)) {
+      return `${lhsTrimmed} ${jsOp} ${toLiteral(rhsTrimmed)}`;
+    }
+    if (assignedVars && assignedVars.has(rhsTrimmed.toLowerCase()) && isLiteral(lhsTrimmed)) {
+      return `${toLiteral(lhsTrimmed)} ${jsOp} ${rhsTrimmed}`;
+    }
 
-    return null; // Conservative: most comparisons reference runtime VBA state
+    // Me.ctrl compared to literal
+    const meLhs = lhsTrimmed.match(/^Me\.(\w+)$/i);
+    if (meLhs && isLiteral(rhsTrimmed)) {
+      return `AC.getValue(${JSON.stringify(meLhs[1])}) ${jsOp} ${toLiteral(rhsTrimmed)}`;
+    }
+
+    // Me.OpenArgs compared to literal
+    if (/^Me\.OpenArgs$/i.test(lhsTrimmed) && isLiteral(rhsTrimmed)) {
+      return `AC.getOpenArgs() ${jsOp} ${toLiteral(rhsTrimmed)}`;
+    }
+
+    return null; // Conservative: can't translate unknown comparisons
   }
 
   // Anything else — untranslatable
@@ -408,8 +495,13 @@ function findEndKeyword(lines, startIdx, startWord, endWord) {
  * Parse a multi-line If/ElseIf/Else/End If block.
  * Returns { jsLines: string[], endIdx: number } where endIdx is the line
  * index of the End If.
+ * @param {string[]} lines
+ * @param {number} startIdx
+ * @param {string} formName
+ * @param {Set<string>} [variables] - Declared variables
+ * @param {Set<string>} [assignedVars] - Variables with translatable assignments
  */
-function parseIfBlock(lines, startIdx, formName) {
+function parseIfBlock(lines, startIdx, formName, variables, assignedVars) {
   // Collect branches: [{condition, bodyLines}]
   const branches = [];
   let depth = 0;
@@ -478,8 +570,8 @@ function parseIfBlock(lines, startIdx, formName) {
 
   // Check if all conditions are translatable
   const translatedBranches = branches.map(b => {
-    const jsCond = b.condition !== null ? translateCondition(b.condition) : null; // null condition = Else branch
-    const { jsLines: bodyJs } = translateBlock(b.bodyLines, 0, formName);
+    const jsCond = b.condition !== null ? translateCondition(b.condition, assignedVars) : null; // null condition = Else branch
+    const { jsLines: bodyJs } = translateBlock(b.bodyLines, 0, formName, variables, assignedVars);
     return { condition: b.condition, jsCond, bodyJs, isElse: b.condition === null };
   });
 
@@ -526,26 +618,235 @@ function parseIfBlock(lines, startIdx, formName) {
 }
 
 /**
- * Translate a block of VBA lines into JS, recognizing control flow.
- * Replaces the flat for loop — handles If/Else, skips Select Case and loops.
+ * Parse a Select Case block into a JS switch statement or if/else chain.
  * Returns { jsLines: string[], endIdx: number }.
  */
-function translateBlock(lines, startIdx, formName) {
+function parseSelectCaseBlock(lines, startIdx, formName, variables, assignedVars) {
+  const caseLine = lines[startIdx];
+  const caseMatch = caseLine.match(/^Select\s+Case\s+(.+)$/i);
+  if (!caseMatch) return { jsLines: [`// [VBA Select Case block skipped]`], endIdx: startIdx };
+
+  const exprRaw = caseMatch[1].trim();
+  let jsExpr = null;
+  let hasCaseIs = false;
+
+  // Translate the switch expression
+  if (assignedVars && assignedVars.has(exprRaw.toLowerCase())) {
+    jsExpr = exprRaw;
+  } else if (/^Me\.OpenArgs$/i.test(exprRaw)) {
+    jsExpr = 'AC.getOpenArgs()';
+  } else {
+    const meMatch = exprRaw.match(/^Me\.(\w+)$/i);
+    if (meMatch && !/^(Name|Caption|RecordSource|Filter|OrderBy)$/i.test(meMatch[1])) {
+      jsExpr = `AC.getValue(${JSON.stringify(meMatch[1])})`;
+    }
+  }
+
+  // Find End Select
+  const endIdx = findEndKeyword(lines, startIdx + 1, 'SELECT CASE');
+
+  // If expression is untranslatable, emit as comment
+  if (!jsExpr) {
+    const jsLines = ['// [VBA Select Case - expression not translatable]'];
+    for (let j = startIdx; j <= Math.min(endIdx, lines.length - 1); j++) {
+      jsLines.push(`// ${lines[j]}`);
+    }
+    return { jsLines, endIdx };
+  }
+
+  // Parse Case branches between startIdx+1 and endIdx
+  const branches = [];
+  let currentBranch = null;
+
+  for (let j = startIdx + 1; j < endIdx && j < lines.length; j++) {
+    const line = lines[j].trim();
+
+    // Case Is > N, Case Is < N, etc.
+    const caseIsMatch = line.match(/^Case\s+Is\s*(>=|<=|<>|>|<|=)\s*(.+)$/i);
+    if (caseIsMatch) {
+      if (currentBranch) branches.push(currentBranch);
+      hasCaseIs = true;
+      currentBranch = { type: 'is', op: caseIsMatch[1], value: caseIsMatch[2].trim(), bodyLines: [] };
+      continue;
+    }
+
+    // Case Else
+    if (/^Case\s+Else$/i.test(line)) {
+      if (currentBranch) branches.push(currentBranch);
+      currentBranch = { type: 'else', bodyLines: [] };
+      continue;
+    }
+
+    // Case "val1", "val2" or Case 1, 2, 3
+    const caseValMatch = line.match(/^Case\s+(.+)$/i);
+    if (caseValMatch) {
+      if (currentBranch) branches.push(currentBranch);
+      // Parse comma-separated values
+      const valuesRaw = caseValMatch[1].split(',').map(v => v.trim());
+      currentBranch = { type: 'values', values: valuesRaw, bodyLines: [] };
+      continue;
+    }
+
+    if (currentBranch) currentBranch.bodyLines.push(line);
+  }
+  if (currentBranch) branches.push(currentBranch);
+
+  const jsLines = [];
+
+  if (hasCaseIs) {
+    // Emit as if/else if chain (switch can't handle comparison operators)
+    branches.forEach((b, idx) => {
+      if (b.type === 'else') {
+        jsLines.push('} else {');
+      } else if (b.type === 'is') {
+        const jsOp = b.op === '=' ? '===' : b.op === '<>' ? '!==' : b.op;
+        const lit = /^True$/i.test(b.value) ? 'true' : /^False$/i.test(b.value) ? 'false' : b.value;
+        if (idx === 0) {
+          jsLines.push(`if (${jsExpr} ${jsOp} ${lit}) {`);
+        } else {
+          jsLines.push(`} else if (${jsExpr} ${jsOp} ${lit}) {`);
+        }
+      } else if (b.type === 'values') {
+        // Values in an if/else chain: x === "A" || x === "B"
+        const conds = b.values.map(v => {
+          const lit = /^True$/i.test(v) ? 'true' : /^False$/i.test(v) ? 'false' : v;
+          return `${jsExpr} === ${lit}`;
+        }).join(' || ');
+        if (idx === 0) {
+          jsLines.push(`if (${conds}) {`);
+        } else {
+          jsLines.push(`} else if (${conds}) {`);
+        }
+      }
+      const { jsLines: bodyJs } = translateBlock(b.bodyLines, 0, formName, variables, assignedVars);
+      for (const bodyLine of bodyJs) {
+        jsLines.push('  ' + bodyLine);
+      }
+    });
+    jsLines.push('}');
+  } else {
+    // Emit as switch/case
+    jsLines.push(`switch (${jsExpr}) {`);
+    for (const b of branches) {
+      if (b.type === 'else') {
+        jsLines.push('  default:');
+      } else if (b.type === 'values') {
+        for (const v of b.values) {
+          const lit = /^True$/i.test(v) ? 'true' : /^False$/i.test(v) ? 'false' : v;
+          jsLines.push(`  case ${lit}:`);
+        }
+      }
+      const { jsLines: bodyJs } = translateBlock(b.bodyLines, 0, formName, variables, assignedVars);
+      for (const bodyLine of bodyJs) {
+        jsLines.push('    ' + bodyLine);
+      }
+      if (b.type !== 'else') {
+        jsLines.push('    break;');
+      }
+    }
+    jsLines.push('}');
+  }
+
+  return { jsLines, endIdx };
+}
+
+/**
+ * Parse a numeric For loop into a JS for statement.
+ * Returns { jsLines: string[], endIdx: number } or null if non-numeric bounds.
+ */
+function parseForLoop(lines, startIdx, formName, variables, assignedVars) {
+  const forLine = lines[startIdx];
+  const forMatch = forLine.match(/^For\s+(\w+)\s*=\s*(\S+)\s+To\s+(\S+)(?:\s+Step\s+(-?\d+))?$/i);
+  if (!forMatch) return null;
+
+  const [, varName, startVal, endVal, stepVal] = forMatch;
+
+  // Only translate numeric bounds
+  if (!/^-?\d+$/.test(startVal) || !/^-?\d+$/.test(endVal)) return null;
+
+  const step = stepVal ? parseInt(stepVal) : 1;
+  const start = parseInt(startVal);
+  const end = parseInt(endVal);
+
+  const endIdx = findEndKeyword(lines, startIdx + 1, 'FOR');
+  const bodyLines = lines.slice(startIdx + 1, endIdx);
+
+  // Loop variable is available in body
+  const innerVars = new Set(variables || []);
+  innerVars.add(varName.toLowerCase());
+  const innerAssigned = new Set(assignedVars || []);
+  innerAssigned.add(varName.toLowerCase());
+
+  const { jsLines: bodyJs } = translateBlock(bodyLines, 0, formName, innerVars, innerAssigned);
+
+  const cmp = step > 0 ? '<=' : '>=';
+  const inc = step === 1 ? `${varName}++` : step === -1 ? `${varName}--` : `${varName} += ${step}`;
+  const jsLines = [`for (let ${varName} = ${start}; ${varName} ${cmp} ${end}; ${inc}) {`];
+  for (const bodyLine of bodyJs) {
+    jsLines.push('  ' + bodyLine);
+  }
+  jsLines.push('}');
+
+  return { jsLines, endIdx };
+}
+
+/**
+ * Translate a block of VBA lines into JS, recognizing control flow.
+ * Handles If/Else, Select Case, numeric For loops, variable tracking.
+ * Returns { jsLines: string[], endIdx: number }.
+ * @param {string[]} lines
+ * @param {number} startIdx
+ * @param {string} formName
+ * @param {Set<string>} [variables] - Declared variable names (lowercase)
+ * @param {Set<string>} [assignedVars] - Variables with translatable RHS values (lowercase)
+ */
+function translateBlock(lines, startIdx, formName, variables, assignedVars) {
   const jsLines = [];
   let i = startIdx;
+
+  // Initialize variable tracking Sets (shared across entire procedure)
+  if (!variables) variables = new Set();
+  if (!assignedVars) assignedVars = new Set();
 
   while (i < lines.length) {
     const line = lines[i].trim();
 
-    // Skip Dim, Set, Const, GoTo (VBA-only constructs)
-    if (/^(Dim|Set|Const|GoTo)\s+/i.test(line)) {
+    // Dim x As Type → let x; (track variable)
+    const dimMatch = line.match(/^Dim\s+(\w+)/i);
+    if (dimMatch) {
+      const varName = dimMatch[1].toLowerCase();
+      variables.add(varName);
+      jsLines.push(`let ${dimMatch[1]};`);
+      i++;
+      continue;
+    }
+
+    // Skip Set, Const, GoTo (VBA-only constructs)
+    if (/^(Set|Const|GoTo)\s+/i.test(line)) {
+      i++;
+      continue;
+    }
+
+    // Variable assignment: x = <rhs> where x is a declared variable
+    const assignMatch = line.match(/^(\w+)\s*=\s*(.+)$/);
+    if (assignMatch && variables.has(assignMatch[1].toLowerCase())) {
+      const varName = assignMatch[1];
+      const rhs = translateAssignmentRHS(assignMatch[2].trim());
+      if (rhs) {
+        assignedVars.add(varName.toLowerCase());
+        jsLines.push(`${varName} = ${rhs};`);
+      } else {
+        // Untranslatable RHS — emit as comment but still track the variable
+        // (it was assigned, just to something we can't translate)
+        jsLines.push(`// ${line}`);
+      }
       i++;
       continue;
     }
 
     // Block If ... Then (multi-line — no statement after Then)
     if (/^If\s+.+\s+Then\s*$/i.test(line)) {
-      const result = parseIfBlock(lines, i, formName);
+      const result = parseIfBlock(lines, i, formName, variables, assignedVars);
       jsLines.push(...result.jsLines);
       i = result.endIdx + 1;
       continue;
@@ -554,7 +855,7 @@ function translateBlock(lines, startIdx, formName) {
     // Single-line If: If <cond> Then <stmt>
     const singleIfMatch = line.match(/^If\s+(.+?)\s+Then\s+(.+)$/i);
     if (singleIfMatch) {
-      const cond = translateCondition(singleIfMatch[1]);
+      const cond = translateCondition(singleIfMatch[1], assignedVars);
       const stmt = translateStatement(singleIfMatch[2].trim(), formName);
       if (cond && stmt) {
         jsLines.push(`if (${cond}) { ${stmt}; }`);
@@ -566,25 +867,34 @@ function translateBlock(lines, startIdx, formName) {
       continue;
     }
 
-    // Select Case — skip to End Select
+    // Select Case — try to translate, fall back to comment
     if (/^Select\s+Case\b/i.test(line)) {
-      const endIdx = findEndKeyword(lines, i + 1, 'SELECT CASE');
-      jsLines.push(`// [VBA Select Case block skipped]`);
-      i = endIdx + 1;
+      const result = parseSelectCaseBlock(lines, i, formName, variables, assignedVars);
+      jsLines.push(...result.jsLines);
+      i = result.endIdx + 1;
       continue;
     }
 
-    // For / For Each — skip to Next
+    // For Each — still skipped (collection iteration)
     if (/^For\s+Each\s+/i.test(line)) {
       const endIdx = findEndKeyword(lines, i + 1, 'FOR EACH');
       jsLines.push(`// [VBA For Each loop skipped]`);
       i = endIdx + 1;
       continue;
     }
+
+    // Numeric For — try to translate
     if (/^For\s+/i.test(line)) {
-      const endIdx = findEndKeyword(lines, i + 1, 'FOR');
-      jsLines.push(`// [VBA For loop skipped]`);
-      i = endIdx + 1;
+      const result = parseForLoop(lines, i, formName, variables, assignedVars);
+      if (result) {
+        jsLines.push(...result.jsLines);
+        i = result.endIdx + 1;
+      } else {
+        // Non-numeric or complex bounds — skip
+        const endIdx = findEndKeyword(lines, i + 1, 'FOR');
+        jsLines.push(`// [VBA For loop skipped]`);
+        i = endIdx + 1;
+      }
       continue;
     }
 
@@ -683,4 +993,5 @@ function parseVbaToHandlers(vbaSource, moduleName) {
 module.exports = {
   parseVbaToHandlers, extractProcedures, stripBoilerplate, translateStatement,
   translateCondition, translateBlock, parseIfBlock, findEndKeyword,
+  translateAssignmentRHS, parseSelectCaseBlock, parseForLoop,
 };

@@ -352,6 +352,103 @@ module.exports = function(pool) {
   });
 
   /**
+   * GET /api/graph/subgraph
+   * Fetch a subgraph: nodes matching requested types + database_id, plus edges between them.
+   * Query params: database_id, types (comma-separated), include_global (true/false)
+   */
+  router.get('/subgraph', async (req, res) => {
+    try {
+      const { database_id, types, include_global } = req.query;
+      const typeList = types ? types.split(',').map(t => t.trim()) : ['table', 'form'];
+      const wantGlobal = include_global === 'true';
+
+      // Build WHERE clause for nodes
+      const conditions = [];
+      const params = [];
+      let idx = 1;
+
+      // Local nodes: match types + database_id
+      const typePlaceholders = typeList.map(t => { params.push(t); return `$${idx++}`; });
+      let nodeQuery = `node_type IN (${typePlaceholders.join(',')})`;
+      if (database_id) {
+        params.push(database_id);
+        nodeQuery += ` AND database_id = $${idx++}`;
+      }
+
+      // Global nodes (potentials + capabilities) when requested
+      let globalClause = '';
+      if (wantGlobal) {
+        globalClause = ` OR (node_type IN ('potential', 'capability') AND scope = 'global')`;
+      }
+
+      const sql = `
+        WITH matched_nodes AS (
+          SELECT * FROM shared._nodes WHERE (${nodeQuery})${globalClause}
+        )
+        SELECT 'node' AS _kind, n.id, n.node_type, n.name, n.database_id, n.scope, n.origin, n.metadata, NULL AS from_id, NULL AS to_id, NULL AS rel_type, NULL AS status
+        FROM matched_nodes n
+        UNION ALL
+        SELECT 'edge' AS _kind, e.id, NULL, NULL, NULL, NULL, NULL, NULL, e.from_id, e.to_id, e.rel_type, e.status
+        FROM shared._edges e
+        WHERE e.from_id IN (SELECT id FROM matched_nodes)
+          AND e.to_id IN (SELECT id FROM matched_nodes)
+      `;
+
+      const result = await pool.query(sql, params);
+      const nodes = [];
+      const edges = [];
+      for (const row of result.rows) {
+        if (row._kind === 'node') {
+          nodes.push({ id: row.id, node_type: row.node_type, name: row.name, database_id: row.database_id, scope: row.scope, origin: row.origin, metadata: row.metadata || {} });
+        } else {
+          edges.push({ id: row.id, from_id: row.from_id, to_id: row.to_id, rel_type: row.rel_type, status: row.status });
+        }
+      }
+
+      res.json({ nodes, edges });
+    } catch (err) {
+      console.error('Error fetching subgraph:', err);
+      logError(pool, 'GET /api/graph/subgraph', 'Failed to fetch subgraph', err, { databaseId: req.databaseId });
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * GET /api/graph/children/:nodeId
+   * Get child nodes connected via outgoing 'contains' edges
+   */
+  router.get('/children/:nodeId', async (req, res) => {
+    try {
+      const { nodeId } = req.params;
+      const sql = `
+        SELECT 'node' AS _kind, n.id, n.node_type, n.name, n.database_id, n.scope, n.origin, n.metadata, NULL AS from_id, NULL AS to_id, NULL AS rel_type, NULL AS status
+        FROM shared._nodes n
+        JOIN shared._edges e ON e.to_id = n.id
+        WHERE e.from_id = $1 AND e.rel_type = 'contains'
+        UNION ALL
+        SELECT 'edge' AS _kind, e.id, NULL, NULL, NULL, NULL, NULL, NULL, e.from_id, e.to_id, e.rel_type, e.status
+        FROM shared._edges e
+        WHERE e.from_id = $1 AND e.rel_type = 'contains'
+      `;
+      const result = await pool.query(sql, [nodeId]);
+      const nodes = [];
+      const edges = [];
+      for (const row of result.rows) {
+        if (row._kind === 'node') {
+          nodes.push({ id: row.id, node_type: row.node_type, name: row.name, database_id: row.database_id, scope: row.scope, origin: row.origin, metadata: row.metadata || {} });
+        } else {
+          edges.push({ id: row.id, from_id: row.from_id, to_id: row.to_id, rel_type: row.rel_type, status: row.status });
+        }
+      }
+      res.json({ nodes, edges });
+    } catch (err) {
+      console.error('Error fetching children:', err);
+      logError(pool, 'GET /api/graph/children/:nodeId', 'Failed to fetch children', err, { databaseId: req.databaseId });
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
    * POST /api/graph/populate
    * Trigger schema population + seed architectural primitives
    */

@@ -155,6 +155,57 @@ function setSubformSource(subformControlName: string, sourceObject: string) {
   store.setFormDefinition(def);
 }
 
+function getValue(controlName: string): unknown {
+  const store = useFormStore.getState();
+  if (!store.projection) return null;
+  const key = ctrlToKey(controlName);
+  const cs = store.projection.controlState || {};
+  const state = cs[key];
+  if (state && state.caption !== undefined) return state.caption;
+  // Fall back to bound field value from current record
+  const record = store.projection.record;
+  if (record && key in record) return record[key];
+  return null;
+}
+
+function getVisible(controlName: string): boolean {
+  const store = useFormStore.getState();
+  if (!store.projection) return true;
+  const key = ctrlToKey(controlName);
+  const cs = store.projection.controlState || {};
+  const state = cs[key];
+  return state?.visible !== false;
+}
+
+function getEnabled(controlName: string): boolean {
+  const store = useFormStore.getState();
+  if (!store.projection) return true;
+  const key = ctrlToKey(controlName);
+  const cs = store.projection.controlState || {};
+  const state = cs[key];
+  return state?.enabled !== false;
+}
+
+function isDirty(): boolean {
+  const store = useFormStore.getState();
+  return !!(store.projection as unknown as Record<string, unknown>)?.['dirty?'];
+}
+
+function isNewRecord(): boolean {
+  const store = useFormStore.getState();
+  const record = store.projection?.record;
+  return !!(record as Record<string, unknown>)?.['__new__'];
+}
+
+function getOpenArgs(): null {
+  // Stub — future: thread OpenForm args through form open flow
+  return null;
+}
+
+function nz(value: unknown, defaultVal?: unknown): unknown {
+  return value ?? defaultVal ?? '';
+}
+
 function runSQL(sql: string) {
   api.post('/api/queries/execute', { sql }).catch(err => {
     console.warn('AC.runSQL failed:', err);
@@ -177,5 +228,12 @@ export function installRuntime() {
     setValue,
     setSubformSource,
     runSQL,
+    getValue,
+    getVisible,
+    getEnabled,
+    isDirty,
+    isNewRecord,
+    getOpenArgs,
+    nz,
   };
 }

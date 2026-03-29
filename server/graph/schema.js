@@ -487,6 +487,144 @@ DO $$ BEGIN
     ALTER TABLE shared.view_metadata ADD COLUMN writable_columns TEXT[] DEFAULT '{}';
   END IF;
 END $$;
+
+-- ============================================================
+-- Objects - unified storage for forms, reports, modules, macros
+-- Replaces shared.forms, shared.reports, shared.modules, shared.macros
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.objects (
+    id SERIAL PRIMARY KEY,
+    database_id VARCHAR(100) NOT NULL,
+    type VARCHAR(50) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    definition JSONB NOT NULL,
+    record_source VARCHAR(255),
+    description TEXT,
+    status VARCHAR(20) DEFAULT 'complete',
+    owner TEXT DEFAULT 'standard',
+    modified_by TEXT,
+    version INT NOT NULL DEFAULT 1,
+    is_current BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+
+    UNIQUE(database_id, type, name, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_objects_database ON shared.objects(database_id);
+CREATE INDEX IF NOT EXISTS idx_objects_current ON shared.objects(database_id, type, name) WHERE is_current = true;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_objects_user_current
+  ON shared.objects(database_id, type, name, owner) WHERE is_current = true;
+CREATE INDEX IF NOT EXISTS idx_objects_type ON shared.objects(database_id, type) WHERE is_current = true;
+
+-- ============================================================
+-- Intents - separated intent data (gesture, business/FIM, etc.)
+-- References shared.objects; replaces intents JSONB column
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.intents (
+    id SERIAL PRIMARY KEY,
+    object_id INT NOT NULL REFERENCES shared.objects(id),
+    intent_type VARCHAR(50) NOT NULL,
+    content JSONB NOT NULL,
+    graph_version INT,
+    generated_by VARCHAR(50),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_intents_object ON shared.intents(object_id);
+CREATE INDEX IF NOT EXISTS idx_intents_type ON shared.intents(object_id, intent_type);
+
+-- ============================================================
+-- Pipeline Steps — template definitions for self-healing pipeline
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.pipeline_steps (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL UNIQUE,
+    parent_id INTEGER REFERENCES shared.pipeline_steps(id),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    description TEXT,
+    intent_prompt TEXT,
+    artifact_invariants JSONB DEFAULT '[]',
+    deterministic_checks JSONB DEFAULT '[]',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- Pipeline Tasks — per-object per-run tracking
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.pipeline_tasks (
+    id SERIAL PRIMARY KEY,
+    run_id INTEGER NOT NULL REFERENCES shared.import_runs(id),
+    step_id INTEGER NOT NULL REFERENCES shared.pipeline_steps(id),
+    object_name TEXT NOT NULL,
+    object_type TEXT NOT NULL,
+    source_artifact TEXT,
+    converted_artifact TEXT,
+    intents JSONB,
+    status TEXT NOT NULL DEFAULT 'pending',
+    parent_task_id INTEGER REFERENCES shared.pipeline_tasks(id),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_pipeline_tasks_run ON shared.pipeline_tasks(run_id);
+CREATE INDEX IF NOT EXISTS idx_pipeline_tasks_status ON shared.pipeline_tasks(run_id, status);
+CREATE INDEX IF NOT EXISTS idx_pipeline_tasks_object ON shared.pipeline_tasks(run_id, object_name, object_type);
+
+-- ============================================================
+-- Pipeline Task Attempts — append-only history
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.pipeline_task_attempts (
+    id SERIAL PRIMARY KEY,
+    task_id INTEGER NOT NULL REFERENCES shared.pipeline_tasks(id),
+    attempt_number INTEGER NOT NULL DEFAULT 1,
+    attempt_type TEXT NOT NULL,
+    input_summary TEXT,
+    output_summary TEXT,
+    result JSONB,
+    duration_ms INTEGER,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_pipeline_attempts_task ON shared.pipeline_task_attempts(task_id);
+
+-- ============================================================
+-- Pipeline Task Evaluations — append-only evaluation results
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.pipeline_task_evaluations (
+    id SERIAL PRIMARY KEY,
+    task_id INTEGER NOT NULL REFERENCES shared.pipeline_tasks(id),
+    attempt_id INTEGER REFERENCES shared.pipeline_task_attempts(id),
+    evaluation_type TEXT NOT NULL,
+    passed BOOLEAN NOT NULL,
+    failure_class TEXT,
+    details JSONB,
+    evaluator TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_pipeline_evals_task ON shared.pipeline_task_evaluations(task_id);
+CREATE INDEX IF NOT EXISTS idx_pipeline_evals_failed ON shared.pipeline_task_evaluations(task_id) WHERE passed = false;
+
+-- Add app_profile column to import_runs
+ALTER TABLE shared.import_runs ADD COLUMN IF NOT EXISTS app_profile TEXT;
+
+-- Standalone evaluations table (decoupled from pipeline — used by form/report save)
+CREATE TABLE IF NOT EXISTS shared.evaluations (
+    id SERIAL PRIMARY KEY,
+    object_id INTEGER NOT NULL,
+    database_id VARCHAR(100) NOT NULL,
+    object_type VARCHAR(50) NOT NULL,
+    object_name VARCHAR(255) NOT NULL,
+    version INTEGER NOT NULL,
+    trigger TEXT NOT NULL DEFAULT 'save',
+    overall_passed BOOLEAN NOT NULL,
+    failure_class TEXT,
+    checks JSONB NOT NULL,
+    check_count INTEGER NOT NULL,
+    passed_count INTEGER NOT NULL,
+    failed_count INTEGER NOT NULL,
+    duration_ms INTEGER,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_evaluations_object ON shared.evaluations(object_id);
+CREATE INDEX IF NOT EXISTS idx_evaluations_lookup ON shared.evaluations(database_id, object_type, object_name);
 `;
 
 /**
@@ -1086,6 +1224,58 @@ async function seedPropertyCatalog(pool) {
 }
 
 /**
+ * Seed pipeline_steps with the import pipeline phase definitions.
+ * Idempotent via ON CONFLICT DO NOTHING.
+ */
+async function seedPipelineSteps(pool) {
+  // [name, sort_order, parent_name, description, deterministic_checks, artifact_invariants, intent_prompt]
+  const steps = [
+    ['scan', 1, null, 'Extract raw Access artifacts', '[]', '[]', null],
+    ['reconnaissance', 2, null, 'LLM reads full inventory, produces app profile', '[]', '[]', null],
+    ['intent_generation', 3, null, 'LLM generates testable intents per object', '[]', '[]', null],
+    ['tables', 10, null, 'Import tables to PostgreSQL', '[]', '[]', null],
+    ['forms', 20, null, 'Export and import Access forms',
+      '["record_source_exists","control_bindings_match","combo_sql_valid","structural_lint"]',
+      '[{"check":"record_source_preserved","desc":"Form with record-source must not lose it"},{"check":"control_count_preserved","desc":"Converted form must have same control count"},{"check":"section_count_preserved","desc":"Converted form must have same sections"}]',
+      'You are analyzing an Access form that has been imported into a web application.\n\nApplication profile:\n{app_profile}\n\nForm name: {object_name}\nRaw Access source (SaveAsText):\n{source_artifact}\n\nGenerate testable intents for this form. Each intent should be:\n1. Specific to this form (not generic)\n2. Verifiable against the converted output\n3. Categorized as \"data\" (record-source, bindings), \"behavior\" (events, navigation), or \"presentation\" (layout, formatting)\n\nReturn JSON: { "intents": [{"id": "f_001", "category": "data|behavior|presentation", "description": "...", "test": "how to verify this"}] }'
+    ],
+    ['reports', 30, null, 'Export and import Access reports', '[]', '[]', null],
+    ['modules', 40, null, 'Export modules, create stubs, translate VBA', '[]', '[]', null],
+    ['queries', 50, null, 'Convert Access queries to PG views', '[]', '[]', null],
+    ['resolve_expressions', 55, null, 'Resolve VBA UDF stubs to real PG implementations', '[]', '[]', null],
+    ['macros', 60, null, 'Export and store macros', '[]', '[]', null],
+    ['extract_intents', 65, null, 'LLM extracts business intents from objects', '[]', '[]', null],
+    ['wire_events', 67, null, 'Populate control_event_map', '[]', '[]', null],
+    ['validation', 70, null, 'Multi-pass validation root', '[]', '[]', null],
+    ['repair', 71, 'validation', 'Auto-fix bindings, retry queries', '[]', '[]', null],
+    ['lint_pass', 72, 'validation', 'Structural + cross-object validation', '[]', '[]', null],
+    ['autofix', 73, 'validation', 'LLM-powered auto-fix', '[]', '[]', null],
+    ['design_check', 74, 'validation', 'Design review', '[]', '[]', null],
+    ['evaluate', 80, null, 'Pipeline intent evaluation', '[]', '[]', null],
+  ];
+
+  // Insert steps without parents first, then update parent_id
+  for (const [name, sortOrder, parentName, description, checks, invariants, intentPrompt] of steps) {
+    await pool.query(`
+      INSERT INTO shared.pipeline_steps (name, sort_order, description, deterministic_checks, artifact_invariants, intent_prompt)
+      VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6)
+      ON CONFLICT (name) DO NOTHING
+    `, [name, sortOrder, description, checks, invariants, intentPrompt]);
+  }
+
+  // Set parent_id for child steps
+  for (const [name, , parentName] of steps) {
+    if (parentName) {
+      await pool.query(`
+        UPDATE shared.pipeline_steps
+        SET parent_id = (SELECT id FROM shared.pipeline_steps WHERE name = $1)
+        WHERE name = $2 AND parent_id IS NULL
+      `, [parentName, name]);
+    }
+  }
+}
+
+/**
  * Initialize the shared schema in the database
  * Creates graph tables (_nodes, _edges) and UI object tables (forms, reports)
  * @param {Pool} pool - PostgreSQL connection pool
@@ -1137,12 +1327,116 @@ async function initializeSchema(pool) {
     // Backfill view_metadata for databases imported before this table existed
     await backfillViewMetadata(pool);
 
-    console.log('Shared schema initialized (graph, forms, reports, property catalog)');
+    // Migrate legacy tables into shared.objects + shared.intents (idempotent)
+    await migrateToObjects(pool);
+
+    // Seed pipeline step definitions (idempotent)
+    await seedPipelineSteps(pool);
+
+    console.log('Shared schema initialized (graph, forms, reports, property catalog, pipeline)');
     return true;
   } catch (err) {
     console.error('Error initializing shared schema:', err.message);
     throw err;
   }
+}
+
+/**
+ * One-time migration: copy data from shared.forms, shared.reports,
+ * shared.modules, shared.macros into shared.objects + shared.intents.
+ * Idempotent — skips if shared.objects already has data.
+ */
+async function migrateToObjects(pool) {
+  const check = await pool.query('SELECT EXISTS (SELECT 1 FROM shared.objects LIMIT 1) AS has_data');
+  if (check.rows[0].has_data) return; // already migrated
+
+  // Also check if any legacy tables have data to migrate
+  const formsExist = await pool.query(`SELECT EXISTS (
+    SELECT 1 FROM information_schema.tables WHERE table_schema = 'shared' AND table_name = 'forms'
+  ) AS ok`);
+  if (!formsExist.rows[0].ok) return;
+
+  console.log('[MIGRATION] Migrating legacy tables into shared.objects + shared.intents...');
+
+  // Migrate forms
+  await pool.query(`
+    INSERT INTO shared.objects (database_id, type, name, definition, record_source, description, status, owner, modified_by, version, is_current, created_at)
+    SELECT database_id, 'form', name, definition, record_source, description, 'complete',
+           COALESCE(owner, 'standard'), modified_by, version, is_current, created_at
+    FROM shared.forms
+  `);
+
+  // Migrate reports
+  await pool.query(`
+    INSERT INTO shared.objects (database_id, type, name, definition, record_source, description, status, owner, modified_by, version, is_current, created_at)
+    SELECT database_id, 'report', name, definition, record_source, description, 'complete',
+           COALESCE(owner, 'standard'), modified_by, version, is_current, created_at
+    FROM shared.reports
+  `);
+
+  // Migrate modules — restructure columns into definition JSONB
+  await pool.query(`
+    INSERT INTO shared.objects (database_id, type, name, definition, record_source, description, status, owner, modified_by, version, is_current, created_at)
+    SELECT database_id, 'module', name,
+           jsonb_build_object(
+             'vba_source', vba_source,
+             'js_handlers', js_handlers,
+             'cljs_source', cljs_source,
+             'review_notes', review_notes
+           ),
+           NULL, description, COALESCE(status, 'pending'),
+           'standard', NULL, version, is_current, created_at
+    FROM shared.modules
+  `);
+
+  // Migrate macros — restructure columns into definition JSONB
+  await pool.query(`
+    INSERT INTO shared.objects (database_id, type, name, definition, record_source, description, status, owner, modified_by, version, is_current, created_at)
+    SELECT database_id, 'macro', name,
+           jsonb_build_object(
+             'macro_xml', macro_xml,
+             'cljs_source', cljs_source,
+             'review_notes', review_notes
+           ),
+           NULL, description, COALESCE(status, 'pending'),
+           'standard', NULL, version, is_current, created_at
+    FROM shared.macros
+  `);
+
+  // Migrate intents from forms
+  await pool.query(`
+    INSERT INTO shared.intents (object_id, intent_type, content, generated_by, created_at)
+    SELECT o.id, 'gesture', f.intents, 'import', f.created_at
+    FROM shared.forms f
+    JOIN shared.objects o ON o.database_id = f.database_id AND o.type = 'form' AND o.name = f.name AND o.version = f.version
+    WHERE f.intents IS NOT NULL
+  `);
+
+  // Migrate intents from reports
+  await pool.query(`
+    INSERT INTO shared.intents (object_id, intent_type, content, generated_by, created_at)
+    SELECT o.id, 'gesture', r.intents, 'import', r.created_at
+    FROM shared.reports r
+    JOIN shared.objects o ON o.database_id = r.database_id AND o.type = 'report' AND o.name = r.name AND o.version = r.version
+    WHERE r.intents IS NOT NULL
+  `);
+
+  // Migrate intents from modules
+  await pool.query(`
+    INSERT INTO shared.intents (object_id, intent_type, content, generated_by, created_at)
+    SELECT o.id, 'gesture', m.intents, 'import', m.created_at
+    FROM shared.modules m
+    JOIN shared.objects o ON o.database_id = m.database_id AND o.type = 'module' AND o.name = m.name AND o.version = m.version
+    WHERE m.intents IS NOT NULL
+  `);
+
+  const count = await pool.query('SELECT type, count(*) as cnt FROM shared.objects GROUP BY type ORDER BY type');
+  for (const row of count.rows) {
+    console.log(`  [MIGRATION] ${row.type}: ${row.cnt} rows`);
+  }
+  const intentCount = await pool.query('SELECT count(*) as cnt FROM shared.intents');
+  console.log(`  [MIGRATION] intents: ${intentCount.rows[0].cnt} rows`);
+  console.log('[MIGRATION] Done migrating to shared.objects + shared.intents');
 }
 
 /**

@@ -35,11 +35,11 @@ module.exports = function(router, pool) {
         // Collect all form and report names from the target database
         const [formsResult, reportsResult] = await Promise.all([
           pool.query(
-            `SELECT DISTINCT name FROM shared.forms WHERE database_id = $1 AND is_current = true AND owner = 'standard'`,
+            `SELECT DISTINCT name FROM shared.objects WHERE database_id = $1 AND type = 'form' AND is_current = true AND owner = 'standard'`,
             [targetDatabaseId]
           ),
           pool.query(
-            `SELECT DISTINCT name FROM shared.reports WHERE database_id = $1 AND is_current = true AND owner = 'standard'`,
+            `SELECT DISTINCT name FROM shared.objects WHERE database_id = $1 AND type = 'report' AND is_current = true AND owner = 'standard'`,
             [targetDatabaseId]
           )
         ]);
@@ -98,13 +98,11 @@ module.exports = function(router, pool) {
 
       for (const [key, imgs] of Object.entries(byObject)) {
         const [objectType, objectName] = key.split(':');
-        const table = objectType === 'form' ? 'shared.forms' : 'shared.reports';
-
         try {
           // Load current definition
           const defResult = await pool.query(
-            `SELECT definition FROM ${table} WHERE database_id = $1 AND name = $2 AND is_current = true AND owner = 'standard'`,
-            [targetDatabaseId, objectName]
+            `SELECT definition FROM shared.objects WHERE database_id = $1 AND type = $2 AND name = $3 AND is_current = true AND owner = 'standard'`,
+            [targetDatabaseId, objectType, objectName]
           );
           if (defResult.rows.length === 0) continue;
 
@@ -154,19 +152,19 @@ module.exports = function(router, pool) {
               await client.query('BEGIN');
 
               const versionResult = await client.query(
-                `SELECT COALESCE(MAX(version), 0) AS max_version FROM ${table} WHERE database_id = $1 AND name = $2`,
-                [targetDatabaseId, objectName]
+                `SELECT COALESCE(MAX(version), 0) AS max_version FROM shared.objects WHERE database_id = $1 AND type = $2 AND name = $3`,
+                [targetDatabaseId, objectType, objectName]
               );
               const newVersion = versionResult.rows[0].max_version + 1;
 
               await client.query(
-                `UPDATE ${table} SET is_current = false WHERE database_id = $1 AND name = $2 AND owner = 'standard' AND is_current = true`,
-                [targetDatabaseId, objectName]
+                `UPDATE shared.objects SET is_current = false WHERE database_id = $1 AND type = $2 AND name = $3 AND owner = 'standard' AND is_current = true`,
+                [targetDatabaseId, objectType, objectName]
               );
 
               await client.query(
-                `INSERT INTO ${table} (database_id, name, definition, record_source, version, is_current, owner, modified_by) VALUES ($1, $2, $3, $4, $5, true, 'standard', 'import-images')`,
-                [targetDatabaseId, objectName, definition, recordSource, newVersion]
+                `INSERT INTO shared.objects (database_id, type, name, definition, record_source, version, is_current, owner, modified_by) VALUES ($1, $2, $3, $4, $5, $6, true, 'standard', 'import-images')`,
+                [targetDatabaseId, objectType, objectName, definition, recordSource, newVersion]
               );
 
               await client.query('COMMIT');
@@ -211,11 +209,11 @@ module.exports = function(router, pool) {
 
       const [formsResult, reportsResult] = await Promise.all([
         pool.query(
-          `SELECT name, definition FROM shared.forms WHERE database_id = $1 AND is_current = true AND owner = 'standard'`,
+          `SELECT name, definition FROM shared.objects WHERE database_id = $1 AND type = 'form' AND is_current = true AND owner = 'standard'`,
           [targetDatabaseId]
         ),
         pool.query(
-          `SELECT name, definition FROM shared.reports WHERE database_id = $1 AND is_current = true AND owner = 'standard'`,
+          `SELECT name, definition FROM shared.objects WHERE database_id = $1 AND type = 'report' AND is_current = true AND owner = 'standard'`,
           [targetDatabaseId]
         )
       ]);

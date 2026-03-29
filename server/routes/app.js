@@ -38,10 +38,10 @@ module.exports = function(pool) {
         pool.query(`SELECT count(*) FROM information_schema.tables WHERE table_schema = $1 AND table_type = 'BASE TABLE'`, [schemaName]),
         pool.query(`SELECT count(*) FROM information_schema.views WHERE table_schema = $1`, [schemaName]),
         pool.query(`SELECT count(*) FROM information_schema.routines WHERE routine_schema = $1`, [schemaName]),
-        pool.query(`SELECT count(DISTINCT name) FROM shared.forms WHERE database_id = $1 AND is_current = true AND owner = 'standard'`, [databaseId]),
-        pool.query(`SELECT count(DISTINCT name) FROM shared.reports WHERE database_id = $1 AND is_current = true AND owner = 'standard'`, [databaseId]),
-        pool.query(`SELECT count(DISTINCT name) FROM shared.modules WHERE database_id = $1 AND is_current = true`, [databaseId]),
-        pool.query(`SELECT count(DISTINCT name) FROM shared.macros WHERE database_id = $1 AND is_current = true`, [databaseId])
+        pool.query(`SELECT count(DISTINCT name) FROM shared.objects WHERE database_id = $1 AND type = 'form' AND is_current = true AND owner = 'standard'`, [databaseId]),
+        pool.query(`SELECT count(DISTINCT name) FROM shared.objects WHERE database_id = $1 AND type = 'report' AND is_current = true AND owner = 'standard'`, [databaseId]),
+        pool.query(`SELECT count(DISTINCT name) FROM shared.objects WHERE database_id = $1 AND type = 'module' AND is_current = true`, [databaseId]),
+        pool.query(`SELECT count(DISTINCT name) FROM shared.objects WHERE database_id = $1 AND type = 'macro' AND is_current = true`, [databaseId])
       ]);
 
       const imported = {
@@ -77,7 +77,7 @@ module.exports = function(pool) {
       try {
         const statusRes = await pool.query(
           `SELECT COALESCE(status, 'pending') as status, count(*) as cnt
-           FROM (SELECT DISTINCT ON (name) name, status FROM shared.modules WHERE database_id = $1 AND is_current = true) sub
+           FROM (SELECT DISTINCT ON (name) name, status FROM shared.objects WHERE database_id = $1 AND type = 'module' AND is_current = true) sub
            GROUP BY status`,
           [databaseId]
         );
@@ -88,7 +88,9 @@ module.exports = function(pool) {
 
         // Aggregate intent stats across all modules
         const intentRes = await pool.query(
-          `SELECT intents FROM shared.modules WHERE database_id = $1 AND is_current = true AND intents IS NOT NULL`,
+          `SELECT i.content as intents FROM shared.intents i
+           JOIN shared.objects o ON o.id = i.object_id
+           WHERE o.database_id = $1 AND o.type = 'module' AND o.is_current = true AND i.intent_type = 'gesture'`,
           [databaseId]
         );
         for (const row of intentRes.rows) {
@@ -180,7 +182,9 @@ module.exports = function(pool) {
       let moduleFormRefs = [];
       try {
         const intentsRes = await pool.query(
-          `SELECT name, intents FROM shared.modules WHERE database_id = $1 AND is_current = true AND intents IS NOT NULL`,
+          `SELECT o.name, i.content as intents FROM shared.intents i
+           JOIN shared.objects o ON o.id = i.object_id
+           WHERE o.database_id = $1 AND o.type = 'module' AND o.is_current = true AND i.intent_type = 'gesture'`,
           [databaseId]
         );
         for (const row of intentsRes.rows) {
@@ -254,7 +258,9 @@ module.exports = function(pool) {
 
       try {
         const intentsRes = await pool.query(
-          `SELECT name, intents FROM shared.modules WHERE database_id = $1 AND is_current = true AND intents IS NOT NULL`,
+          `SELECT o.name, i.content as intents FROM shared.intents i
+           JOIN shared.objects o ON o.id = i.object_id
+           WHERE o.database_id = $1 AND o.type = 'module' AND o.is_current = true AND i.intent_type = 'gesture'`,
           [databaseId]
         );
 

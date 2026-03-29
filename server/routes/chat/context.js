@@ -118,10 +118,10 @@ async function checkImportCompleteness(pool, databaseId) {
       pool.query(`SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_type = 'BASE TABLE'`, [schemaName]),
       pool.query(`SELECT table_name FROM information_schema.views WHERE table_schema = $1`, [schemaName]),
       pool.query(`SELECT routine_name FROM information_schema.routines WHERE routine_schema = $1`, [schemaName]),
-      pool.query(`SELECT DISTINCT name FROM shared.forms WHERE database_id = $1 AND is_current = true`, [databaseId]),
-      pool.query(`SELECT DISTINCT name FROM shared.reports WHERE database_id = $1 AND is_current = true`, [databaseId]),
-      pool.query(`SELECT DISTINCT name FROM shared.modules WHERE database_id = $1 AND is_current = true`, [databaseId]),
-      pool.query(`SELECT DISTINCT name FROM shared.macros WHERE database_id = $1 AND is_current = true`, [databaseId])
+      pool.query(`SELECT DISTINCT name FROM shared.objects WHERE database_id = $1 AND type = 'form' AND is_current = true`, [databaseId]),
+      pool.query(`SELECT DISTINCT name FROM shared.objects WHERE database_id = $1 AND type = 'report' AND is_current = true`, [databaseId]),
+      pool.query(`SELECT DISTINCT name FROM shared.objects WHERE database_id = $1 AND type = 'module' AND is_current = true`, [databaseId]),
+      pool.query(`SELECT DISTINCT name FROM shared.objects WHERE database_id = $1 AND type = 'macro' AND is_current = true`, [databaseId])
     ]);
 
     const actualTables = new Set(tablesRes.rows.map(r => r.table_name.toLowerCase()));
@@ -215,12 +215,12 @@ async function buildGraphContext(pool, databaseId) {
       ),
       pool.query(
         `SELECT DISTINCT ON (name) name, record_source
-         FROM shared.forms WHERE database_id = $1 AND is_current = true`,
+         FROM shared.objects WHERE database_id = $1 AND type = 'form' AND is_current = true`,
         [databaseId]
       ),
       pool.query(
         `SELECT DISTINCT ON (name) name, record_source
-         FROM shared.reports WHERE database_id = $1 AND is_current = true`,
+         FROM shared.objects WHERE database_id = $1 AND type = 'report' AND is_current = true`,
         [databaseId]
       )
     ]);
@@ -541,19 +541,15 @@ No explanation, no markdown fences — just the JSON array.`,
 async function loadObjectIntents(pool, objectType, objectName, databaseId) {
   try {
     let result;
-    if (objectType === 'form') {
+    if (objectType === 'form' || objectType === 'report') {
+      // Load from shared.intents via object lookup
       result = await pool.query(
-        `SELECT intents FROM shared.forms
-         WHERE database_id = $1 AND name = $2 AND is_current = true AND intents IS NOT NULL
-         LIMIT 1`,
-        [databaseId, objectName]
-      );
-    } else if (objectType === 'report') {
-      result = await pool.query(
-        `SELECT intents FROM shared.reports
-         WHERE database_id = $1 AND name = $2 AND is_current = true AND intents IS NOT NULL
-         LIMIT 1`,
-        [databaseId, objectName]
+        `SELECT i.content as intents FROM shared.intents i
+         JOIN shared.objects o ON o.id = i.object_id
+         WHERE o.database_id = $1 AND o.type = $2 AND o.name = $3 AND o.is_current = true
+           AND i.intent_type = CASE WHEN $2 = 'module' THEN 'gesture' ELSE 'business' END
+         ORDER BY i.created_at DESC LIMIT 1`,
+        [databaseId, objectType, objectName]
       );
     } else if (objectType === 'query') {
       result = await pool.query(
@@ -566,6 +562,31 @@ async function loadObjectIntents(pool, objectType, objectName, databaseId) {
     return result?.rows[0]?.intents || null;
   } catch (err) {
     console.error(`Error loading intents for ${objectType} "${objectName}":`, err.message);
+    return null;
+  }
+}
+
+/**
+ * Load extracted structure intents for a form.
+ *
+ * @param {Object} pool - PG pool
+ * @param {string} formName
+ * @param {string} databaseId
+ * @returns {Promise<Object|null>} The structure intent JSONB or null
+ */
+async function loadStructureIntents(pool, formName, databaseId) {
+  try {
+    const result = await pool.query(
+      `SELECT i.content as intents FROM shared.intents i
+       JOIN shared.objects o ON o.id = i.object_id
+       WHERE o.database_id = $1 AND o.type = 'form' AND o.name = $2 AND o.is_current = true
+         AND i.intent_type = 'structure'
+       ORDER BY i.created_at DESC LIMIT 1`,
+      [databaseId, formName]
+    );
+    return result?.rows[0]?.intents || null;
+  } catch (err) {
+    console.error(`Error loading structure intents for form "${formName}":`, err.message);
     return null;
   }
 }
@@ -607,8 +628,73 @@ function formatObjectIntents(intents) {
   return parts.join('\n');
 }
 
+/**
+ * Format structure intents into a compact text block for the LLM system prompt.
+ * Gives the LLM awareness of this form's architectural pattern, subpatterns,
+ * layout characteristics, and navigation relationships.
+ */
+function formatStructureIntents(structure) {
+  if (!structure) return '';
+  const parts = [];
+
+  if (structure.pattern) {
+    parts.push(`Pattern archetype: ${structure.pattern}${structure.confidence ? ` (confidence: ${structure.confidence})` : ''}`);
+  }
+  if (structure.evidence) parts.push(`Evidence: ${structure.evidence}`);
+
+  if (structure.subpatterns?.length) {
+    parts.push('Subpatterns:');
+    for (const sp of structure.subpatterns) {
+      const ctrls = sp.controls?.length ? ` [${sp.controls.join(', ')}]` : '';
+      parts.push(`  ${sp.type}${ctrls} — ${sp.mechanism || ''}`);
+    }
+  }
+
+  if (structure.layout) {
+    const l = structure.layout;
+    const layoutParts = [];
+    if (l.style) layoutParts.push(l.style);
+    if (l.continuous) layoutParts.push('continuous');
+    if (l.estimated_density) layoutParts.push(l.estimated_density);
+    if (layoutParts.length) parts.push(`Layout: ${layoutParts.join(', ')}`);
+  }
+
+  if (structure.navigation) {
+    const nav = structure.navigation;
+    if (nav.opens?.length) {
+      parts.push('Opens:');
+      for (const o of nav.opens) {
+        parts.push(`  ${o.target_type} "${o.target_name}" via ${o.trigger} (${o.mechanism})`);
+      }
+    }
+    if (nav.opened_from?.length) {
+      parts.push(`Opened from: ${nav.opened_from.join(', ')}`);
+    }
+    if (nav.data_handoff && nav.data_handoff !== 'none') {
+      parts.push(`Data handoff: ${nav.data_handoff}`);
+    }
+  }
+
+  if (structure.record_interaction) {
+    const ri = structure.record_interaction;
+    const caps = [];
+    if (ri.mode) caps.push(`mode=${ri.mode}`);
+    if (ri.creates_records) caps.push('creates');
+    if (ri.edits_records) caps.push('edits');
+    if (ri.deletes_records) caps.push('deletes');
+    if (ri.navigates_records) caps.push('navigates');
+    if (caps.length) parts.push(`Record interaction: ${caps.join(', ')}`);
+  }
+
+  if (structure.similar_forms?.length) {
+    parts.push(`Similar forms: ${structure.similar_forms.join(', ')}`);
+  }
+
+  return parts.join('\n');
+}
+
 module.exports = {
   summarizeDefinition, checkImportCompleteness, formatMissingList, buildAppInventory,
   buildGraphContext, formatGraphContext, checkIntentDependencies, autoResolveGaps,
-  autoResolveGapsLLM, loadObjectIntents, formatObjectIntents
+  autoResolveGapsLLM, loadObjectIntents, loadStructureIntents, formatObjectIntents, formatStructureIntents
 };

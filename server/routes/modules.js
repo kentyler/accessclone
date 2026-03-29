@@ -1,6 +1,7 @@
 /**
  * Module routes with append-only versioning
- * Handles reading/writing VBA modules from shared.modules table
+ * Handles reading/writing VBA modules from shared.objects table (type='module')
+ * Module-specific data (vba_source, js_handlers, etc.) stored in definition JSONB
  * Each save creates a new version; old versions are preserved
  */
 
@@ -20,11 +21,11 @@ function createRouter(pool) {
       const databaseId = req.databaseId;
 
       const result = await pool.query(
-        `SELECT name, description, status, review_notes, version, created_at,
-                (vba_source IS NOT NULL) as has_vba_source,
-                (cljs_source IS NOT NULL) as has_cljs_source
-         FROM shared.modules
-         WHERE database_id = $1 AND is_current = true
+        `SELECT name, description, status, definition->>'review_notes' as review_notes, version, created_at,
+                (definition->>'vba_source' IS NOT NULL) as has_vba_source,
+                (definition->>'cljs_source' IS NOT NULL) as has_cljs_source
+         FROM shared.objects
+         WHERE database_id = $1 AND type = 'module' AND is_current = true
          ORDER BY name`,
         [databaseId]
       );
@@ -39,31 +40,35 @@ function createRouter(pool) {
   });
 
   /**
-   * GET /api/modules/:name
-   * Read the current version of a module
-   */
-  /**
    * GET /api/modules/:name/reactions
    * Extract simple reaction specs from a form module's after-update procedures.
-   * Returns [{trigger, ctrl, prop, value}] for procedures that are:
-   *   - named FieldX_AfterUpdate
-   *   - contain only set-control-visible / set-control-enabled / set-control-value intents
-   *   - no branches, no async effects (dlookup, run-sql, etc.)
    */
   router.get('/:name/reactions', async (req, res) => {
     try {
       const databaseId = req.databaseId;
-      const result = await pool.query(
-        `SELECT intents FROM shared.modules
-         WHERE database_id = $1 AND name = $2 AND is_current = true`,
+      // Load intents from shared.intents via object lookup
+      const objResult = await pool.query(
+        `SELECT o.id FROM shared.objects o
+         WHERE o.database_id = $1 AND o.type = 'module' AND o.name = $2 AND o.is_current = true`,
         [databaseId, req.params.name]
       );
 
-      if (result.rows.length === 0 || !result.rows[0].intents) {
+      if (objResult.rows.length === 0) {
         return res.json([]);
       }
 
-      const intents = result.rows[0].intents;
+      const intentResult = await pool.query(
+        `SELECT content FROM shared.intents
+         WHERE object_id = $1 AND intent_type = 'gesture'
+         ORDER BY created_at DESC LIMIT 1`,
+        [objResult.rows[0].id]
+      );
+
+      if (intentResult.rows.length === 0 || !intentResult.rows[0].content) {
+        return res.json([]);
+      }
+
+      const intents = intentResult.rows[0].content;
       const procedures = (intents?.mapped?.procedures) || [];
       res.json(extractReactions(procedures));
     } catch (err) {
@@ -75,8 +80,6 @@ function createRouter(pool) {
   /**
    * GET /api/modules/:name/handlers
    * Extract event handler descriptors from a form module's intents.
-   * Returns [{key, control, event, procedure, intents}] for procedures
-   * that have a trigger and are NOT already fully covered by reactions.
    */
   router.get('/:name/handlers', async (req, res) => {
     try {
@@ -104,14 +107,17 @@ function createRouter(pool) {
         );
 
         if (cemResult.rows.length > 0) {
-          // Load module intents + js_handlers for resolving event-procedure handlers
+          // Load module definition + intents for resolving event-procedure handlers
           const modResult = await pool.query(
-            `SELECT intents, js_handlers FROM shared.modules
-             WHERE database_id = $1 AND name = $2 AND is_current = true`,
+            `SELECT o.definition,
+                    (SELECT i.content FROM shared.intents i WHERE i.object_id = o.id AND i.intent_type = 'gesture' ORDER BY i.created_at DESC LIMIT 1) as intents
+             FROM shared.objects o
+             WHERE o.database_id = $1 AND o.type = 'module' AND o.name = $2 AND o.is_current = true`,
             [databaseId, moduleName]
           );
+          const def = modResult.rows[0]?.definition || {};
           const intents = modResult.rows[0]?.intents;
-          const jsHandlers = modResult.rows[0]?.js_handlers || [];
+          const jsHandlers = def.js_handlers || [];
           const procedures = (intents?.mapped?.procedures) || [];
           const procMap = {};
           for (const proc of procedures) {
@@ -184,8 +190,10 @@ function createRouter(pool) {
 
       // Fallback: try stored js_handlers, then module intents
       const result = await pool.query(
-        `SELECT intents, js_handlers FROM shared.modules
-         WHERE database_id = $1 AND name = $2 AND is_current = true`,
+        `SELECT o.definition,
+                (SELECT i.content FROM shared.intents i WHERE i.object_id = o.id AND i.intent_type = 'gesture' ORDER BY i.created_at DESC LIMIT 1) as intents
+         FROM shared.objects o
+         WHERE o.database_id = $1 AND o.type = 'module' AND o.name = $2 AND o.is_current = true`,
         [databaseId, moduleName]
       );
 
@@ -193,7 +201,9 @@ function createRouter(pool) {
         return res.json([]);
       }
 
-      const { intents, js_handlers } = result.rows[0];
+      const def = result.rows[0].definition || {};
+      const intents = result.rows[0].intents;
+      const js_handlers = def.js_handlers;
 
       // JS handlers (generated at import time from VBA source)
       if (js_handlers && js_handlers.length > 0) {
@@ -215,17 +225,12 @@ function createRouter(pool) {
       for (const proc of procedures) {
         if (!proc.trigger || !proc.name) continue;
 
-        // Parse control name and event from procedure name
-        // e.g. "btnOrders_Click" → control="btnOrders", event="on-click"
-        // e.g. "Form_Load" → control="Form", event="on-load"
-        // e.g. "cboStatus_AfterUpdate" → control="cboStatus", event="after-update"
         const match = proc.name.match(/^(.+?)_(\w+)$/);
         if (!match) continue;
 
         const rawControl = match[1];
         const rawEvent = match[2];
 
-        // Map VBA event names to kebab-case event keys
         const eventMap = {
           'click': 'on-click',
           'dblclick': 'on-dblclick',
@@ -246,7 +251,6 @@ function createRouter(pool) {
         const eventKey = eventMap[rawEvent.toLowerCase()];
         if (!eventKey) continue;
 
-        // Skip AfterUpdate procedures already fully covered by reactions
         if (eventKey === 'after-update') {
           const triggerKw = toKw(rawControl);
           if (reactionTriggers.has(triggerKw)) continue;
@@ -269,14 +273,20 @@ function createRouter(pool) {
     }
   });
 
+  /**
+   * GET /api/modules/:name
+   * Read the current version of a module
+   * Returns a flat object with vba_source, js_handlers, etc. extracted from definition JSONB
+   */
   router.get('/:name', async (req, res) => {
     try {
       const databaseId = req.databaseId;
 
       const result = await pool.query(
-        `SELECT name, vba_source, cljs_source, description, status, review_notes, intents, js_handlers, version, created_at
-         FROM shared.modules
-         WHERE database_id = $1 AND name = $2 AND is_current = true`,
+        `SELECT o.name, o.definition, o.description, o.status, o.version, o.created_at,
+                (SELECT i.content FROM shared.intents i WHERE i.object_id = o.id AND i.intent_type = 'gesture' ORDER BY i.created_at DESC LIMIT 1) as intents
+         FROM shared.objects o
+         WHERE o.database_id = $1 AND o.type = 'module' AND o.name = $2 AND o.is_current = true`,
         [databaseId, req.params.name]
       );
 
@@ -284,7 +294,21 @@ function createRouter(pool) {
         return res.status(404).json({ error: 'Module not found' });
       }
 
-      res.json(result.rows[0]);
+      // Flatten definition fields into the response to maintain API compatibility
+      const row = result.rows[0];
+      const def = row.definition || {};
+      res.json({
+        name: row.name,
+        vba_source: def.vba_source || null,
+        cljs_source: def.cljs_source || null,
+        description: row.description,
+        status: row.status,
+        review_notes: def.review_notes || null,
+        intents: row.intents || null,
+        js_handlers: def.js_handlers || null,
+        version: row.version,
+        created_at: row.created_at
+      });
     } catch (err) {
       console.error('Error reading module:', err);
       logError(pool, 'GET /api/modules/:name', 'Failed to read module', err, { databaseId: req.databaseId });
@@ -307,32 +331,34 @@ function createRouter(pool) {
 
       // Load current version to preserve fields not being updated
       const currentResult = await client.query(
-        `SELECT vba_source, cljs_source, description, status, review_notes, intents, js_handlers
-         FROM shared.modules
-         WHERE database_id = $1 AND name = $2 AND is_current = true`,
+        `SELECT o.definition, o.description, o.status,
+                (SELECT i.content FROM shared.intents i WHERE i.object_id = o.id AND i.intent_type = 'gesture' ORDER BY i.created_at DESC LIMIT 1) as intents
+         FROM shared.objects o
+         WHERE o.database_id = $1 AND o.type = 'module' AND o.name = $2 AND o.is_current = true`,
         [databaseId, moduleName]
       );
       const prev = currentResult.rows[0] || {};
+      const prevDef = prev.definition || {};
 
       // Get max version across ALL rows (including non-current)
       const versionResult = await client.query(
         `SELECT COALESCE(MAX(version), 0) as max_version
-         FROM shared.modules
-         WHERE database_id = $1 AND name = $2`,
+         FROM shared.objects
+         WHERE database_id = $1 AND type = 'module' AND name = $2`,
         [databaseId, moduleName]
       );
       const newVersion = versionResult.rows[0].max_version + 1;
 
       // Merge: use provided value when present, otherwise preserve current
-      const finalVba = vba_source !== undefined ? vba_source : (prev.vba_source || null);
-      const finalCljs = prev.cljs_source || null; // Historical only — no longer written from frontend
+      const finalVba = vba_source !== undefined ? vba_source : (prevDef.vba_source || null);
+      const finalCljs = prevDef.cljs_source || null;
       const finalDesc = description !== undefined ? description : (prev.description || null);
       const finalStatus = status || prev.status || 'pending';
-      const finalNotes = review_notes !== undefined ? review_notes : (prev.review_notes || null);
+      const finalNotes = review_notes !== undefined ? review_notes : (prevDef.review_notes || null);
       const finalIntents = intents !== undefined ? intents : prev.intents;
 
       // Auto-generate JS handlers from VBA source when VBA changes
-      let finalJsHandlers = js_handlers !== undefined ? js_handlers : (prev.js_handlers || null);
+      let finalJsHandlers = js_handlers !== undefined ? js_handlers : (prevDef.js_handlers || null);
       if (vba_source !== undefined && vba_source) {
         try {
           const parsed = parseVbaToHandlers(vba_source, moduleName);
@@ -342,22 +368,39 @@ function createRouter(pool) {
         }
       }
 
+      // Build definition JSONB
+      const definition = {
+        vba_source: finalVba,
+        js_handlers: finalJsHandlers,
+        cljs_source: finalCljs,
+        review_notes: finalNotes
+      };
+
       // Mark all existing versions as not current
       await client.query(
-        `UPDATE shared.modules
+        `UPDATE shared.objects
          SET is_current = false
-         WHERE database_id = $1 AND name = $2 AND is_current = true`,
+         WHERE database_id = $1 AND type = 'module' AND name = $2 AND is_current = true`,
         [databaseId, moduleName]
       );
 
       // Insert new version as current
-      await client.query(
-        `INSERT INTO shared.modules (database_id, name, vba_source, cljs_source, description, status, review_notes, intents, js_handlers, version, is_current)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)`,
-        [databaseId, moduleName, finalVba, finalCljs, finalDesc,
-         finalStatus, finalNotes, finalIntents ? JSON.stringify(finalIntents) : null,
-         finalJsHandlers ? JSON.stringify(finalJsHandlers) : null, newVersion]
+      const insertResult = await client.query(
+        `INSERT INTO shared.objects (database_id, type, name, definition, description, status, version, is_current)
+         VALUES ($1, 'module', $2, $3, $4, $5, $6, true)
+         RETURNING id`,
+        [databaseId, moduleName, JSON.stringify(definition), finalDesc, finalStatus, newVersion]
       );
+
+      // Save intents to shared.intents if provided
+      if (finalIntents) {
+        const objectId = insertResult.rows[0].id;
+        await client.query(
+          `INSERT INTO shared.intents (object_id, intent_type, content, generated_by)
+           VALUES ($1, 'gesture', $2, 'import')`,
+          [objectId, JSON.stringify(finalIntents)]
+        );
+      }
 
       await client.query('COMMIT');
 

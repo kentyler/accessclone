@@ -34,6 +34,7 @@ const appRoutes = require('./routes/app');
 const pipelineRoutes = require('./routes/pipeline');
 const attachmentsRoutes = require('./routes/attachments');
 const designCheckRoutes = require('./routes/design-check');
+const evaluationsRoutes = require('./routes/evaluations');
 
 function createApp({
   pool,
@@ -143,6 +144,7 @@ function createApp({
   // Serve attachment files directly by path: /attachments/{dbId}/{table}/{pk}/{filename}
   app.use('/attachments', express.static(path.join(__dirname, 'uploads', 'attachments')));
   app.use('/api/design-check', designCheckRoutes(pool, secrets));
+  app.use('/api/evaluations', evaluationsRoutes(pool));
   return { app, databasesRouter };
 }
 

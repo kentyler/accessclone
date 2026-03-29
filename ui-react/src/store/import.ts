@@ -27,12 +27,20 @@ export interface ImportPhaseStatus {
   failed: Array<{ name: string; error: string }>;
 }
 
+export interface ScannedDatabase {
+  path: string;
+  name: string;
+  size: number;
+  modified: string;
+}
+
 export interface ImportState {
   // Source
   loading: boolean;
   error: string | null;
   activePath: string | null;
   selectedPaths: string[];
+  scannedDatabases: ScannedDatabase[];
   objectType: ObjectType;
   // Cached source contents per path
   cache: Record<string, Record<ObjectType, SourceItem[]>>;
@@ -55,6 +63,7 @@ export interface ImportState {
 
 export interface ImportActions {
   // Source browsing
+  scanForDatabases(locations?: string): Promise<void>;
   loadAccessDatabase(path: string): Promise<void>;
   setActivePath(path: string): void;
   toggleDatabaseSelection(path: string): void;
@@ -136,6 +145,7 @@ export const useImportStore = create<Store>()(
     error: null,
     activePath: null,
     selectedPaths: [],
+    scannedDatabases: [],
     objectType: 'tables',
     cache: {},
     selected: new Set<string>(),
@@ -152,6 +162,22 @@ export const useImportStore = create<Store>()(
     // --------------------------------------------------------
     // Source browsing
     // --------------------------------------------------------
+    async scanForDatabases(locations) {
+      set(s => { s.loading = true; s.error = null; });
+      const url = locations
+        ? `/api/database-import/scan?locations=${encodeURIComponent(locations)}`
+        : '/api/database-import/scan';
+      const res = await api.get<{ databases: ScannedDatabase[] }>(url);
+      set(s => {
+        s.loading = false;
+        if (res.ok) {
+          s.scannedDatabases = res.data.databases ?? [];
+        } else {
+          s.error = 'Failed to scan for databases';
+        }
+      });
+    },
+
     async loadAccessDatabase(path) {
       if (get().cache[path]) {
         set(s => { s.activePath = path; });
@@ -217,24 +243,59 @@ export const useImportStore = create<Store>()(
     // --------------------------------------------------------
     // Target tracking
     // --------------------------------------------------------
+    // Match CLJS: forms/reports/modules/macros use name-array keys (string[]),
+    // tables use object array (.name), queries merge views + functions
     async loadTargetExisting() {
-      const types: ObjectType[] = ['tables', 'queries', 'forms', 'reports', 'modules', 'macros'];
-      const endpoints: Record<ObjectType, string> = {
-        tables: '/api/tables',
-        queries: '/api/queries',
-        forms: '/api/forms',
-        reports: '/api/reports',
-        modules: '/api/modules',
-        macros: '/api/macros',
-      };
-      await Promise.all(types.map(async type => {
-        const res = await api.get<Array<{ name: string }>>(endpoints[type]);
-        if (res.ok) {
-          set(s => {
-            s.targetExisting[type] = new Set(res.data.map(i => sanitizeName(i.name)));
-          });
-        }
-      }));
+      await Promise.all([
+        // Tables: body.tables is array of objects with .name
+        api.get<Record<string, unknown>>('/api/tables').then(res => {
+          if (res.ok) {
+            const items = (res.data.tables ?? []) as Array<{ name: string }>;
+            set(s => { s.targetExisting.tables = new Set(items.map(i => sanitizeName(i.name))); });
+          }
+        }),
+        // Forms: body.forms is string array
+        api.get<Record<string, unknown>>('/api/forms').then(res => {
+          if (res.ok) {
+            const names = (res.data.forms ?? []) as string[];
+            set(s => { s.targetExisting.forms = new Set(names.map(n => sanitizeName(n))); });
+          }
+        }),
+        // Reports: body.reports is string array
+        api.get<Record<string, unknown>>('/api/reports').then(res => {
+          if (res.ok) {
+            const names = (res.data.reports ?? []) as string[];
+            set(s => { s.targetExisting.reports = new Set(names.map(n => sanitizeName(n))); });
+          }
+        }),
+        // Modules: body.modules is string array
+        api.get<Record<string, unknown>>('/api/modules').then(res => {
+          if (res.ok) {
+            const names = (res.data.modules ?? []) as string[];
+            set(s => { s.targetExisting.modules = new Set(names.map(n => sanitizeName(n))); });
+          }
+        }),
+        // Macros: body.macros is string array
+        api.get<Record<string, unknown>>('/api/macros').then(res => {
+          if (res.ok) {
+            const names = (res.data.macros ?? []) as string[];
+            set(s => { s.targetExisting.macros = new Set(names.map(n => sanitizeName(n))); });
+          }
+        }),
+        // Queries: merge views + functions (matches CLJS which fetches both endpoints)
+        Promise.all([
+          api.get<Record<string, unknown>>('/api/queries'),
+          api.get<Record<string, unknown>>('/api/functions'),
+        ]).then(([qRes, fRes]) => {
+          const viewNames = qRes.ok
+            ? ((qRes.data.queries ?? []) as Array<{ name: string }>).map(q => sanitizeName(q.name))
+            : [];
+          const funcNames = fRes.ok
+            ? ((fRes.data.functions ?? []) as Array<{ name: string }>).map(f => sanitizeName(f.name))
+            : [];
+          set(s => { s.targetExisting.queries = new Set([...viewNames, ...funcNames]); });
+        }),
+      ]);
     },
 
     // --------------------------------------------------------
@@ -481,6 +542,7 @@ export const useImportStore = create<Store>()(
         s.error = null;
         s.activePath = null;
         s.selectedPaths = [];
+        s.scannedDatabases = [];
         s.objectType = 'tables';
         s.cache = {};
         s.selected = new Set();

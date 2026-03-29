@@ -8,7 +8,7 @@ const path = require('path');
 const fs = require('fs');
 const { logError } = require('../../lib/events');
 const { dataTools, graphTools, queryTools, designCheckTools } = require('./tools');
-const { summarizeDefinition, checkImportCompleteness, formatMissingList, buildAppInventory, buildGraphContext, formatGraphContext, checkIntentDependencies, autoResolveGaps, autoResolveGapsLLM, loadObjectIntents, formatObjectIntents } = require('./context');
+const { summarizeDefinition, checkImportCompleteness, formatMissingList, buildAppInventory, buildGraphContext, formatGraphContext, checkIntentDependencies, autoResolveGaps, autoResolveGapsLLM, loadObjectIntents, loadStructureIntents, formatObjectIntents, formatStructureIntents } = require('./context');
 const { executeTool } = require('./tool-handlers');
 const { deriveCapabilities } = require('../../lib/capability-deriver');
 const { upsertNode, upsertEdge, findNode } = require('../../graph/query');
@@ -266,12 +266,14 @@ You can see all objects in this application. Help the user understand cross-obje
         }
       }
 
-      // Load business intents if available for the active object
+      // Load business + structure intents if available for the active object
       let intentContext = '';
       if (database_id) {
         let intents = null;
+        let structureIntent = null;
         if (form_context?.form_name) {
           intents = await loadObjectIntents(pool, 'form', form_context.form_name, database_id);
+          structureIntent = await loadStructureIntents(pool, form_context.form_name, database_id);
         } else if (report_context?.report_name) {
           intents = await loadObjectIntents(pool, 'report', report_context.report_name, database_id);
         } else if (query_context?.query_name) {
@@ -279,6 +281,9 @@ You can see all objects in this application. Help the user understand cross-obje
         }
         if (intents) {
           intentContext = '\n\nExtracted business intent for this object:\n' + formatObjectIntents(intents);
+        }
+        if (structureIntent) {
+          intentContext += '\n\nForm structural pattern:\n' + formatStructureIntents(structureIntent);
         }
       }
 
@@ -578,7 +583,10 @@ Return ONLY the ClojureScript code, no markdown code fences, no explanations. In
       if (databaseId) {
         try {
           const existing = await pool.query(
-            `SELECT intents FROM shared.modules WHERE name = $1 AND database_id = $2 ORDER BY version DESC LIMIT 1`,
+            `SELECT i.content as intents FROM shared.intents i
+             JOIN shared.objects o ON o.id = i.object_id
+             WHERE o.type = 'module' AND o.name = $1 AND o.database_id = $2 AND i.intent_type = 'gesture'
+             ORDER BY o.version DESC, i.created_at DESC LIMIT 1`,
             [moduleName, databaseId]
           );
           if (existing.rows[0]?.intents?.mapped?.procedures) {
@@ -692,10 +700,11 @@ Return ONLY the ClojureScript code, no markdown code fences, no explanations. In
     try {
       // Load all modules with intents
       const modulesRes = await pool.query(
-        `SELECT DISTINCT ON (name) name, intents
-         FROM shared.modules
-         WHERE database_id = $1 AND is_current = true AND intents IS NOT NULL
-         ORDER BY name, version DESC`,
+        `SELECT DISTINCT ON (o.name) o.name, i.content as intents
+         FROM shared.objects o
+         JOIN shared.intents i ON i.object_id = o.id AND i.intent_type = 'gesture'
+         WHERE o.database_id = $1 AND o.type = 'module' AND o.is_current = true
+         ORDER BY o.name, o.version DESC`,
         [databaseId]
       );
 
@@ -839,7 +848,10 @@ Return ONLY the ClojureScript code, no markdown code fences, no explanations. In
     try {
       // Load current intents from DB
       const result = await pool.query(
-        `SELECT intents FROM shared.modules WHERE name = $1 AND database_id = $2 ORDER BY version DESC LIMIT 1`,
+        `SELECT i.content as intents FROM shared.intents i
+         JOIN shared.objects o ON o.id = i.object_id
+         WHERE o.type = 'module' AND o.name = $1 AND o.database_id = $2 AND i.intent_type = 'gesture'
+         ORDER BY o.version DESC, i.created_at DESC LIMIT 1`,
         [module_name, databaseId]
       );
 
@@ -886,11 +898,20 @@ Return ONLY the ClojureScript code, no markdown code fences, no explanations. In
         return res.status(404).json({ error: `Gap with id "${gap_id}" not found` });
       }
 
-      // Update intents in DB
-      await pool.query(
-        `UPDATE shared.modules SET intents = $1 WHERE name = $2 AND database_id = $3 AND version = (SELECT MAX(version) FROM shared.modules WHERE name = $2 AND database_id = $3)`,
-        [JSON.stringify(intents), module_name, databaseId]
+      // Update intents in shared.intents
+      const objResult = await pool.query(
+        `SELECT id FROM shared.objects WHERE type = 'module' AND name = $1 AND database_id = $2
+         AND version = (SELECT MAX(version) FROM shared.objects WHERE type = 'module' AND name = $1 AND database_id = $2)`,
+        [module_name, databaseId]
       );
+      if (objResult.rows.length > 0) {
+        const objectId = objResult.rows[0].id;
+        await pool.query('DELETE FROM shared.intents WHERE object_id = $1 AND intent_type = $2', [objectId, 'gesture']);
+        await pool.query(
+          `INSERT INTO shared.intents (object_id, intent_type, content, generated_by) VALUES ($1, 'gesture', $2, 'user')`,
+          [objectId, JSON.stringify(intents)]
+        );
+      }
 
       res.json({ success: true, updated_intents: intents });
     } catch (err) {

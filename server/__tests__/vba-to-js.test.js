@@ -1,7 +1,8 @@
 const {
   translateStatement, translateCondition, stripBoilerplate,
   parseIfBlock, translateBlock, findEndKeyword,
-  parseVbaToHandlers,
+  parseVbaToHandlers, translateAssignmentRHS,
+  parseSelectCaseBlock, parseForLoop,
 } = require('../lib/vba-to-js');
 
 // ============================================================
@@ -116,6 +117,62 @@ describe('translateStatement', () => {
 });
 
 // ============================================================
+// translateAssignmentRHS
+// ============================================================
+
+describe('translateAssignmentRHS', () => {
+  test('string literal', () => {
+    expect(translateAssignmentRHS('"Hello"')).toBe('"Hello"');
+  });
+
+  test('numeric literal', () => {
+    expect(translateAssignmentRHS('42')).toBe('42');
+    expect(translateAssignmentRHS('3.14')).toBe('3.14');
+  });
+
+  test('boolean literals', () => {
+    expect(translateAssignmentRHS('True')).toBe('true');
+    expect(translateAssignmentRHS('False')).toBe('false');
+  });
+
+  test('Me.OpenArgs', () => {
+    expect(translateAssignmentRHS('Me.OpenArgs')).toBe('AC.getOpenArgs()');
+  });
+
+  test('Me.ControlName → AC.getValue', () => {
+    expect(translateAssignmentRHS('Me.txtName')).toBe('AC.getValue("txtName")');
+    expect(translateAssignmentRHS('Me.cboStatus')).toBe('AC.getValue("cboStatus")');
+  });
+
+  test('Me.Name (non-control property) returns null', () => {
+    expect(translateAssignmentRHS('Me.Name')).toBeNull();
+    expect(translateAssignmentRHS('Me.RecordSource')).toBeNull();
+  });
+
+  test('Nz(Me.OpenArgs, "")', () => {
+    expect(translateAssignmentRHS('Nz(Me.OpenArgs, "")')).toBe('AC.nz(AC.getOpenArgs(), "")');
+  });
+
+  test('Nz(Me.ctrl, default)', () => {
+    expect(translateAssignmentRHS('Nz(Me.txtId, 0)')).toBe('AC.nz(AC.getValue("txtId"), 0)');
+  });
+
+  test('Nz with single arg', () => {
+    expect(translateAssignmentRHS('Nz(Me.OpenArgs)')).toBe('AC.nz(AC.getOpenArgs())');
+  });
+
+  test('complex expression returns null', () => {
+    expect(translateAssignmentRHS('CurrentDb.OpenRecordset("tbl")')).toBeNull();
+    expect(translateAssignmentRHS('DLookup("Name", "tbl")')).toBeNull();
+  });
+
+  test('empty/null returns null', () => {
+    expect(translateAssignmentRHS('')).toBeNull();
+    expect(translateAssignmentRHS(null)).toBeNull();
+  });
+});
+
+// ============================================================
 // translateCondition
 // ============================================================
 
@@ -131,24 +188,24 @@ describe('translateCondition', () => {
     expect(translateCondition('Not False')).toBe('!(false)');
   });
 
-  test('Not <condition> with untranslatable inner returns null', () => {
-    expect(translateCondition('Not Me.NewRecord')).toBeNull();
+  test('Not Me.NewRecord translates', () => {
+    expect(translateCondition('Not Me.NewRecord')).toBe('!(AC.isNewRecord())');
   });
 
-  test('Me.NewRecord returns null', () => {
-    expect(translateCondition('Me.NewRecord')).toBeNull();
+  test('Me.NewRecord → AC.isNewRecord()', () => {
+    expect(translateCondition('Me.NewRecord')).toBe('AC.isNewRecord()');
   });
 
-  test('Me.Dirty returns null', () => {
-    expect(translateCondition('Me.Dirty')).toBeNull();
+  test('Me.Dirty → AC.isDirty()', () => {
+    expect(translateCondition('Me.Dirty')).toBe('AC.isDirty()');
   });
 
-  test('IsNull(Me.OpenArgs) returns null', () => {
-    expect(translateCondition('IsNull(Me.OpenArgs)')).toBeNull();
+  test('IsNull(Me.OpenArgs) → AC.getOpenArgs() == null', () => {
+    expect(translateCondition('IsNull(Me.OpenArgs)')).toBe('AC.getOpenArgs() == null');
   });
 
-  test('IsNull with Me.control returns null', () => {
-    expect(translateCondition('IsNull(Me.txtName)')).toBeNull();
+  test('IsNull(Me.ctrl) → AC.getValue("ctrl") == null', () => {
+    expect(translateCondition('IsNull(Me.txtName)')).toBe('AC.getValue("txtName") == null');
   });
 
   test('MsgBox = vbYes translates to confirm', () => {
@@ -164,17 +221,78 @@ describe('translateCondition', () => {
     expect(translateCondition('True Or False')).toBe('true || false');
   });
 
-  test('And with one side untranslatable returns null', () => {
-    expect(translateCondition('True And Me.NewRecord')).toBeNull();
+  test('And with Me.NewRecord translates', () => {
+    expect(translateCondition('True And Me.NewRecord')).toBe('true && AC.isNewRecord()');
   });
 
-  test('comparison with local VBA variable returns null', () => {
+  test('comparison with unknown variable returns null', () => {
     expect(translateCondition('strAction = "Add"')).toBeNull();
   });
 
   test('empty/null input returns null', () => {
     expect(translateCondition('')).toBeNull();
     expect(translateCondition(null)).toBeNull();
+  });
+
+  // --- New: translateCondition with assignedVars ---
+
+  test('variable comparison with assignedVars', () => {
+    const vars = new Set(['straction']);
+    expect(translateCondition('strAction = "Add"', vars)).toBe('strAction === "Add"');
+    expect(translateCondition('strAction <> "Delete"', vars)).toBe('strAction !== "Delete"');
+    expect(translateCondition('strAction = "Edit"', vars)).toBe('strAction === "Edit"');
+  });
+
+  test('variable comparison with number', () => {
+    const vars = new Set(['intmode']);
+    expect(translateCondition('intMode = 1', vars)).toBe('intMode === 1');
+    expect(translateCondition('intMode > 0', vars)).toBe('intMode > 0');
+    expect(translateCondition('intMode <> 0', vars)).toBe('intMode !== 0');
+  });
+
+  test('variable comparison without assignedVars returns null', () => {
+    expect(translateCondition('strAction = "Add"')).toBeNull();
+    expect(translateCondition('strAction = "Add"', new Set())).toBeNull();
+  });
+
+  test('Me.ctrl.Visible = True/False', () => {
+    expect(translateCondition('Me.btnSave.Visible = True')).toBe('AC.getVisible("btnSave")');
+    expect(translateCondition('Me.btnSave.Visible = False')).toBe('!(AC.getVisible("btnSave"))');
+    expect(translateCondition('Me.panel.Visible = -1')).toBe('AC.getVisible("panel")');
+    expect(translateCondition('Me.panel.Visible = 0')).toBe('!(AC.getVisible("panel"))');
+  });
+
+  test('Me.ctrl.Enabled = True/False', () => {
+    expect(translateCondition('Me.txtName.Enabled = True')).toBe('AC.getEnabled("txtName")');
+    expect(translateCondition('Me.txtName.Enabled = False')).toBe('!(AC.getEnabled("txtName"))');
+  });
+
+  test('Me.ctrl = literal in condition', () => {
+    expect(translateCondition('Me.cboStatus = "Active"')).toBe('AC.getValue("cboStatus") === "Active"');
+    expect(translateCondition('Me.txtCount = 0')).toBe('AC.getValue("txtCount") === 0');
+  });
+
+  test('IsNull(variable) with assignedVars', () => {
+    const vars = new Set(['straction']);
+    expect(translateCondition('IsNull(strAction)', vars)).toBe('strAction == null');
+  });
+
+  test('And/Or with assignedVars passes through', () => {
+    const vars = new Set(['straction']);
+    expect(translateCondition('strAction = "Add" And True', vars))
+      .toBe('strAction === "Add" && true');
+    expect(translateCondition('strAction = "A" Or strAction = "B"', vars))
+      .toBe('strAction === "A" || strAction === "B"');
+  });
+
+  test('Not with assignedVars', () => {
+    const vars = new Set(['straction']);
+    expect(translateCondition('Not IsNull(strAction)', vars)).toBe('!(strAction == null)');
+  });
+
+  test('Me.Dirty And Me.NewRecord compound', () => {
+    expect(translateCondition('Me.Dirty And Me.NewRecord'))
+      .toBe('AC.isDirty() && AC.isNewRecord()');
   });
 });
 
@@ -353,6 +471,7 @@ describe('parseIfBlock', () => {
       'MsgBox "unknown"',
       'End If',
     ];
+    // No assignedVars → strAction is unknown → untranslatable
     const result = parseIfBlock(lines, 0, 'frmTest');
     expect(result.endIdx).toBe(4);
     const js = result.jsLines.join('\n');
@@ -360,6 +479,24 @@ describe('parseIfBlock', () => {
     expect(js).toContain('// If strAction = "Add" Then');
     expect(js).not.toContain('AC.gotoRecord');
     expect(js).not.toContain('alert');
+  });
+
+  test('If with assignedVars translates condition', () => {
+    const lines = [
+      'If strAction = "Add" Then',
+      'DoCmd.GoToRecord , , acNewRec',
+      'Else',
+      'MsgBox "unknown"',
+      'End If',
+    ];
+    const vars = new Set(['straction']);
+    const assigned = new Set(['straction']);
+    const result = parseIfBlock(lines, 0, 'frmTest', vars, assigned);
+    expect(result.endIdx).toBe(4);
+    const js = result.jsLines.join('\n');
+    expect(js).toContain('if (strAction === "Add")');
+    expect(js).toContain('AC.gotoRecord("new");');
+    expect(js).toContain('alert("unknown");');
   });
 
   test('nested If blocks handled correctly', () => {
@@ -374,8 +511,9 @@ describe('parseIfBlock', () => {
     const result = parseIfBlock(lines, 0, 'frmTest');
     expect(result.endIdx).toBe(5);
     const js = result.jsLines.join('\n');
-    // Outer If is translatable (True), inner If body is recursively translated
+    // Outer If is translatable (True), inner If (Me.NewRecord) now also translatable
     expect(js).toContain('if (true)');
+    expect(js).toContain('AC.isNewRecord()');
   });
 
   test('empty branches produce valid output', () => {
@@ -404,7 +542,7 @@ describe('translateBlock', () => {
     ]);
   });
 
-  test('skips Dim, Set, Const, GoTo', () => {
+  test('Dim emits let, Set/Const/GoTo skipped', () => {
     const lines = [
       'Dim x As Integer',
       'Set rs = Nothing',
@@ -413,7 +551,7 @@ describe('translateBlock', () => {
       'DoCmd.Close',
     ];
     const result = translateBlock(lines, 0, 'frmTest');
-    expect(result.jsLines).toEqual(['AC.closeForm("frmTest");']);
+    expect(result.jsLines).toEqual(['let x;', 'AC.closeForm("frmTest");']);
   });
 
   test('single-line If with translatable condition', () => {
@@ -428,7 +566,7 @@ describe('translateBlock', () => {
     expect(result.jsLines[0]).toMatch(/^\/\/ If x > 0 Then DoCmd\.Close/);
   });
 
-  test('Select Case skipped with comment', () => {
+  test('Select Case with unknown expr emits comment', () => {
     const lines = [
       'Select Case x',
       'Case "A"',
@@ -439,11 +577,12 @@ describe('translateBlock', () => {
       'DoCmd.Requery',
     ];
     const result = translateBlock(lines, 0, 'frmTest');
-    expect(result.jsLines[0]).toBe('// [VBA Select Case block skipped]');
-    expect(result.jsLines[1]).toBe('AC.requery();');
+    expect(result.jsLines[0]).toBe('// [VBA Select Case - expression not translatable]');
+    // Last line is still the requery after all the comment lines
+    expect(result.jsLines[result.jsLines.length - 1]).toBe('AC.requery();');
   });
 
-  test('For loop skipped with comment', () => {
+  test('numeric For loop translates', () => {
     const lines = [
       'For i = 1 To 10',
       'DoCmd.Close',
@@ -451,8 +590,10 @@ describe('translateBlock', () => {
       'DoCmd.Requery',
     ];
     const result = translateBlock(lines, 0, 'frmTest');
-    expect(result.jsLines[0]).toBe('// [VBA For loop skipped]');
-    expect(result.jsLines[1]).toBe('AC.requery();');
+    expect(result.jsLines[0]).toBe('for (let i = 1; i <= 10; i++) {');
+    expect(result.jsLines[1]).toBe('  AC.closeForm("frmTest");');
+    expect(result.jsLines[2]).toBe('}');
+    expect(result.jsLines[3]).toBe('AC.requery();');
   });
 
   test('For Each loop skipped with comment', () => {
@@ -514,6 +655,289 @@ describe('translateBlock', () => {
     const result = translateBlock(lines, 0, 'frmTest');
     expect(result.jsLines).toEqual(['AC.closeForm("frmTest");']);
   });
+
+  // --- New: variable tracking ---
+
+  test('Dim + assignment tracks variable', () => {
+    const lines = [
+      'Dim strAction As String',
+      'strAction = "Add"',
+      'If strAction = "Add" Then',
+      'DoCmd.GoToRecord , , acNewRec',
+      'End If',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    const js = result.jsLines.join('\n');
+    expect(js).toContain('let strAction;');
+    expect(js).toContain('strAction = "Add";');
+    expect(js).toContain('if (strAction === "Add")');
+    expect(js).toContain('AC.gotoRecord("new");');
+  });
+
+  test('Dim + Me.OpenArgs assignment', () => {
+    const lines = [
+      'Dim strAction As String',
+      'strAction = Nz(Me.OpenArgs, "")',
+      'If strAction = "Add" Then',
+      'DoCmd.GoToRecord , , acNewRec',
+      'Else',
+      'MsgBox "other"',
+      'End If',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    const js = result.jsLines.join('\n');
+    expect(js).toContain('let strAction;');
+    expect(js).toContain('strAction = AC.nz(AC.getOpenArgs(), "");');
+    expect(js).toContain('if (strAction === "Add")');
+    expect(js).toContain('AC.gotoRecord("new");');
+    expect(js).toContain('} else {');
+    expect(js).toContain('alert("other");');
+  });
+
+  test('Dim + untranslatable RHS emits comment', () => {
+    const lines = [
+      'Dim rs As DAO.Recordset',
+      'rs = CurrentDb.OpenRecordset("tbl")',
+      'DoCmd.Close',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    const js = result.jsLines.join('\n');
+    expect(js).toContain('let rs;');
+    expect(js).toContain('// rs = CurrentDb.OpenRecordset("tbl")');
+    expect(js).toContain('AC.closeForm("frmTest");');
+  });
+
+  test('assignment without Dim does not track', () => {
+    const lines = [
+      'strAction = "Add"',
+      'If strAction = "Add" Then',
+      'DoCmd.Close',
+      'End If',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    const js = result.jsLines.join('\n');
+    // strAction is not declared, so assignment is not captured and If is untranslatable
+    expect(js).toContain('// [VBA If block - condition not translatable]');
+  });
+
+  test('Dim + Me.ctrl assignment', () => {
+    const lines = [
+      'Dim val As String',
+      'val = Me.txtName',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    const js = result.jsLines.join('\n');
+    expect(js).toContain('let val;');
+    expect(js).toContain('val = AC.getValue("txtName");');
+  });
+});
+
+// ============================================================
+// Select Case
+// ============================================================
+
+describe('parseSelectCaseBlock', () => {
+  test('string switch with assigned variable', () => {
+    const lines = [
+      'Select Case strAction',
+      'Case "Add"',
+      'DoCmd.GoToRecord , , acNewRec',
+      'Case "Edit"',
+      'DoCmd.Requery',
+      'Case Else',
+      'MsgBox "unknown"',
+      'End Select',
+    ];
+    const vars = new Set(['straction']);
+    const assigned = new Set(['straction']);
+    const result = parseSelectCaseBlock(lines, 0, 'frmTest', vars, assigned);
+    const js = result.jsLines.join('\n');
+    expect(js).toContain('switch (strAction)');
+    expect(js).toContain('case "Add":');
+    expect(js).toContain('AC.gotoRecord("new");');
+    expect(js).toContain('case "Edit":');
+    expect(js).toContain('AC.requery();');
+    expect(js).toContain('default:');
+    expect(js).toContain('alert("unknown");');
+    expect(js).toContain('break;');
+  });
+
+  test('numeric switch', () => {
+    const lines = [
+      'Select Case intMode',
+      'Case 1',
+      'DoCmd.Close',
+      'Case 2, 3',
+      'DoCmd.Save',
+      'End Select',
+    ];
+    const vars = new Set(['intmode']);
+    const assigned = new Set(['intmode']);
+    const result = parseSelectCaseBlock(lines, 0, 'frmTest', vars, assigned);
+    const js = result.jsLines.join('\n');
+    expect(js).toContain('switch (intMode)');
+    expect(js).toContain('case 1:');
+    expect(js).toContain('case 2:');
+    expect(js).toContain('case 3:');
+  });
+
+  test('Case Is comparisons → if/else chain', () => {
+    const lines = [
+      'Select Case intScore',
+      'Case Is >= 90',
+      'MsgBox "A"',
+      'Case Is >= 80',
+      'MsgBox "B"',
+      'Case Else',
+      'MsgBox "F"',
+      'End Select',
+    ];
+    const vars = new Set(['intscore']);
+    const assigned = new Set(['intscore']);
+    const result = parseSelectCaseBlock(lines, 0, 'frmTest', vars, assigned);
+    const js = result.jsLines.join('\n');
+    expect(js).toContain('if (intScore >= 90)');
+    expect(js).toContain('} else if (intScore >= 80)');
+    expect(js).toContain('} else {');
+    expect(js).not.toContain('switch');
+  });
+
+  test('Me.OpenArgs as switch expression', () => {
+    const lines = [
+      'Select Case Me.OpenArgs',
+      'Case "Add"',
+      'DoCmd.GoToRecord , , acNewRec',
+      'Case "Edit"',
+      'DoCmd.Requery',
+      'End Select',
+    ];
+    const result = parseSelectCaseBlock(lines, 0, 'frmTest');
+    const js = result.jsLines.join('\n');
+    expect(js).toContain('switch (AC.getOpenArgs())');
+    expect(js).toContain('case "Add":');
+    expect(js).toContain('case "Edit":');
+  });
+
+  test('Me.ctrl as switch expression', () => {
+    const lines = [
+      'Select Case Me.cboType',
+      'Case "A"',
+      'DoCmd.Close',
+      'End Select',
+    ];
+    const result = parseSelectCaseBlock(lines, 0, 'frmTest');
+    const js = result.jsLines.join('\n');
+    expect(js).toContain('switch (AC.getValue("cboType"))');
+  });
+
+  test('untranslatable expression emits comment', () => {
+    const lines = [
+      'Select Case DLookup("Type", "tbl")',
+      'Case "A"',
+      'DoCmd.Close',
+      'End Select',
+    ];
+    const result = parseSelectCaseBlock(lines, 0, 'frmTest');
+    const js = result.jsLines.join('\n');
+    expect(js).toContain('// [VBA Select Case - expression not translatable]');
+    expect(js).not.toContain('switch');
+  });
+
+  test('integration: Select Case in translateBlock with tracked variable', () => {
+    const lines = [
+      'Dim strMode As String',
+      'strMode = Me.OpenArgs',
+      'Select Case strMode',
+      'Case "Add"',
+      'DoCmd.GoToRecord , , acNewRec',
+      'Case "Edit"',
+      'DoCmd.Requery',
+      'End Select',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    const js = result.jsLines.join('\n');
+    expect(js).toContain('let strMode;');
+    expect(js).toContain('strMode = AC.getOpenArgs();');
+    expect(js).toContain('switch (strMode)');
+    expect(js).toContain('case "Add":');
+  });
+});
+
+// ============================================================
+// For Loops
+// ============================================================
+
+describe('parseForLoop', () => {
+  test('simple numeric For loop', () => {
+    const lines = [
+      'For i = 1 To 10',
+      'DoCmd.Save',
+      'Next i',
+    ];
+    const result = parseForLoop(lines, 0, 'frmTest');
+    expect(result).not.toBeNull();
+    const js = result.jsLines.join('\n');
+    expect(js).toContain('for (let i = 1; i <= 10; i++)');
+    expect(js).toContain('AC.saveRecord();');
+  });
+
+  test('For loop with Step -1', () => {
+    const lines = [
+      'For i = 10 To 1 Step -1',
+      'DoCmd.Close',
+      'Next i',
+    ];
+    const result = parseForLoop(lines, 0, 'frmTest');
+    expect(result).not.toBeNull();
+    const js = result.jsLines.join('\n');
+    expect(js).toContain('for (let i = 10; i >= 1; i--)');
+  });
+
+  test('For loop with Step 2', () => {
+    const lines = [
+      'For i = 0 To 20 Step 2',
+      'DoCmd.Save',
+      'Next i',
+    ];
+    const result = parseForLoop(lines, 0, 'frmTest');
+    expect(result).not.toBeNull();
+    const js = result.jsLines.join('\n');
+    expect(js).toContain('for (let i = 0; i <= 20; i += 2)');
+  });
+
+  test('non-numeric bounds returns null', () => {
+    const lines = [
+      'For i = 1 To UBound(arr)',
+      'DoCmd.Close',
+      'Next i',
+    ];
+    const result = parseForLoop(lines, 0, 'frmTest');
+    expect(result).toBeNull();
+  });
+
+  test('integration: numeric For translated by translateBlock', () => {
+    const lines = [
+      'For j = 0 To 5',
+      'MsgBox "hello"',
+      'Next j',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    const js = result.jsLines.join('\n');
+    expect(js).toContain('for (let j = 0; j <= 5; j++)');
+    expect(js).toContain('alert("hello");');
+  });
+
+  test('non-numeric For falls back to skip comment', () => {
+    const lines = [
+      'For i = 1 To UBound(arr)',
+      'DoCmd.Close',
+      'Next i',
+      'DoCmd.Requery',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    expect(result.jsLines[0]).toBe('// [VBA For loop skipped]');
+    expect(result.jsLines[1]).toBe('AC.requery();');
+  });
 });
 
 // ============================================================
@@ -533,7 +957,7 @@ End Sub
     expect(handlers[0].js).toContain('AC.closeForm("frmMain")');
   });
 
-  test('handler with If/Else where condition is untranslatable', () => {
+  test('handler with Dim+assignment makes If/Else translatable', () => {
     const vba = `
 Private Sub Form_Load()
     Dim strAction As String
@@ -546,9 +970,13 @@ Private Sub Form_Load()
 End Sub
 `;
     const handlers = parseVbaToHandlers(vba, 'Form_frmCompanyDetail');
-    // The If block condition is untranslatable, so it becomes comments
-    // No real JS lines remain → handler should not be emitted
-    expect(handlers).toHaveLength(0);
+    // Variable tracking makes strAction translatable → handler IS emitted
+    expect(handlers).toHaveLength(1);
+    const js = handlers[0].js;
+    expect(js).toContain('strAction = AC.nz(AC.getOpenArgs(), "");');
+    expect(js).toContain('if (strAction === "Add")');
+    expect(js).toContain('AC.gotoRecord("new");');
+    expect(js).toContain('alert("An unknown action has been requested.");');
   });
 
   test('handler with translatable If/Else', () => {
@@ -595,12 +1023,12 @@ End Sub
     const handlers = parseVbaToHandlers(vba, 'Form_frmData');
     expect(handlers).toHaveLength(1);
     const js = handlers[0].js;
-    // DoCmd.Requery translates; the If block is commented out
+    // DoCmd.Requery translates; strMode has no Dim → If block is commented out
     expect(js).toContain('AC.requery();');
     expect(js).toContain('// [VBA If block - condition not translatable]');
   });
 
-  test('handler with Select Case skipped', () => {
+  test('handler with Select Case Me.OpenArgs translates to switch', () => {
     const vba = `
 Private Sub Form_Load()
     DoCmd.Save
@@ -616,10 +1044,12 @@ End Sub
     expect(handlers).toHaveLength(1);
     const js = handlers[0].js;
     expect(js).toContain('AC.saveRecord();');
-    expect(js).toContain('// [VBA Select Case block skipped]');
+    expect(js).toContain('switch (AC.getOpenArgs())');
+    expect(js).toContain('case "Add":');
+    expect(js).toContain('case "Edit":');
   });
 
-  test('handler skips Dim/Set/Const statements', () => {
+  test('handler with Dim produces let, skips Set', () => {
     const vba = `
 Private Sub cmdRun_Click()
     Dim rs As DAO.Recordset
@@ -629,9 +1059,10 @@ End Sub
 `;
     const handlers = parseVbaToHandlers(vba, 'Form_frmRun');
     expect(handlers).toHaveLength(1);
-    expect(handlers[0].js).toContain('AC.closeForm("frmRun");');
-    expect(handlers[0].js).not.toContain('Dim');
-    expect(handlers[0].js).not.toContain('Set');
+    const js = handlers[0].js;
+    expect(js).toContain('AC.closeForm("frmRun");');
+    expect(js).toContain('let rs;');
+    expect(js).not.toContain('Set');
   });
 
   test('line continuations merged before translation', () => {
@@ -675,7 +1106,7 @@ End Sub
     expect(parseVbaToHandlers(null)).toEqual([]);
   });
 
-  test('frmCompanyDetail Form_Load pattern — no accidental execution', () => {
+  test('frmCompanyDetail Form_Load pattern — now translatable with variable tracking', () => {
     // Real-world pattern: condition references local VBA variable
     const vba = `
 Option Compare Database
@@ -699,8 +1130,48 @@ Err_Handler:
 End Sub
 `;
     const handlers = parseVbaToHandlers(vba, 'Form_frmCompanyDetail');
-    // All conditions reference strAction (local var) → untranslatable
-    // No real JS → no handler emitted
-    expect(handlers).toHaveLength(0);
+    // Variable tracking: strAction is declared and assigned → conditions translate
+    expect(handlers).toHaveLength(1);
+    const js = handlers[0].js;
+    expect(js).toContain('let strAction;');
+    expect(js).toContain('strAction = AC.nz(AC.getOpenArgs(), "");');
+    expect(js).toContain('if (strAction === "Add")');
+    expect(js).toContain('} else if (strAction === "Edit")');
+    expect(js).toContain('} else {');
+    expect(js).toContain('AC.gotoRecord("new");');
+    expect(js).toContain('alert("An unknown action has been requested.");');
+  });
+
+  test('Me.NewRecord in handler condition', () => {
+    const vba = `
+Private Sub Form_BeforeUpdate(Cancel As Integer)
+    If Me.NewRecord Then
+        MsgBox "New record"
+    Else
+        MsgBox "Existing record"
+    End If
+End Sub
+`;
+    const handlers = parseVbaToHandlers(vba, 'Form_frmTest');
+    expect(handlers).toHaveLength(1);
+    const js = handlers[0].js;
+    expect(js).toContain('if (AC.isNewRecord())');
+    expect(js).toContain('alert("New record");');
+    expect(js).toContain('alert("Existing record");');
+  });
+
+  test('Me.Dirty in handler condition', () => {
+    const vba = `
+Private Sub cmdSave_Click()
+    If Me.Dirty Then
+        DoCmd.RunCommand acCmdSaveRecord
+    End If
+End Sub
+`;
+    const handlers = parseVbaToHandlers(vba, 'Form_frmTest');
+    expect(handlers).toHaveLength(1);
+    const js = handlers[0].js;
+    expect(js).toContain('if (AC.isDirty())');
+    expect(js).toContain('AC.saveRecord();');
   });
 });

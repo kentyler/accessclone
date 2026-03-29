@@ -1,11 +1,11 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useMemo } from 'react';
 import { useFormStore } from '@/store/form';
 import { useUiStore } from '@/store/ui';
 import {
   controlStyle, displayText, snapToGrid, getSectionControls, getSectionHeight
 } from '@/lib/utils';
 import { CONTROL_DEFAULTS } from './ControlPalette';
-import type { Control, FormDefinition, ControlType } from '@/api/types';
+import type { Control, FormDefinition, ControlType, ColumnInfo } from '@/api/types';
 
 // ============================================================
 // Design control — single control on the canvas
@@ -232,16 +232,43 @@ function DesignSection({
 
 function FieldList({ formDef }: { formDef: FormDefinition }) {
   const recordSource = (formDef as Record<string, unknown>)['record-source'] as string | undefined;
-  // TODO: Load fields from store based on record source
-  // For now, show placeholder
+  const tables = useUiStore(s => s.objects.tables);
+  const queries = useUiStore(s => s.objects.queries);
+
+  const fields: ColumnInfo[] = useMemo(() => {
+    if (!recordSource) return [];
+    const rsLower = recordSource.toLowerCase();
+    const table = tables.find(t => t.name.toLowerCase() === rsLower);
+    if (table) return table.fields ?? [];
+    const query = queries.find(q => q.name.toLowerCase() === rsLower);
+    if (query) return query.fields ?? [];
+    return [];
+  }, [recordSource, tables, queries]);
+
   if (!recordSource) return <div className="field-list-panel"><span>No record source</span></div>;
 
   return (
     <div className="field-list-panel">
       <div className="panel-header">Fields: {recordSource}</div>
-      <div style={{ color: '#999', padding: 4, fontSize: 12 }}>
-        (Field list loaded from record source)
-      </div>
+      {fields.length === 0 ? (
+        <div style={{ color: '#999', padding: 4, fontSize: 12 }}>No fields found</div>
+      ) : (
+        <div className="field-list-items">
+          {fields.map(f => (
+            <div
+              key={f.name}
+              className="field-list-item"
+              draggable
+              onDragStart={e => {
+                e.dataTransfer.setData('application/x-field', JSON.stringify({ name: f.name, type: f.type }));
+              }}
+            >
+              <span className="field-name">{f.name}</span>
+              <span className="field-type">{f.type}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

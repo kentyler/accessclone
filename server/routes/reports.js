@@ -1,6 +1,6 @@
 /**
  * Report routes with append-only versioning
- * Handles reading/writing reports from shared.reports table
+ * Handles reading/writing reports from shared.objects table (type='report')
  * Each save creates a new version; old versions are preserved
  */
 
@@ -33,8 +33,8 @@ function createRouter(pool) {
 
       const result = await pool.query(
         `SELECT name, record_source, description, version, created_at
-         FROM shared.reports
-         WHERE database_id = $1 AND is_current = true AND owner = 'standard'
+         FROM shared.objects
+         WHERE database_id = $1 AND type = 'report' AND is_current = true AND owner = 'standard'
          ORDER BY name`,
         [databaseId]
       );
@@ -58,10 +58,12 @@ function createRouter(pool) {
       const userId = req.userId;
 
       const result = await pool.query(
-        `SELECT definition, version, owner, intents FROM shared.reports
-         WHERE database_id = $1 AND name = $2 AND is_current = true
-           AND owner IN ($3, 'standard')
-         ORDER BY CASE WHEN owner = 'standard' THEN 1 ELSE 0 END
+        `SELECT o.definition, o.version, o.owner,
+                (SELECT i.content FROM shared.intents i WHERE i.object_id = o.id AND i.intent_type = 'business' ORDER BY i.created_at DESC LIMIT 1) as intents
+         FROM shared.objects o
+         WHERE o.database_id = $1 AND o.type = 'report' AND o.name = $2 AND o.is_current = true
+           AND o.owner IN ($3, 'standard')
+         ORDER BY CASE WHEN o.owner = 'standard' THEN 1 ELSE 0 END
          LIMIT 1`,
         [databaseId, req.params.name, userId || 'standard']
       );
@@ -92,8 +94,8 @@ function createRouter(pool) {
 
       const result = await pool.query(
         `SELECT version, is_current, created_at, owner, modified_by
-         FROM shared.reports
-         WHERE database_id = $1 AND name = $2
+         FROM shared.objects
+         WHERE database_id = $1 AND type = 'report' AND name = $2
          ORDER BY version DESC`,
         [databaseId, req.params.name]
       );
@@ -117,8 +119,8 @@ function createRouter(pool) {
 
       const result = await pool.query(
         `SELECT definition, version, is_current, created_at
-         FROM shared.reports
-         WHERE database_id = $1 AND name = $2 AND version = $3`,
+         FROM shared.objects
+         WHERE database_id = $1 AND type = 'report' AND name = $2 AND version = $3`,
         [databaseId, req.params.name, version]
       );
 
@@ -154,8 +156,8 @@ function createRouter(pool) {
       let owner = 'standard';
       if (!isStandard && userId) {
         const personalCheck = await client.query(
-          `SELECT 1 FROM shared.reports
-           WHERE database_id = $1 AND name = $2 AND owner = $3 AND is_current = true`,
+          `SELECT 1 FROM shared.objects
+           WHERE database_id = $1 AND type = 'report' AND name = $2 AND owner = $3 AND is_current = true`,
           [databaseId, reportName, userId]
         );
         if (personalCheck.rows.length > 0 || content._personalized) {
@@ -171,26 +173,28 @@ function createRouter(pool) {
       // Get current max version for this report (across all owners)
       const versionResult = await client.query(
         `SELECT COALESCE(MAX(version), 0) as max_version
-         FROM shared.reports
-         WHERE database_id = $1 AND name = $2`,
+         FROM shared.objects
+         WHERE database_id = $1 AND type = 'report' AND name = $2`,
         [databaseId, reportName]
       );
       const newVersion = versionResult.rows[0].max_version + 1;
 
       // Mark existing current version for same owner as not current
       await client.query(
-        `UPDATE shared.reports
+        `UPDATE shared.objects
          SET is_current = false
-         WHERE database_id = $1 AND name = $2 AND owner = $3 AND is_current = true`,
+         WHERE database_id = $1 AND type = 'report' AND name = $2 AND owner = $3 AND is_current = true`,
         [databaseId, reportName, owner]
       );
 
       // Insert new version as current
-      await client.query(
-        `INSERT INTO shared.reports (database_id, name, definition, record_source, version, is_current, owner, modified_by)
-         VALUES ($1, $2, $3, $4, $5, true, $6, $7)`,
+      const insertResult = await client.query(
+        `INSERT INTO shared.objects (database_id, type, name, definition, record_source, version, is_current, owner, modified_by)
+         VALUES ($1, 'report', $2, $3, $4, $5, true, $6, $7)
+         RETURNING id`,
         [databaseId, reportName, content, recordSource, newVersion, owner, userId]
       );
+      const objectId = insertResult.rows[0].id;
 
       await client.query('COMMIT');
 
@@ -223,6 +227,20 @@ function createRouter(pool) {
       } catch (evtErr) {
         console.error('Error populating control-event map for report:', evtErr.message);
         logEvent(pool, 'warning', 'PUT /api/reports/:name', 'Control-event map population failed', { databaseId, details: { error: evtErr.message } });
+      }
+
+      // Post-save evaluation (deterministic checks recorded to shared.evaluations)
+      let evaluation = null;
+      try {
+        const { runAndRecordEvaluation } = require('../lib/pipeline-evaluator');
+        evaluation = await runAndRecordEvaluation(pool, {
+          objectId, databaseId, objectType: 'report', objectName: reportName,
+          version: newVersion, definition: content,
+          trigger: req.query.source === 'import' ? 'import' : 'save'
+        });
+      } catch (evalErr) {
+        logEvent(pool, 'warning', 'PUT /api/reports/:name', 'Post-save evaluation failed',
+          { databaseId, details: { error: evalErr.message } });
       }
 
       // Post-import lint: detect issues for imported reports
@@ -263,8 +281,8 @@ function createRouter(pool) {
             );
             if (functions.length > 0) {
               await pool.query(
-                `UPDATE shared.reports SET definition = $1
-                 WHERE database_id = $2 AND name = $3 AND is_current = true AND owner = 'standard'`,
+                `UPDATE shared.objects SET definition = $1
+                 WHERE database_id = $2 AND type = 'report' AND name = $3 AND is_current = true AND owner = 'standard'`,
                 [updatedDef, databaseId, reportName]
               );
               console.log(`Created ${functions.length} computed functions for report ${reportName}`);
@@ -280,7 +298,7 @@ function createRouter(pool) {
       }
 
       console.log(`Saved report: ${reportName} v${newVersion} (database: ${databaseId})`);
-      res.json({ success: true, name: reportName, version: newVersion, database_id: databaseId });
+      res.json({ success: true, name: reportName, version: newVersion, database_id: databaseId, evaluation });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
       console.error('Error saving report:', err);
@@ -304,8 +322,8 @@ function createRouter(pool) {
 
       // Check target version exists (safe to read outside transaction)
       const checkResult = await client.query(
-        `SELECT definition FROM shared.reports
-         WHERE database_id = $1 AND name = $2 AND version = $3`,
+        `SELECT definition FROM shared.objects
+         WHERE database_id = $1 AND type = 'report' AND name = $2 AND version = $3`,
         [databaseId, reportName, targetVersion]
       );
 
@@ -318,17 +336,17 @@ function createRouter(pool) {
 
       // Get current max version
       const versionResult = await client.query(
-        `SELECT MAX(version) as max_version FROM shared.reports
-         WHERE database_id = $1 AND name = $2`,
+        `SELECT MAX(version) as max_version FROM shared.objects
+         WHERE database_id = $1 AND type = 'report' AND name = $2`,
         [databaseId, reportName]
       );
       const newVersion = versionResult.rows[0].max_version + 1;
 
       // Mark current version as not current
       await client.query(
-        `UPDATE shared.reports
+        `UPDATE shared.objects
          SET is_current = false
-         WHERE database_id = $1 AND name = $2 AND is_current = true`,
+         WHERE database_id = $1 AND type = 'report' AND name = $2 AND is_current = true`,
         [databaseId, reportName]
       );
 
@@ -337,8 +355,8 @@ function createRouter(pool) {
       const recordSource = extractRecordSource(targetDefinition);
 
       await client.query(
-        `INSERT INTO shared.reports (database_id, name, definition, record_source, version, is_current, modified_by)
-         VALUES ($1, $2, $3, $4, $5, true, $6)`,
+        `INSERT INTO shared.objects (database_id, type, name, definition, record_source, version, is_current, modified_by)
+         VALUES ($1, 'report', $2, $3, $4, $5, true, $6)`,
         [databaseId, reportName, targetDefinition, recordSource, newVersion, req.userId]
       );
 
@@ -377,8 +395,8 @@ function createRouter(pool) {
 
       // Load the user's personalized current version
       const personalResult = await client.query(
-        `SELECT definition, record_source FROM shared.reports
-         WHERE database_id = $1 AND name = $2 AND owner = $3 AND is_current = true`,
+        `SELECT definition, record_source FROM shared.objects
+         WHERE database_id = $1 AND type = 'report' AND name = $2 AND owner = $3 AND is_current = true`,
         [databaseId, req.params.name, userId]
       );
 
@@ -393,23 +411,23 @@ function createRouter(pool) {
 
       // Get next version number
       const versionResult = await client.query(
-        `SELECT COALESCE(MAX(version), 0) as max_version FROM shared.reports
-         WHERE database_id = $1 AND name = $2`,
+        `SELECT COALESCE(MAX(version), 0) as max_version FROM shared.objects
+         WHERE database_id = $1 AND type = 'report' AND name = $2`,
         [databaseId, req.params.name]
       );
       const newVersion = versionResult.rows[0].max_version + 1;
 
       // Mark current standard version as not current
       await client.query(
-        `UPDATE shared.reports SET is_current = false
-         WHERE database_id = $1 AND name = $2 AND owner = 'standard' AND is_current = true`,
+        `UPDATE shared.objects SET is_current = false
+         WHERE database_id = $1 AND type = 'report' AND name = $2 AND owner = 'standard' AND is_current = true`,
         [databaseId, req.params.name]
       );
 
       // Insert copy as new standard version
       await client.query(
-        `INSERT INTO shared.reports (database_id, name, definition, record_source, version, is_current, owner, modified_by)
-         VALUES ($1, $2, $3, $4, $5, true, 'standard', $6)`,
+        `INSERT INTO shared.objects (database_id, type, name, definition, record_source, version, is_current, owner, modified_by)
+         VALUES ($1, 'report', $2, $3, $4, $5, true, 'standard', $6)`,
         [databaseId, req.params.name, definition, record_source, newVersion, userId]
       );
 
@@ -441,9 +459,9 @@ function createRouter(pool) {
       }
 
       const result = await pool.query(
-        `UPDATE shared.reports
+        `UPDATE shared.objects
          SET is_current = false
-         WHERE database_id = $1 AND name = $2 AND owner = $3 AND is_current = true
+         WHERE database_id = $1 AND type = 'report' AND name = $2 AND owner = $3 AND is_current = true
          RETURNING version`,
         [databaseId, req.params.name, userId]
       );
@@ -470,9 +488,9 @@ function createRouter(pool) {
       const databaseId = req.databaseId;
 
       const result = await pool.query(
-        `UPDATE shared.reports
+        `UPDATE shared.objects
          SET is_current = false
-         WHERE database_id = $1 AND name = $2 AND is_current = true
+         WHERE database_id = $1 AND type = 'report' AND name = $2 AND is_current = true
          RETURNING version`,
         [databaseId, req.params.name]
       );

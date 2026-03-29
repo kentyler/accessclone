@@ -2,12 +2,12 @@
  * POST /extract-object-intents — Batch extract business-level intents from all
  * forms, reports, and queries in a database using LLM analysis.
  *
- * Stores results in the `intents` JSONB column on shared.forms, shared.reports,
- * and shared.view_metadata respectively.
+ * Stores results in shared.intents table (linked to shared.objects),
+ * and in the `intents` JSONB column on shared.view_metadata for queries.
  */
 
 const { logError, logEvent } = require('../../lib/events');
-const { extractFormIntents, extractReportIntents, extractQueryIntents } = require('../../lib/object-intent-extractor');
+const { extractFormIntents, extractReportIntents, extractQueryIntents, extractFormStructureIntents } = require('../../lib/object-intent-extractor');
 const { buildGraphContext } = require('../chat/context');
 
 module.exports = function(router, pool, secrets) {
@@ -41,13 +41,13 @@ module.exports = function(router, pool, secrets) {
       // Load all forms, reports, queries
       const [formsResult, reportsResult, viewsResult] = await Promise.all([
         pool.query(
-          `SELECT id, name, definition, record_source FROM shared.forms
-           WHERE database_id = $1 AND is_current = true`,
+          `SELECT id, name, definition, record_source FROM shared.objects
+           WHERE database_id = $1 AND type = 'form' AND is_current = true`,
           [database_id]
         ),
         pool.query(
-          `SELECT id, name, definition, record_source FROM shared.reports
-           WHERE database_id = $1 AND is_current = true`,
+          `SELECT id, name, definition, record_source FROM shared.objects
+           WHERE database_id = $1 AND type = 'report' AND is_current = true`,
           [database_id]
         ),
         pool.query(
@@ -60,21 +60,39 @@ module.exports = function(router, pool, secrets) {
       const results = {
         forms: { extracted: [], failed: [] },
         reports: { extracted: [], failed: [] },
-        queries: { extracted: [], failed: [] }
+        queries: { extracted: [], failed: [] },
+        structure: { extracted: [], failed: [] }
       };
 
-      // Extract form intents
+      // Extract form intents (business + structure)
       for (const form of formsResult.rows) {
+        // Business intents
         try {
           const intents = await extractFormIntents(form.definition, form.name, graphContext, apiKey);
+          // Save to shared.intents (replace existing business intents for this object)
+          await pool.query('DELETE FROM shared.intents WHERE object_id = $1 AND intent_type = $2', [form.id, 'business']);
           await pool.query(
-            `UPDATE shared.forms SET intents = $1 WHERE id = $2`,
-            [JSON.stringify(intents), form.id]
+            `INSERT INTO shared.intents (object_id, intent_type, content, generated_by) VALUES ($1, 'business', $2, 'llm')`,
+            [form.id, JSON.stringify(intents)]
           );
           results.forms.extracted.push(form.name);
         } catch (err) {
-          console.error(`Failed to extract intents for form "${form.name}":`, err.message);
+          console.error(`Failed to extract business intents for form "${form.name}":`, err.message);
           results.forms.failed.push({ name: form.name, error: err.message });
+        }
+
+        // Structure intents
+        try {
+          const structure = await extractFormStructureIntents(form.definition, form.name, graphContext, apiKey);
+          await pool.query('DELETE FROM shared.intents WHERE object_id = $1 AND intent_type = $2', [form.id, 'structure']);
+          await pool.query(
+            `INSERT INTO shared.intents (object_id, intent_type, content, generated_by) VALUES ($1, 'structure', $2, 'llm')`,
+            [form.id, JSON.stringify(structure)]
+          );
+          results.structure.extracted.push(form.name);
+        } catch (err) {
+          console.error(`Failed to extract structure intents for form "${form.name}":`, err.message);
+          results.structure.failed.push({ name: form.name, error: err.message });
         }
       }
 
@@ -82,9 +100,11 @@ module.exports = function(router, pool, secrets) {
       for (const report of reportsResult.rows) {
         try {
           const intents = await extractReportIntents(report.definition, report.name, graphContext, apiKey);
+          // Save to shared.intents (replace existing business intents for this object)
+          await pool.query('DELETE FROM shared.intents WHERE object_id = $1 AND intent_type = $2', [report.id, 'business']);
           await pool.query(
-            `UPDATE shared.reports SET intents = $1 WHERE id = $2`,
-            [JSON.stringify(intents), report.id]
+            `INSERT INTO shared.intents (object_id, intent_type, content, generated_by) VALUES ($1, 'business', $2, 'llm')`,
+            [report.id, JSON.stringify(intents)]
           );
           results.reports.extracted.push(report.name);
         } catch (err) {
@@ -144,9 +164,11 @@ module.exports = function(router, pool, secrets) {
         results.reports.extracted.length + results.queries.extracted.length;
       const totalFailed = results.forms.failed.length +
         results.reports.failed.length + results.queries.failed.length;
+      const structureExtracted = results.structure.extracted.length;
+      const structureFailed = results.structure.failed.length;
 
       await logEvent(pool, 'info', 'POST /api/database-import/extract-object-intents',
-        `Extracted business intents: ${totalExtracted} succeeded, ${totalFailed} failed`,
+        `Extracted intents: ${totalExtracted} business, ${structureExtracted} structure (${totalFailed + structureFailed} failed)`,
         { databaseId: database_id, details: JSON.stringify(results) });
 
       res.json(results);

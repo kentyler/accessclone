@@ -362,7 +362,38 @@ export interface RowSourceData {
 // Tabs
 // ============================================================
 
-export type ObjectType = 'tables' | 'queries' | 'forms' | 'reports' | 'modules' | 'macros' | 'sql-functions';
+export type ObjectType = 'tables' | 'queries' | 'forms' | 'reports' | 'modules' | 'macros' | 'sql-functions' | 'graph';
+
+// ============================================================
+// Graph
+// ============================================================
+
+export interface GraphNode {
+  id: string;
+  node_type: string;
+  name: string;
+  database_id: string | null;
+  scope: 'local' | 'global';
+  origin: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface GraphEdge {
+  id: string;
+  from_id: string;
+  to_id: string;
+  rel_type: string;
+  status: string | null;
+  from_type?: string;
+  from_name?: string;
+  to_type?: string;
+  to_name?: string;
+}
+
+export interface SubgraphResponse {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
 
 export interface TabDescriptor {
   type: ObjectType;

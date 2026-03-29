@@ -96,6 +96,45 @@
                        form-def
                        [:header :detail :footer]))))))
 
+(defn get-value [control-name]
+  (let [ctrl-kw (projection/ctrl->kw control-name)
+        cs (when ctrl-kw (get-in @app-state [:form-editor :projection :control-state ctrl-kw]))
+        record (get-in @app-state [:form-editor :projection :record])]
+    ;; Try control-state caption first, then bound field value from record
+    (or (when cs (:caption cs))
+        (when (and ctrl-kw record) (get record ctrl-kw))
+        nil)))
+
+(defn get-visible [control-name]
+  (let [ctrl-kw (projection/ctrl->kw control-name)
+        cs (when ctrl-kw (get-in @app-state [:form-editor :projection :control-state ctrl-kw]))]
+    (if cs
+      (not= false (:visible cs))
+      true)))
+
+(defn get-enabled [control-name]
+  (let [ctrl-kw (projection/ctrl->kw control-name)
+        cs (when ctrl-kw (get-in @app-state [:form-editor :projection :control-state ctrl-kw]))]
+    (if cs
+      (not= false (:enabled cs))
+      true)))
+
+(defn is-dirty []
+  (boolean (get-in @app-state [:form-editor :projection :dirty?])))
+
+(defn is-new-record []
+  (let [record (get-in @app-state [:form-editor :projection :record])]
+    (boolean (:__new__ record))))
+
+(defn get-open-args []
+  ;; Stub — future: thread OpenForm args through form open flow
+  nil)
+
+(defn nz [value default-val]
+  (if (nil? value)
+    (if (nil? default-val) "" default-val)
+    value))
+
 (defn run-sql [sql]
   (go
     (let [resp (<! (http/post (str state/api-base "/api/queries/execute")
@@ -117,5 +156,12 @@
                  :setEnabled       set-enabled
                  :setValue          set-value
                  :setSubformSource set-subform-source
-                 :runSQL           run-sql}]
+                 :runSQL           run-sql
+                 :getValue         get-value
+                 :getVisible       get-visible
+                 :getEnabled       get-enabled
+                 :isDirty          is-dirty
+                 :isNewRecord      is-new-record
+                 :getOpenArgs      get-open-args
+                 :nz               nz}]
     (set! (.-AC js/window) api)))

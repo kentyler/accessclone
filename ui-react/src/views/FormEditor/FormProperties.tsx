@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useFormStore } from '@/store/form';
 import { useUiStore } from '@/store/ui';
 import type { Control, FormDefinition } from '@/api/types';
@@ -279,6 +280,19 @@ export default function FormProperties() {
   const queries = useUiStore(s => s.objects.queries);
 
   const { current, selectedControl, selectedSection, propertiesTab } = store;
+
+  // Record source fields for field-select (must be before any conditional returns — Rules of Hooks)
+  const recordSource = current ? (current as Record<string, unknown>)['record-source'] as string | undefined : undefined;
+  const recordSourceFields: Array<{ name: string }> = useMemo(() => {
+    if (!recordSource) return [];
+    const rsLower = recordSource.toLowerCase();
+    const table = tables.find(t => t.name.toLowerCase() === rsLower);
+    if (table) return table.fields?.map(f => ({ name: f.name })) ?? [];
+    const query = queries.find(q => q.name.toLowerCase() === rsLower);
+    if (query) return query.fields?.map(f => ({ name: f.name })) ?? [];
+    return [];
+  }, [recordSource, tables, queries]);
+
   if (!current) return null;
 
   // Determine what we're editing
@@ -339,10 +353,6 @@ export default function FormProperties() {
 
   const tabs = ['format', 'data', 'event', 'other', 'all'];
   const activeTab = propertiesTab || 'format';
-
-  // Record source fields for field-select
-  const recordSource = (current as Record<string, unknown>)['record-source'] as string | undefined;
-  const recordSourceFields: Array<{ name: string }> = []; // TODO: fetch from store
 
   // Get props for active tab
   const getPropsForTab = (tab: string): PropDef[] => {

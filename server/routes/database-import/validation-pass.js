@@ -29,8 +29,8 @@ module.exports = function(router, pool) {
 
       // Load all current forms and reports
       const [formsRes, reportsRes] = await Promise.all([
-        pool.query(`SELECT name, definition FROM shared.forms WHERE database_id = $1 AND is_current = true AND owner = 'standard'`, [database_id]),
-        pool.query(`SELECT name, definition FROM shared.reports WHERE database_id = $1 AND is_current = true AND owner = 'standard'`, [database_id])
+        pool.query(`SELECT name, definition FROM shared.objects WHERE database_id = $1 AND type = 'form' AND is_current = true AND owner = 'standard'`, [database_id]),
+        pool.query(`SELECT name, definition FROM shared.objects WHERE database_id = $1 AND type = 'report' AND is_current = true AND owner = 'standard'`, [database_id])
       ]);
 
       let formsValid = 0;

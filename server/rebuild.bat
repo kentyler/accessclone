@@ -1,12 +1,12 @@
 @echo off
 cd /d "%~dp0.."
-echo [1/2] Compiling ClojureScript...
-pushd ui
-npx shadow-cljs compile app
-set COMPILE_RESULT=%errorlevel%
+echo [1/2] Building React UI...
+pushd ui-react
+call npm run build
+set BUILD_RESULT=%errorlevel%
 popd
-if %COMPILE_RESULT% neq 0 (
-    echo Compile failed. Server not started.
+if %BUILD_RESULT% neq 0 (
+    echo Build failed. Server not started.
     pause
     exit /b 1
 )

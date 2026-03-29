@@ -36,14 +36,20 @@ module.exports = function(router, pool, secrets) {
       // 1. Load modules with VBA source (optionally filtered by name)
       const modulesQuery = module_names?.length
         ? {
-            text: `SELECT name, vba_source, intents FROM shared.modules
-                   WHERE database_id = $1 AND is_current = true AND vba_source IS NOT NULL
-                   AND name = ANY($2)`,
+            text: `SELECT o.name, o.definition->>'vba_source' as vba_source,
+                          (SELECT i.content FROM shared.intents i WHERE i.object_id = o.id AND i.intent_type = 'gesture' ORDER BY i.created_at DESC LIMIT 1) as intents
+                   FROM shared.objects o
+                   WHERE o.database_id = $1 AND o.type = 'module' AND o.is_current = true
+                   AND o.definition->>'vba_source' IS NOT NULL
+                   AND o.name = ANY($2)`,
             values: [database_id, module_names]
           }
         : {
-            text: `SELECT name, vba_source, intents FROM shared.modules
-                   WHERE database_id = $1 AND is_current = true AND vba_source IS NOT NULL`,
+            text: `SELECT o.name, o.definition->>'vba_source' as vba_source,
+                          (SELECT i.content FROM shared.intents i WHERE i.object_id = o.id AND i.intent_type = 'gesture' ORDER BY i.created_at DESC LIMIT 1) as intents
+                   FROM shared.objects o
+                   WHERE o.database_id = $1 AND o.type = 'module' AND o.is_current = true
+                   AND o.definition->>'vba_source' IS NOT NULL`,
             values: [database_id]
           };
       const modulesResult = await pool.query(modulesQuery);
@@ -143,14 +149,23 @@ module.exports = function(router, pool, secrets) {
         }
       }
 
-      // 4. Save intents for all modules
+      // 4. Save intents for all modules (into shared.intents)
       for (const mi of moduleIntents) {
         try {
-          await pool.query(
-            `UPDATE shared.modules SET intents = $1
-             WHERE name = $2 AND database_id = $3 AND is_current = true`,
-            [JSON.stringify(mi.mapped), mi.name, database_id]
+          // Look up the object ID
+          const objResult = await pool.query(
+            `SELECT id FROM shared.objects WHERE database_id = $1 AND type = 'module' AND name = $2 AND is_current = true`,
+            [database_id, mi.name]
           );
+          if (objResult.rows.length > 0) {
+            const objectId = objResult.rows[0].id;
+            // Replace existing gesture intents
+            await pool.query('DELETE FROM shared.intents WHERE object_id = $1 AND intent_type = $2', [objectId, 'gesture']);
+            await pool.query(
+              `INSERT INTO shared.intents (object_id, intent_type, content, generated_by) VALUES ($1, 'gesture', $2, 'import')`,
+              [objectId, JSON.stringify(mi.mapped)]
+            );
+          }
           results.mapped++;
         } catch (err) {
           console.error(`[translate-modules] Save intents failed for ${mi.name}:`, err.message);

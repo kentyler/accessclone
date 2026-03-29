@@ -42,6 +42,7 @@ Read in order for the full import workflow.
 
 | File | Summary |
 |------|---------|
+| `skills/import-patterns.md` | **START** Known import patterns checklist — every solved problem with status (automated/partial/not-implemented). Consult when working on import pipeline. |
 | `skills/form-design.md` | Form definition JSON structure — control types (15), layout (twips grid), binding, sections, hotkeys, continuous/popup/modal. |
 | `skills/form-state-sync.md` | Cross-form state sync architecture — control_column_map, session_state cross-join, runtime population, import ordering. |
 | `skills/updatable-queries.md` | View write-target resolution — Access updatable queries vs PG read-only views, view_metadata table, INSTEAD OF triggers. |
@@ -63,6 +64,7 @@ Read in order for the full import workflow.
 | File | Summary |
 |------|---------|
 | `skills/codebase-guide.md` | Pipeline-oriented walkthrough of every subsystem — best starting point for understanding the codebase. |
+| `skills/render-levels.md` | Progressive render level system — 5-level debug/dev tool for form/report/table/query rendering. Full implementation plan for forms, cross-object architecture. |
 | `skills/testing.md` | Test map, patterns, coverage gaps, templates for writing new tests. Read before adding tests. |
 | `skills/install.md` | Installation assistant skill — auto-detect environment, PostgreSQL setup, troubleshooting steps. |
 | `skills/writing-skills.md` | Meta-guide for writing new skill files — cross-platform patterns, structure checklist, examples. |

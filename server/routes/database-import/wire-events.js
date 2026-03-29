@@ -20,8 +20,8 @@ module.exports = function (router, pool) {
     try {
       // Load all current forms
       const formsResult = await pool.query(
-        `SELECT name, content FROM shared.forms
-         WHERE database_id = $1 AND is_current = true`,
+        `SELECT name, definition as content FROM shared.objects
+         WHERE database_id = $1 AND type = 'form' AND is_current = true`,
         [databaseId]
       );
 
@@ -36,8 +36,8 @@ module.exports = function (router, pool) {
 
       // Load all current reports
       const reportsResult = await pool.query(
-        `SELECT name, content FROM shared.reports
-         WHERE database_id = $1 AND is_current = true`,
+        `SELECT name, definition as content FROM shared.objects
+         WHERE database_id = $1 AND type = 'report' AND is_current = true`,
         [databaseId]
       );
 

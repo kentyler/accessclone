@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import * as api from '@/api/client';
 import type {
-  Database, TableInfo, QueryInfo, FormListItem, ReportListItem,
+  Database, TableInfo, ColumnInfo, QueryInfo, FormListItem, ReportListItem,
   ModuleListItem, MacroListItem, SqlFunctionInfo, TabDescriptor,
   ChatMessage, AppMode, ObjectType, AppConfig, LogsFilter,
   ImportLogEntry, ImportIssue, ContextMenuState,
@@ -192,6 +192,7 @@ const typeToKey: Record<ObjectType, keyof UiState['objects']> = {
   modules: 'modules',
   macros: 'macros',
   'sql-functions': 'sqlFunctions',
+  graph: 'tables', // graph doesn't use object lists; placeholder to satisfy type
 };
 
 // ============================================================
@@ -262,12 +263,14 @@ export const useUiStore = create<UiStore>()(
     // Database
     // --------------------------------------------------------
     async loadDatabases() {
-      const res = await api.get<Database[]>('/api/databases');
+      const res = await api.get<{ databases: Database[]; current: string }>('/api/databases');
       if (!res.ok) return;
+      const databases = res.data.databases ?? [];
+      const currentId = res.data.current;
       set(s => {
-        s.availableDatabases = res.data;
-        if (res.data.length > 0 && !s.currentDatabase) {
-          s.currentDatabase = res.data[0];
+        s.availableDatabases = databases;
+        if (databases.length > 0 && !s.currentDatabase) {
+          s.currentDatabase = databases.find(d => d.database_id === currentId) ?? databases[0];
         }
       });
       const db = get().currentDatabase;
@@ -303,11 +306,9 @@ export const useUiStore = create<UiStore>()(
           s._pendingLoads--;
           if (s._pendingLoads <= 0) {
             s.loadingObjects = false;
-            // Restore UI state if pending
             if (s._pendingUiState) {
               const saved = s._pendingUiState as Record<string, unknown>;
               s._pendingUiState = null;
-              // Restore tabs
               if (Array.isArray(saved.open_objects)) {
                 s.openTabs = saved.open_objects as TabDescriptor[];
               }
@@ -322,50 +323,116 @@ export const useUiStore = create<UiStore>()(
         });
       };
 
-      const load = async <T>(path: string, key: keyof UiState['objects']) => {
-        const res = await api.get<T[]>(path);
-        if (res.ok) set(s => { (s.objects[key] as T[]) = res.data; });
-        decrement();
+      const wrap = async (fn: () => Promise<void>) => {
+        try { await fn(); } finally { decrement(); }
       };
 
       await Promise.all([
-        load<TableInfo>('/api/tables', 'tables'),
-        load<QueryInfo>('/api/queries', 'queries'),
-        load<FormListItem>('/api/forms', 'forms'),
-        load<ReportListItem>('/api/reports', 'reports'),
-        load<ModuleListItem>('/api/modules', 'modules'),
-        load<MacroListItem>('/api/macros', 'macros'),
-        load<SqlFunctionInfo>('/api/functions', 'sqlFunctions'),
+        wrap(() => get().loadTables()),
+        wrap(() => get().loadQueries()),
+        wrap(() => get().loadForms()),
+        wrap(() => get().loadReports()),
+        wrap(() => get().loadModules()),
+        wrap(() => get().loadMacros()),
+        wrap(() => get().loadSqlFunctions()),
       ]);
     },
 
+    // Match CLJS: body.tables is array of objects, add synthetic 1-based id
     async loadTables() {
-      const res = await api.get<TableInfo[]>('/api/tables');
-      if (res.ok) set(s => { s.objects.tables = res.data; });
+      const res = await api.get<Record<string, unknown>>('/api/tables');
+      if (res.ok) {
+        const raw = (res.data.tables ?? []) as Array<Record<string, unknown>>;
+        set(s => {
+          s.objects.tables = raw.map((t, i) => ({
+            id: i + 1, name: t.name as string,
+            fields: (t.fields ?? []) as ColumnInfo[],
+            description: t.description as string | undefined,
+          }));
+        });
+      }
     },
+    // Match CLJS: body.queries is array of objects, add synthetic id
     async loadQueries() {
-      const res = await api.get<QueryInfo[]>('/api/queries');
-      if (res.ok) set(s => { s.objects.queries = res.data; });
+      const res = await api.get<Record<string, unknown>>('/api/queries');
+      if (res.ok) {
+        const raw = (res.data.queries ?? []) as Array<Record<string, unknown>>;
+        set(s => {
+          s.objects.queries = raw.map((q, i) => ({
+            id: i + 1, name: q.name as string,
+            sql: (q.sql ?? '') as string,
+            fields: (q.fields ?? []) as ColumnInfo[],
+          }));
+        });
+      }
     },
+    // Match CLJS: iterate body.forms (string array), look up detail by index
     async loadForms() {
-      const res = await api.get<FormListItem[]>('/api/forms');
-      if (res.ok) set(s => { s.objects.forms = res.data; });
+      const res = await api.get<Record<string, unknown>>('/api/forms');
+      if (res.ok) {
+        const names = (res.data.forms ?? []) as string[];
+        const details = (res.data.details ?? []) as Array<Record<string, unknown>>;
+        set(s => {
+          s.objects.forms = names.map((name, i) => ({
+            id: i + 1, name, filename: name,
+            record_source: (details[i]?.record_source as string) || undefined,
+          }));
+        });
+      }
     },
+    // Match CLJS: iterate body.reports (string array), look up detail by index
     async loadReports() {
-      const res = await api.get<ReportListItem[]>('/api/reports');
-      if (res.ok) set(s => { s.objects.reports = res.data; });
+      const res = await api.get<Record<string, unknown>>('/api/reports');
+      if (res.ok) {
+        const names = (res.data.reports ?? []) as string[];
+        const details = (res.data.details ?? []) as Array<Record<string, unknown>>;
+        set(s => {
+          s.objects.reports = names.map((name, i) => ({
+            id: i + 1, name, filename: name,
+            record_source: (details[i]?.record_source as string) || undefined,
+          }));
+        });
+      }
     },
+    // Match CLJS: body.modules is string array, add synthetic id
     async loadModules() {
-      const res = await api.get<ModuleListItem[]>('/api/modules');
-      if (res.ok) set(s => { s.objects.modules = res.data; });
+      const res = await api.get<Record<string, unknown>>('/api/modules');
+      if (res.ok) {
+        const names = (res.data.modules ?? []) as string[];
+        set(s => {
+          s.objects.modules = names.map((name, i) => ({
+            id: i + 1, name, filename: name,
+          }));
+        });
+      }
     },
+    // Match CLJS: body.macros is string array, add synthetic id
     async loadMacros() {
-      const res = await api.get<MacroListItem[]>('/api/macros');
-      if (res.ok) set(s => { s.objects.macros = res.data; });
+      const res = await api.get<Record<string, unknown>>('/api/macros');
+      if (res.ok) {
+        const names = (res.data.macros ?? []) as string[];
+        set(s => {
+          s.objects.macros = names.map((name, i) => ({
+            id: i + 1, name,
+          }));
+        });
+      }
     },
+    // Match CLJS: body.functions is array of objects, add synthetic id
     async loadSqlFunctions() {
-      const res = await api.get<SqlFunctionInfo[]>('/api/functions');
-      if (res.ok) set(s => { s.objects.sqlFunctions = res.data; });
+      const res = await api.get<Record<string, unknown>>('/api/functions');
+      if (res.ok) {
+        const raw = (res.data.functions ?? []) as Array<Record<string, unknown>>;
+        set(s => {
+          s.objects.sqlFunctions = raw.map((f, i) => ({
+            id: i + 1, name: f.name as string,
+            arguments: (f.arguments ?? '') as string,
+            return_type: (f.returnType ?? f.return_type ?? '') as string,
+            source: f.source as string | undefined,
+            description: f.description as string | undefined,
+          }));
+        });
+      }
     },
 
     // --------------------------------------------------------
@@ -412,7 +479,12 @@ export const useUiStore = create<UiStore>()(
     // --------------------------------------------------------
     toggleSidebar() { set(s => { s.sidebarCollapsed = !s.sidebarCollapsed; }); },
     togglePropertiesPanel() { set(s => { s.propertiesPanelOpen = !s.propertiesPanelOpen; }); },
-    setSidebarObjectType(type) { set(s => { s.sidebarObjectType = type; }); },
+    setSidebarObjectType(type) {
+      set(s => { s.sidebarObjectType = type; });
+      if (type === 'graph') {
+        get().openObject('graph', 'explorer', 'Graph Explorer');
+      }
+    },
 
     // --------------------------------------------------------
     // App mode

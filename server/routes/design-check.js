@@ -96,8 +96,8 @@ module.exports = function(pool, secrets) {
 
       // Load forms/reports (names + record sources)
       const [formsRes, reportsRes] = await Promise.all([
-        pool.query(`SELECT name, record_source FROM shared.forms WHERE database_id = $1 AND is_current = true AND owner = 'standard'`, [database_id]),
-        pool.query(`SELECT name, record_source FROM shared.reports WHERE database_id = $1 AND is_current = true AND owner = 'standard'`, [database_id])
+        pool.query(`SELECT name, record_source FROM shared.objects WHERE database_id = $1 AND type = 'form' AND is_current = true AND owner = 'standard'`, [database_id]),
+        pool.query(`SELECT name, record_source FROM shared.objects WHERE database_id = $1 AND type = 'report' AND is_current = true AND owner = 'standard'`, [database_id])
       ]);
 
       // Load import log summary if run_id provided

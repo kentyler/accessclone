@@ -398,8 +398,8 @@ module.exports = function(router, pool, secrets) {
       for (const [formName, controlNames] of Object.entries(byForm)) {
         // Load current form definition
         const formResult = await pool.query(
-          `SELECT definition FROM shared.forms
-           WHERE database_id = $1 AND name = $2 AND is_current = true AND owner = 'standard'`,
+          `SELECT definition FROM shared.objects
+           WHERE database_id = $1 AND type = 'form' AND name = $2 AND is_current = true AND owner = 'standard'`,
           [targetDatabaseId, formName]
         );
         if (formResult.rows.length === 0) continue;
@@ -423,8 +423,8 @@ module.exports = function(router, pool, secrets) {
 
         if (modified) {
           await pool.query(
-            `UPDATE shared.forms SET definition = $1
-             WHERE database_id = $2 AND name = $3 AND is_current = true AND owner = 'standard'`,
+            `UPDATE shared.objects SET definition = $1
+             WHERE database_id = $2 AND type = 'form' AND name = $3 AND is_current = true AND owner = 'standard'`,
             [definition, targetDatabaseId, formName]
           );
         }

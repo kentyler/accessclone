@@ -1,6 +1,5 @@
 import { useEffect, useMemo } from 'react';
 import { useImportStore, ObjectType, SourceItem } from '@/store/import';
-import { useUiStore } from '@/store/ui';
 
 // ============================================================
 // Helpers
@@ -27,45 +26,28 @@ const TYPE_LABELS: Record<ObjectType, string> = {
 
 function SourceDatabasesList() {
   const store = useImportStore();
-  const accessDatabases = useUiStore(s => (s.objects as Record<string, unknown>).access_databases) as string[] | undefined;
+
+  if (store.selectedPaths.length === 0) return null;
 
   return (
     <div className="import-source-panel">
-      <div className="panel-header">Source Databases</div>
-      {(accessDatabases || []).length === 0 ? (
-        <div style={{ padding: 8, color: '#999', fontSize: 12 }}>
-          No Access databases found. Add a folder path in the sidebar to scan for .accdb/.mdb files.
-        </div>
-      ) : (
-        <div className="source-db-list">
-          {(accessDatabases || []).map((path: string) => {
-            const isSelected = store.selectedPaths.includes(path);
-            const isActive = store.activePath === path;
-            const filename = path.split(/[/\\]/).pop() || path;
-            return (
-              <div
-                key={path}
-                className={`source-db-item${isActive ? ' active' : ''}${isSelected ? ' selected' : ''}`}
-                onClick={() => {
-                  if (isSelected) {
-                    store.setActivePath(path);
-                  } else {
-                    store.toggleDatabaseSelection(path);
-                  }
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={isSelected}
-                  onChange={() => store.toggleDatabaseSelection(path)}
-                  onClick={e => e.stopPropagation()}
-                />
-                <span className="source-db-name">{filename}</span>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      <div className="panel-header">Selected Sources</div>
+      <div className="source-db-list">
+        {store.selectedPaths.map((path: string) => {
+          const isActive = store.activePath === path;
+          const filename = path.split(/[/\\]/).pop() || path;
+          return (
+            <div
+              key={path}
+              className={`source-db-item${isActive ? ' active' : ''}`}
+              onClick={() => store.setActivePath(path)}
+              title={path}
+            >
+              <span className="source-db-name">{filename}</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

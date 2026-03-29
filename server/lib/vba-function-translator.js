@@ -90,8 +90,8 @@ async function translateVbaFunctions(pool, databaseId, schemaName, apiKey, funct
 
   // Load all current VBA modules
   const modulesResult = await pool.query(
-    `SELECT name, vba_source FROM shared.modules
-     WHERE database_id = $1 AND is_current = true AND vba_source IS NOT NULL`,
+    `SELECT name, definition->>'vba_source' as vba_source FROM shared.objects
+     WHERE database_id = $1 AND type = 'module' AND is_current = true AND definition->>'vba_source' IS NOT NULL`,
     [databaseId]
   );
   const modules = modulesResult.rows;

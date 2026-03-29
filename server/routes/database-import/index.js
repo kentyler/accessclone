@@ -25,6 +25,7 @@ module.exports = function(pool, secrets) {
   require('./resolve-expressions')(router, pool, secrets);
   require('./extract-object-intents')(router, pool, secrets);
   require('./wire-events')(router, pool);
+  require('./pipeline')(router, pool, secrets);
 
   return router;
 };

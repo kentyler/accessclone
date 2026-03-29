@@ -39,10 +39,11 @@ module.exports = function(pool, secrets) {
     try {
       // Load module data from DB
       const moduleResult = await pool.query(
-        `SELECT name, vba_source, cljs_source, intents, status
-         FROM shared.modules
-         WHERE name = $1 AND database_id = $2
-         ORDER BY version DESC LIMIT 1`,
+        `SELECT o.name, o.definition, o.status,
+                (SELECT i.content FROM shared.intents i WHERE i.object_id = o.id AND i.intent_type = 'gesture' ORDER BY i.created_at DESC LIMIT 1) as intents
+         FROM shared.objects o
+         WHERE o.type = 'module' AND o.name = $1 AND o.database_id = $2
+         ORDER BY o.version DESC LIMIT 1`,
         [module_name, databaseId]
       );
 
@@ -50,15 +51,16 @@ module.exports = function(pool, secrets) {
         return res.status(404).json({ error: `Module "${module_name}" not found` });
       }
 
-      const mod = moduleResult.rows[0];
-      const intentsData = mod.intents || {};
+      const row = moduleResult.rows[0];
+      const def = row.definition || {};
+      const intentsData = row.intents || {};
 
       // Build step input from module data
       let input;
       switch (step) {
         case 'extract':
           input = {
-            vbaSource: mod.vba_source,
+            vbaSource: def.vba_source,
             moduleName: module_name,
             appObjects: await getAppObjects(pool, databaseId)
           };
@@ -70,7 +72,7 @@ module.exports = function(pool, secrets) {
           const mapped = intentsData.mapped;
           const { collectGaps } = require('../lib/vba-intent-extractor');
           const gaps = collectGaps(mapped || {});
-          input = { gaps, vbaSource: mod.vba_source, moduleName: module_name };
+          input = { gaps, vbaSource: def.vba_source, moduleName: module_name };
           break;
         }
         case 'resolve-gaps':
@@ -86,12 +88,19 @@ module.exports = function(pool, secrets) {
 
       // Get updated module status
       const updatedMod = await pool.query(
-        `SELECT intents, cljs_source FROM shared.modules
-         WHERE name = $1 AND database_id = $2
-         ORDER BY version DESC LIMIT 1`,
+        `SELECT o.definition,
+                (SELECT i.content FROM shared.intents i WHERE i.object_id = o.id AND i.intent_type = 'gesture' ORDER BY i.created_at DESC LIMIT 1) as intents
+         FROM shared.objects o
+         WHERE o.type = 'module' AND o.name = $1 AND o.database_id = $2
+         ORDER BY o.version DESC LIMIT 1`,
         [module_name, databaseId]
       );
-      const moduleStatus = getModuleStatus(updatedMod.rows[0] || {});
+      const updatedRow = updatedMod.rows[0] || {};
+      const updatedDef = updatedRow.definition || {};
+      const moduleStatus = getModuleStatus({
+        intents: updatedRow.intents,
+        cljs_source: updatedDef.cljs_source
+      });
 
       res.json({ ...result, module_status: moduleStatus });
     } catch (err) {
@@ -121,10 +130,11 @@ module.exports = function(pool, secrets) {
     try {
       // Load module data
       const moduleResult = await pool.query(
-        `SELECT name, vba_source, cljs_source, intents, status
-         FROM shared.modules
-         WHERE name = $1 AND database_id = $2
-         ORDER BY version DESC LIMIT 1`,
+        `SELECT o.name, o.definition, o.status,
+                (SELECT i.content FROM shared.intents i WHERE i.object_id = o.id AND i.intent_type = 'gesture' ORDER BY i.created_at DESC LIMIT 1) as intents
+         FROM shared.objects o
+         WHERE o.type = 'module' AND o.name = $1 AND o.database_id = $2
+         ORDER BY o.version DESC LIMIT 1`,
         [module_name, databaseId]
       );
 
@@ -132,11 +142,12 @@ module.exports = function(pool, secrets) {
         return res.status(404).json({ error: `Module "${module_name}" not found` });
       }
 
-      const mod = moduleResult.rows[0];
-      const intentsData = mod.intents || {};
+      const row = moduleResult.rows[0];
+      const def = row.definition || {};
+      const intentsData = row.intents || {};
 
       const moduleData = {
-        vbaSource: mod.vba_source,
+        vbaSource: def.vba_source,
         moduleName: module_name,
         appObjects: await getAppObjects(pool, databaseId),
         intents: intentsData.intents || null,
@@ -153,12 +164,19 @@ module.exports = function(pool, secrets) {
 
       // Get final module status
       const updatedMod = await pool.query(
-        `SELECT intents, cljs_source FROM shared.modules
-         WHERE name = $1 AND database_id = $2
-         ORDER BY version DESC LIMIT 1`,
+        `SELECT o.definition,
+                (SELECT i.content FROM shared.intents i WHERE i.object_id = o.id AND i.intent_type = 'gesture' ORDER BY i.created_at DESC LIMIT 1) as intents
+         FROM shared.objects o
+         WHERE o.type = 'module' AND o.name = $1 AND o.database_id = $2
+         ORDER BY o.version DESC LIMIT 1`,
         [module_name, databaseId]
       );
-      result.moduleStatus = getModuleStatus(updatedMod.rows[0] || {});
+      const updatedRow = updatedMod.rows[0] || {};
+      const updatedDef = updatedRow.definition || {};
+      result.moduleStatus = getModuleStatus({
+        intents: updatedRow.intents,
+        cljs_source: updatedDef.cljs_source
+      });
 
       res.json(result);
     } catch (err) {
@@ -184,22 +202,27 @@ module.exports = function(pool, secrets) {
 
     try {
       const result = await pool.query(
-        `SELECT DISTINCT ON (name) name, vba_source, cljs_source, intents, status
-         FROM shared.modules
-         WHERE database_id = $1 AND is_current = true
-         ORDER BY name, version DESC`,
+        `SELECT DISTINCT ON (o.name) o.name, o.definition, o.status,
+                (SELECT i.content FROM shared.intents i WHERE i.object_id = o.id AND i.intent_type = 'gesture' ORDER BY i.created_at DESC LIMIT 1) as intents
+         FROM shared.objects o
+         WHERE o.database_id = $1 AND o.type = 'module' AND o.is_current = true
+         ORDER BY o.name, o.version DESC`,
         [databaseId]
       );
 
-      const modules = result.rows.map(mod => {
-        const pipelineStatus = getModuleStatus(mod);
+      const modules = result.rows.map(row => {
+        const def = row.definition || {};
+        const pipelineStatus = getModuleStatus({
+          intents: row.intents,
+          cljs_source: def.cljs_source
+        });
         return {
-          name: mod.name,
+          name: row.name,
           step: pipelineStatus.step,
           status: pipelineStatus.status,
-          has_vba: !!mod.vba_source,
-          has_cljs: !!mod.cljs_source,
-          module_status: mod.status
+          has_vba: !!def.vba_source,
+          has_cljs: !!def.cljs_source,
+          module_status: row.status
         };
       });
 
@@ -233,8 +256,8 @@ async function getAppObjects(pool, databaseId) {
     const [tables, views, forms, reports] = await Promise.all([
       pool.query(`SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_type = 'BASE TABLE'`, [schema]),
       pool.query(`SELECT table_name FROM information_schema.views WHERE table_schema = $1`, [schema]),
-      pool.query(`SELECT DISTINCT name FROM shared.forms WHERE database_id = $1 AND is_current = true`, [databaseId]),
-      pool.query(`SELECT DISTINCT name FROM shared.reports WHERE database_id = $1 AND is_current = true`, [databaseId])
+      pool.query(`SELECT DISTINCT name FROM shared.objects WHERE database_id = $1 AND type = 'form' AND is_current = true`, [databaseId]),
+      pool.query(`SELECT DISTINCT name FROM shared.objects WHERE database_id = $1 AND type = 'report' AND is_current = true`, [databaseId])
     ]);
 
     return {
@@ -250,7 +273,7 @@ async function getAppObjects(pool, databaseId) {
 }
 
 /**
- * Persist a step result back to the module's intents JSONB column.
+ * Persist a step result back to shared.intents for the module.
  */
 async function persistStepResult(pool, moduleName, databaseId, stepName, stepResult, intentsData) {
   const result = stepResult.result;
@@ -284,11 +307,20 @@ async function persistStepResult(pool, moduleName, databaseId, stepName, stepRes
   }
 
   if (updated) {
-    await pool.query(
-      `UPDATE shared.modules SET intents = $1
-       WHERE name = $2 AND database_id = $3
-       AND version = (SELECT MAX(version) FROM shared.modules WHERE name = $2 AND database_id = $3)`,
-      [JSON.stringify(intentsData), moduleName, databaseId]
+    // Look up the object ID, then upsert into shared.intents
+    const objResult = await pool.query(
+      `SELECT id FROM shared.objects
+       WHERE type = 'module' AND name = $1 AND database_id = $2
+       AND version = (SELECT MAX(version) FROM shared.objects WHERE type = 'module' AND name = $1 AND database_id = $2)`,
+      [moduleName, databaseId]
     );
+    if (objResult.rows.length > 0) {
+      const objectId = objResult.rows[0].id;
+      await pool.query('DELETE FROM shared.intents WHERE object_id = $1 AND intent_type = $2', [objectId, 'gesture']);
+      await pool.query(
+        `INSERT INTO shared.intents (object_id, intent_type, content, generated_by) VALUES ($1, 'gesture', $2, 'pipeline')`,
+        [objectId, JSON.stringify(intentsData)]
+      );
+    }
   }
 }

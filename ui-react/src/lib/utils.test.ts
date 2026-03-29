@@ -188,7 +188,7 @@ describe('controlStyle', () => {
     const ctrl = {
       type: 'label', name: 'x', left: 0, top: 0, width: 0, height: 0,
       'back-color': '#fff',
-    } as Control;
+    } as unknown as Control;
     const style = controlStyle(ctrl);
     expect(style.backgroundColor).toBeUndefined();
   });
@@ -197,7 +197,7 @@ describe('controlStyle', () => {
     const ctrl = {
       type: 'text-box', name: 'x', left: 0, top: 0, width: 0, height: 0,
       'back-color': '#fff',
-    } as Control;
+    } as unknown as Control;
     const style = controlStyle(ctrl);
     expect(style.backgroundColor).toBe('#fff');
   });
@@ -206,7 +206,7 @@ describe('controlStyle', () => {
     const ctrl = {
       type: 'label', name: 'x', left: 0, top: 0, width: 0, height: 0,
       'back-style': 1, 'back-color': '#fff',
-    } as Control;
+    } as unknown as Control;
     const style = controlStyle(ctrl);
     expect(style.backgroundColor).toBe('#fff');
   });

@@ -68,6 +68,8 @@ function OverviewPane({ data }: { data: OverviewData | null }) {
 
   if (!data) return <div style={{ padding: 16, color: '#999' }}>Loading overview...</div>;
 
+  const imported = data.imported ?? {};
+  const source = data.source ?? {};
   const types = ['tables', 'queries', 'forms', 'reports', 'modules', 'macros'];
 
   const runDesignCheck = async () => {
@@ -84,7 +86,7 @@ function OverviewPane({ data }: { data: OverviewData | null }) {
       <div style={{ maxWidth: 400, marginBottom: 16 }}>
         {types.map(t => (
           <StatusCard key={t} label={t.charAt(0).toUpperCase() + t.slice(1)}
-            imported={data.imported[t] || 0} total={data.source[t] || data.imported[t] || 0} />
+            imported={imported[t] || 0} total={source[t] || imported[t] || 0} />
         ))}
       </div>
 

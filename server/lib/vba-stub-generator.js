@@ -151,8 +151,8 @@ async function createStubFunctions(pool, schemaName, databaseId) {
 
   // 1. Load all current modules for this database
   const modulesResult = await pool.query(
-    `SELECT name, vba_source FROM shared.modules
-     WHERE database_id = $1 AND is_current = true AND vba_source IS NOT NULL`,
+    `SELECT name, definition->>'vba_source' as vba_source FROM shared.objects
+     WHERE database_id = $1 AND type = 'module' AND is_current = true AND definition->>'vba_source' IS NOT NULL`,
     [databaseId]
   );
 

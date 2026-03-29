@@ -79,8 +79,8 @@ async function buildVbaContext(pool, databaseId, pgError) {
 
   // Load all current VBA modules for this database
   const modResult = await pool.query(
-    `SELECT name, vba_source FROM shared.modules
-     WHERE database_id = $1 AND is_current = true AND vba_source IS NOT NULL`,
+    `SELECT name, definition->>'vba_source' as vba_source FROM shared.objects
+     WHERE database_id = $1 AND type = 'module' AND is_current = true AND definition->>'vba_source' IS NOT NULL`,
     [databaseId]
   );
   if (modResult.rows.length === 0) return '';

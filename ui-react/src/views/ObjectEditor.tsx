@@ -7,6 +7,7 @@ import SqlFunctionViewer from './SqlFunctionViewer';
 import LogsViewer from './LogsViewer';
 import FormEditor from './FormEditor/FormEditor';
 import ReportEditor from './ReportEditor/ReportEditor';
+import GraphExplorer from './GraphExplorer/GraphExplorer';
 
 interface Props {
   tab: TabDescriptor;
@@ -28,6 +29,8 @@ export default function ObjectEditor({ tab }: Props) {
       return <MacroViewer macroName={tab.name} />;
     case 'sql-functions':
       return <SqlFunctionViewer functionName={tab.name} />;
+    case 'graph':
+      return <GraphExplorer />;
     default:
       return <div>Unknown object type: {tab.type}</div>;
   }

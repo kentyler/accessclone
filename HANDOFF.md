@@ -6,7 +6,68 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 
 ## Current State
 
-### Just Shipped (2026-03-23)
+### Just Shipped (2026-03-28)
+- **Structure intent extraction** (cowork session): New `intent_type='structure'` captures architectural patterns per form (11 archetypes: master-detail, search-dashboard, switchboard, etc.; 11 subpatterns). Extracted for all 40 northwind_18 forms. New `skills/structure-intent-extraction.md` (LLM prompt), `scripts/extract-structure-intents.js` (standalone runner). Modified: `server/lib/object-intent-extractor.js`, `extract-object-intents.js`, `chat/context.js`, `chat/index.js`. Stored in `shared.intents` with `intent_type='structure'`.
+
+### Planned — Progressive Render Levels
+Full plan in `skills/render-levels.md`. 5-level progressive rendering for form view: Chrome → Layout → Data Source → Data Binding → Interactivity. Dropdown in toolbar, info bar, LLM chat context integration. Shared types (`render-level.ts`) and reusable selector component designed for later use with reports/tables/queries. Investigation confirmed frmAbout data is identical between nw15 (CLJS era) and nw18 — all rendering bugs are in the React layer, not the import data.
+
+### Previously Shipped (2026-03-27)
+- **Standalone evaluation system (`shared.evaluations`)**: Decoupled from the pipeline-specific `pipeline_task_evaluations` table. Every form and report save now runs deterministic checks (record-source exists, structural lint, control bindings, combo-box SQL for forms) and records results. No FK to `shared.objects` (append-only versioning makes FKs fragile). `trigger` column distinguishes `save` vs `import` vs `manual`.
+  - **New table**: `shared.evaluations` (id, object_id, database_id, object_type, object_name, version, trigger, overall_passed, failure_class, checks JSONB, check/passed/failed counts, duration_ms, created_at). Indexed on object_id and (database_id, object_type, object_name).
+  - **pipeline-evaluator.js expanded**: `runFormDeterministicChecks` now accepts string or task object (backward-compatible). New `runReportDeterministicChecks` (3 checks, no combo-box). New `runAndRecordEvaluation` orchestrator (fetches schema, dispatches to form/report checks, classifies failure, INSERTs to evaluations).
+  - **Form/report save wired**: `PUT /api/forms/:name` and `PUT /api/reports/:name` now capture `RETURNING id` from INSERT, run evaluation as post-commit side effect (try/catch — never blocks save), include `evaluation` in response JSON.
+  - **New route `server/routes/evaluations.js`**: `POST /run-all` (batch evaluate all forms+reports), `POST /:type/:name/run` (evaluate single object), `GET /:type/:name` (paginated history), `GET /:type/:name/latest`. Registered at `/api/evaluations`.
+  - **11 new tests** in `server/__tests__/evaluations.test.js`. All 647 tests pass (575 server + 72 electron).
+- **React hook order fix in FormProperties**: `useMemo` for record-source field lookup was placed after conditional `return null` (line 297), violating Rules of Hooks. Moved above all early returns. Root cause: the `useMemo` was added (March 25) after the early-return guards were already in place.
+
+### Previously Shipped (2026-03-25)
+- **React UI is now the default frontend**: Flipped `server/index.js` to serve `ui-react/dist/` by default. Set `USE_CLJS_UI=1` to fall back to CLJS.
+  - `server/rebuild.bat` now builds React (was CLJS). Old CLJS script preserved as `server/rebuild-cljs.bat`.
+  - Fixed 2 TS build errors: `Projection` cast in `runtime.ts`, `back-color` type mismatch in `utils.test.ts`.
+  - `ui-react/dist/` added to `.gitignore`.
+- **React API response handling fixed to match CLJS** — Root cause of most runtime errors: React assumed bare arrays from API but all endpoints return wrapped objects. Systematically audited all 8 CLJS loaders and matched them:
+  - All 7 object types now get synthetic 1-based IDs (`id: i + 1`), matching CLJS `(inc idx)` pattern
+  - Forms/Reports: iterate `body.forms`/`body.reports` (string arrays), look up details by index. Populate `name` + `filename` (both raw).
+  - Modules/Macros: iterate `body.modules`/`body.macros` (string arrays), add synthetic IDs
+  - Tables/Queries/SqlFunctions: add synthetic IDs to server-returned object arrays
+  - `loadTargetExisting` in import store: forms/reports/modules/macros now use name-array keys (not `details`), queries merge views + functions (matching CLJS dual-endpoint fetch)
+- **ModuleViewer enhanced** (`ui-react/src/views/ModuleViewer.tsx`): Added status dropdown (Pending/Translated/Needs Review/Complete) with PUT save, imported date display, "Extract Intents" button calling `POST /api/chat/extract-intents`, and collapsible intent summary panel with classification badges (mechanical/LLM/gap) and procedure-level stats.
+- **MacroViewer enhanced** (`ui-react/src/views/MacroViewer.tsx`): Added status dropdown with PUT save, imported date display.
+- **FormDesign field list wired** (`ui-react/src/views/FormEditor/FormDesign.tsx`): FieldList now loads columns from `objects.tables`/`objects.queries` based on record-source, with drag-drop to create bound text-box controls.
+- **FormProperties field dropdown wired** (`ui-react/src/views/FormEditor/FormProperties.tsx`): Control Source `field-select` dropdown now populated from record-source columns.
+- All 636 tests pass (564 server + 72 electron).
+
+### Known React UI Issues (2026-03-25 evening)
+Observed on northwind4 with frmAdmin in View mode:
+1. **Tab bar shows raw filenames** — "Frmadmin", "Frmcompanydetail" etc. Need `filenameToDisplayName` applied in the tab bar component (sidebar already does this). CLJS applied the transform at load time (stored display name in `:name`); React stores raw filename in `name` — need display transform at render time in the tab bar.
+2. **Record position "0 of 5"** — Off-by-one error in record navigation display. Should show "1 of 5" when first record is active.
+3. **Subform column mismatch** — frmAdmin System Settings subform: header band shows `# | Setting Name | Setting Value | Notes` but detail band columns are in different order (`Setting Value | # | Notes | Setting Name`). Likely a column ordering issue in the datasheet/continuous form renderer.
+4. **General smoke testing needed** — The React UI renders and loads data but hasn't been thoroughly tested against all form types, report preview, query execution, chat, etc.
+
+### Previously Shipped (2026-03-24)
+- **Self-Healing Pipeline: Evaluation Ledger (Phase 1 — Forms)**: Built a reconnaissance + intent generation + layered evaluation system on top of the existing import pipeline. The conversion code is unchanged; the LLM is used only for understanding (reconnaissance, intent generation) and verification (semantic evaluation). No automated repair — this builds the evaluation ledger to validate intent quality first.
+  - **4 new tables + 1 ALTER**: `shared.pipeline_steps` (18 seeded template rows), `shared.pipeline_tasks` (per-object per-run with source/converted artifacts + intents), `shared.pipeline_task_attempts` (append-only), `shared.pipeline_task_evaluations` (results with failure_class enum). `shared.import_runs.app_profile TEXT` added.
+  - **New lib `server/lib/pipeline-evaluator.js`**: Reuses existing lint validators (`validateForm`, `validateFormCrossObject`, `validateComboBoxSql`). Three check layers: deterministic (record-source exists, bindings match, combo SQL valid, structural lint), artifact invariants (record-source preserved, control count, section count), semantic evaluation (LLM Sonnet, only when deterministic passes + intents exist).
+  - **New routes `server/routes/database-import/pipeline.js`**: 6 endpoints — `POST /reconnaissance` (LLM generates app profile from inventory, creates pipeline_tasks), `POST /capture-source-artifacts` (bulk stores raw SaveAsText), `POST /generate-intents` (per-form LLM intent generation using template from pipeline_steps), `POST /evaluate` (3-layer evaluation, records attempts + evaluations, classifies failures), `GET /pipeline-status/:runId`, `GET /pipeline-task/:taskId`.
+  - **Failure classification enum**: `missing_dependency | translation_ambiguity | unsupported_pattern | regression | semantic_mismatch | structural_error`
+  - **19 new tests** in `pipeline-evaluator.test.js`. All 636 tests pass.
+  - **Motivation**: northwind_15→16 regression (expression-to-record-source fix lost). Pipeline now tracks what it was trying to accomplish per object.
+  - **Not yet done**: Frontend integration (CLJS `pipeline-evaluation-phase!` in import flow), SaveAsText capture in PowerShell scripts, automated repair. Phase 1 scope is forms only.
+- **Unified Objects Table + Intents Table**: Consolidated 4 separate tables (`shared.forms`, `shared.reports`, `shared.modules`, `shared.macros`) into a single `shared.objects` table with a `type` discriminator column. Separated intent data into a dedicated `shared.intents` table with FK to objects.
+  - **New tables**: `shared.objects` (id, database_id, type, name, definition JSONB, record_source, description, status, owner, modified_by, version, is_current, created_at) with indexes on database, current objects, user-specific objects, and type. `shared.intents` (id, object_id FK, intent_type, content JSONB, graph_version, generated_by, created_at) with indexes on object and type.
+  - **Module/macro restructuring**: Type-specific columns (`vba_source`, `js_handlers`, `cljs_source`, `review_notes` for modules; `macro_xml`, `cljs_source`, `review_notes` for macros) moved into the `definition` JSONB column. GET endpoints flatten definition fields for API compatibility; PUT endpoints build definition JSONB from incoming fields.
+  - **Intent separation**: `intents` JSONB column on forms/modules replaced with rows in `shared.intents` table using `intent_type = 'gesture'`. Future FIM data will use `intent_type = 'business'`.
+  - **Migration**: Idempotent `migrateToObjects()` in `schema.js` copies data from legacy tables, restructures module/macro columns into definition JSONB, copies intents via JOIN. Old tables remain for safety.
+  - **New helper module**: `server/lib/objects.js` — `getObject`, `saveObject`, `listObjects`, `getIntents`, `saveIntents`, `getIntentsByObject`
+  - **~30 files modified**: All route files (forms, reports, modules, macros), all 11 database-import files, chat/context.js, chat/index.js, lint, app.js, pipeline.js, graph libs (vba-stub-generator, vba-function-translator, llm-fallback), design-check.js
+  - **API unchanged**: All endpoints remain the same (`/api/forms/:name`, `/api/modules/:name`, etc.). Frontend untouched.
+  - **All 620 tests pass** (548 server + 72 electron).
+  - **Verification needed**: Start server, import a fresh database, verify all object types import correctly. Check `SELECT type, count(*) FROM shared.objects WHERE is_current GROUP BY type` matches previous table counts.
+
+### Previously Shipped (2026-03-23)
+- **VBA-to-JS parser: If/Else control flow**: Added `translateCondition`, `translateBlock`, `parseIfBlock`, `findEndKeyword` to `server/lib/vba-to-js.js`. The parser now recognizes block `If/ElseIf/Else/End If`, single-line `If`, and skips `Select Case`, `For`, `Do`, `While`, `With` blocks (emitted as JS comments). Untranslatable conditions (local VBA variables, `Me.NewRecord`, `IsNull(Me.OpenArgs)`) cause the entire If block to be commented out — no branch executes. `stripBoilerplate` now merges VBA line continuations (trailing ` _`). Fixes frmCompanyDetail `Form_Load` bug where both "Add" and "unknown action" branches executed simultaneously. 52 new tests in `server/__tests__/vba-to-js.test.js`. All 575 tests pass (503 server + 72 electron).
+  - **Follow-up needed**: `AC.getVisible(name)` / `AC.getEnabled(name)` runtime getters would enable translating conditions like `subVersion.Visible = False`. `Select Case` → `switch` and loop translation not yet implemented.
 - **React/TypeScript frontend migration complete (10 waves)**: Created `ui-react/` — a full React 18 + TypeScript + Zustand + Vite frontend alongside the existing ClojureScript UI. Both share the same server API (port 3001) and CSS.
   - **81 modules, 327KB/95KB gzipped** — built in ~2 seconds (vs 22-second CLJS compile)
   - **Stack**: React 18, TypeScript, Zustand + Immer, Vite, fetch + async/await
@@ -14,6 +75,9 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
   - **Key files**: `ui-react/src/store/` (6 Zustand stores), `ui-react/src/views/` (all viewers/editors), `ui-react/src/lib/` (expressions parser, projection builder, utils, normalize, runtime)
   - **Server toggle**: Set `USE_REACT_UI=1` env var to serve React build instead of CLJS. `server/rebuild-react.bat` builds and starts with React UI.
   - **All 72 server tests pass** — no server changes needed except the UI directory toggle in `index.js`
+
+### Previously Shipped (2026-03-23)
+- **VBA-to-JS parser: expanded coverage**: Select Case → switch, numeric For loops, variable tracking (Dim/assignments), enhanced conditions (Me.NewRecord, Me.Dirty, Me.ctrl.Visible), translateAssignmentRHS. 118 tests (up from 52).
 
 ### Previously Shipped (2026-03-22)
 - **Re-Import enhanced with query re-conversion, module translation, and validation**: The Re-Import button in form/report editors now runs 3 additional steps after re-exporting from Access:
@@ -231,10 +295,7 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 - **`server/rebuild.bat`**: New script — compiles ClojureScript then starts the server (`set PGPASSWORD=7297`). Lives in `server/` folder, run directly when server is stopped.
 
 ### In Progress / Uncommitted
-Working tree has uncommitted changes spanning multiple sessions:
-- Dead CLJS translation pipeline removal (March 21): ~27 files modified, 3 deleted. All server+frontend tests pass. Frontend compiles with 3 warnings (all `:redef`, no `:undeclared-var`).
-- VBA-to-JS event handler architecture (March 21): `vba-to-js.js`, `runtime.cljs`, `js_handlers` JSONB column.
-- SaveAsText rewrite of all 4 export scripts, macro export fixes, business intent extraction, schema updates, and various route/frontend updates from prior sessions.
+Unified objects table migration complete (all tests pass). Not yet committed. Old tables (`shared.forms`, `shared.reports`, `shared.modules`, `shared.macros`) still exist and should be retained until live verification confirms everything works.
 
 ### Next Up — Image Import Test
 With the server running, test the full image import pipeline for Northwind:
@@ -271,6 +332,7 @@ Check results with: `GET /api/database-import/image-status?targetDatabaseId=nort
 
 ### Schema Migration
 - `server/graph/schema.js` has migration blocks that run on startup:
+  - **Unified objects migration** (`migrateToObjects()`): Creates `shared.objects` and `shared.intents` tables if they don't exist. Copies data from `shared.forms`, `shared.reports`, `shared.modules`, `shared.macros` into `shared.objects` (idempotent — skips if objects table already has data). Module/macro columns restructured into definition JSONB. Intents copied from old tables via JOIN. Old tables preserved.
   - Adds `owner TEXT DEFAULT 'standard'` and `modified_by TEXT` to `shared.forms` and `shared.reports`. Backfills NULL owners to `'standard'`. Creates unique indexes on `(database_id, name, owner) WHERE is_current = true`.
   - Renames `intent` → `potential` nodes, deletes `application` nodes, updates `valid_scope` constraint
   - Renames `form_name` → `table_name` and `control_name` → `column_name` in `form_control_state` (older migration)

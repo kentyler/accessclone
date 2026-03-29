@@ -67,10 +67,10 @@ module.exports = function(router, pool) {
         pool.query(`SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_type = 'BASE TABLE'`, [schemaName]),
         pool.query(`SELECT table_name FROM information_schema.views WHERE table_schema = $1`, [schemaName]),
         pool.query(`SELECT routine_name FROM information_schema.routines WHERE routine_schema = $1`, [schemaName]),
-        pool.query(`SELECT DISTINCT name FROM shared.forms WHERE database_id = $1 AND is_current = true AND owner = 'standard'`, [database_id]),
-        pool.query(`SELECT DISTINCT name FROM shared.reports WHERE database_id = $1 AND is_current = true AND owner = 'standard'`, [database_id]),
-        pool.query(`SELECT DISTINCT name FROM shared.modules WHERE database_id = $1 AND is_current = true`, [database_id]),
-        pool.query(`SELECT DISTINCT name FROM shared.macros WHERE database_id = $1 AND is_current = true`, [database_id])
+        pool.query(`SELECT DISTINCT name FROM shared.objects WHERE database_id = $1 AND type = 'form' AND is_current = true AND owner = 'standard'`, [database_id]),
+        pool.query(`SELECT DISTINCT name FROM shared.objects WHERE database_id = $1 AND type = 'report' AND is_current = true AND owner = 'standard'`, [database_id]),
+        pool.query(`SELECT DISTINCT name FROM shared.objects WHERE database_id = $1 AND type = 'module' AND is_current = true`, [database_id]),
+        pool.query(`SELECT DISTINCT name FROM shared.objects WHERE database_id = $1 AND type = 'macro' AND is_current = true`, [database_id])
       ]);
 
       const actualTables = new Set(tablesRes.rows.map(r => r.table_name.toLowerCase()));

@@ -54,8 +54,8 @@ module.exports = function(router, pool, secrets) {
 
       // Load current form and report definitions
       const [formsRes, reportsRes] = await Promise.all([
-        pool.query(`SELECT id, name, definition, record_source, database_id FROM shared.forms WHERE database_id = $1 AND is_current = true AND owner = 'standard'`, [database_id]),
-        pool.query(`SELECT id, name, definition, record_source, database_id FROM shared.reports WHERE database_id = $1 AND is_current = true AND owner = 'standard'`, [database_id])
+        pool.query(`SELECT id, name, definition, record_source, database_id FROM shared.objects WHERE database_id = $1 AND type = 'form' AND is_current = true AND owner = 'standard'`, [database_id]),
+        pool.query(`SELECT id, name, definition, record_source, database_id FROM shared.objects WHERE database_id = $1 AND type = 'report' AND is_current = true AND owner = 'standard'`, [database_id])
       ]);
 
       const formsByName = new Map();
@@ -536,27 +536,25 @@ function updateControlRowSource(definition, controlName, newSql) {
  * Save a patched definition as a new version (append-only).
  */
 async function savePatchedDefinition(pool, objectType, objectName, databaseId, definition, changes, runId) {
-  const table = objectType === 'form' ? 'shared.forms' : 'shared.reports';
-
   // Mark old standard version as not current (autofix only touches standard versions)
   await pool.query(
-    `UPDATE ${table} SET is_current = false WHERE database_id = $1 AND name = $2 AND owner = 'standard' AND is_current = true`,
-    [databaseId, objectName]
+    `UPDATE shared.objects SET is_current = false WHERE database_id = $1 AND type = $2 AND name = $3 AND owner = 'standard' AND is_current = true`,
+    [databaseId, objectType, objectName]
   );
 
   // Get next version number
   const vResult = await pool.query(
-    `SELECT COALESCE(MAX(version), 0) as max_version FROM ${table} WHERE database_id = $1 AND name = $2`,
-    [databaseId, objectName]
+    `SELECT COALESCE(MAX(version), 0) as max_version FROM shared.objects WHERE database_id = $1 AND type = $2 AND name = $3`,
+    [databaseId, objectType, objectName]
   );
   const newVersion = vResult.rows[0].max_version + 1;
 
   // Insert new version (standard owner, modified_by = 'autofix')
   const rs = definition['record-source'] || '';
   await pool.query(
-    `INSERT INTO ${table} (database_id, name, definition, record_source, version, is_current, owner, modified_by)
-     VALUES ($1, $2, $3, $4, $5, true, 'standard', 'autofix')`,
-    [databaseId, objectName, definition, rs, newVersion]
+    `INSERT INTO shared.objects (database_id, type, name, definition, record_source, version, is_current, owner, modified_by)
+     VALUES ($1, $2, $3, $4, $5, $6, true, 'standard', 'autofix')`,
+    [databaseId, objectType, objectName, definition, rs, newVersion]
   );
 }
 

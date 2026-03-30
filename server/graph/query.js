@@ -6,9 +6,9 @@
 /**
  * Find a node by type, name, and optionally database_id
  * @param {Pool} pool
- * @param {string} nodeType - 'table', 'column', 'form', 'control', 'capability', 'potential'
+ * @param {string} nodeType - 'table', 'column', 'form', 'control'
  * @param {string} name - Node name
- * @param {string|null} databaseId - Database ID (null for capability/potential)
+ * @param {string|null} databaseId - Database ID
  * @returns {Promise<Object|null>}
  */
 async function findNode(pool, nodeType, name, databaseId = null) {
@@ -44,9 +44,6 @@ async function findNodesByType(pool, nodeType, databaseId = null) {
   if (databaseId) {
     query = 'SELECT * FROM shared._nodes WHERE node_type = $1 AND database_id = $2 ORDER BY name';
     params = [nodeType, databaseId];
-  } else if (nodeType === 'potential') {
-    query = 'SELECT * FROM shared._nodes WHERE node_type = $1 ORDER BY name';
-    params = [nodeType];
   } else {
     query = 'SELECT * FROM shared._nodes WHERE node_type = $1 ORDER BY database_id, name';
     params = [nodeType];
@@ -66,7 +63,7 @@ async function upsertNode(pool, node) {
     node_type,
     name,
     database_id = null,
-    scope = ['capability', 'potential'].includes(node_type) ? 'global' : 'local',
+    scope = 'local',
     origin = null,
     metadata = {}
   } = node;
@@ -229,40 +226,6 @@ async function traverseDependencies(pool, nodeId, direction = 'downstream', maxD
   return results;
 }
 
-/**
- * Find structures that serve a potential
- * @param {Pool} pool
- * @param {string} potentialId - Potential node UUID
- * @returns {Promise<Array>}
- */
-async function getStructuresForPotential(pool, potentialId) {
-  const result = await pool.query(`
-    SELECT n.*, e.status, e.proposed_by
-    FROM shared._nodes n
-    JOIN shared._edges e ON e.from_id = n.id
-    WHERE e.to_id = $1 AND e.rel_type = 'serves'
-    ORDER BY n.node_type, n.name
-  `, [potentialId]);
-  return result.rows;
-}
-
-/**
- * Find potentials that a structure serves
- * @param {Pool} pool
- * @param {string} structureId - Structure node UUID
- * @returns {Promise<Array>}
- */
-async function getPotentialsForStructure(pool, structureId) {
-  const result = await pool.query(`
-    SELECT n.*, e.status, e.proposed_by
-    FROM shared._nodes n
-    JOIN shared._edges e ON e.to_id = n.id
-    WHERE e.from_id = $1 AND e.rel_type = 'serves'
-    ORDER BY n.name
-  `, [structureId]);
-  return result.rows;
-}
-
 module.exports = {
   findNode,
   findNodeById,
@@ -272,7 +235,5 @@ module.exports = {
   getEdges,
   upsertEdge,
   deleteEdge,
-  traverseDependencies,
-  getStructuresForPotential,
-  getPotentialsForStructure
+  traverseDependencies
 };

@@ -50,9 +50,12 @@ module.exports = function (router, pool) {
         }
       }
 
+      const secondaryObjects = [];
+      if (formsWired > 0) secondaryObjects.push({ type: 'form', count: formsWired, change: 'events-wired' });
+      if (reportsWired > 0) secondaryObjects.push({ type: 'report', count: reportsWired, change: 'events-wired' });
       logEvent(pool, 'info', 'POST /api/database-import/wire-events',
         `Wired events: ${formsWired} forms, ${reportsWired} reports, ${errors.length} errors`,
-        { databaseId });
+        { databaseId, propagation: { secondary_objects: secondaryObjects } });
 
       res.json({ formsWired, reportsWired, errors });
     } catch (err) {

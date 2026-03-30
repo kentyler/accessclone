@@ -234,16 +234,12 @@ const LEGEND_NODES = [
   { type: 'column', color: '#93c5fd', label: 'Column' },
   { type: 'form', color: '#22c55e', label: 'Form' },
   { type: 'control', color: '#86efac', label: 'Control' },
-  { type: 'potential', color: '#f97316', label: 'Potential' },
-  { type: 'capability', color: '#a855f7', label: 'Capability' },
 ];
 
 const LEGEND_EDGES = [
   { type: 'contains', color: '#9ca3af', style: 'solid', label: 'Contains' },
   { type: 'references', color: '#3b82f6', style: 'dashed', label: 'References' },
   { type: 'bound_to', color: '#22c55e', style: 'solid', label: 'Bound To' },
-  { type: 'serves', color: '#f97316', style: 'dotted', label: 'Serves' },
-  { type: 'actualizes', color: '#a855f7', style: 'dashed', label: 'Actualizes' },
 ];
 
 function GraphLegend() {
@@ -253,9 +249,8 @@ function GraphLegend() {
       {LEGEND_NODES.map(n => (
         <div key={n.type} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
           <span style={{
-            width: 12, height: 12, borderRadius: n.type === 'potential' ? 0 : 3,
+            width: 12, height: 12, borderRadius: 3,
             background: n.color, display: 'inline-block',
-            transform: n.type === 'potential' ? 'rotate(45deg) scale(0.8)' : undefined,
           }} />
           <span style={{ fontSize: 11 }}>{n.label}</span>
         </div>

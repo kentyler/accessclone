@@ -5,8 +5,6 @@ const TYPE_COLORS: Record<string, string> = {
   column: '#93c5fd',
   form: '#22c55e',
   control: '#86efac',
-  potential: '#f97316',
-  capability: '#a855f7',
 };
 
 export default function DetailPanel() {

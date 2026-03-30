@@ -19,15 +19,11 @@ export interface GraphState {
   searchResults: GraphNode[];
   visibleLayers: {
     structural: boolean;
-    potentials: boolean;
-    capabilities: boolean;
   };
-  globalLoaded: boolean;
 }
 
 export interface GraphActions {
   loadSubgraph(databaseId: string): Promise<void>;
-  loadGlobalNodes(): Promise<void>;
   expandNode(nodeId: string): Promise<void>;
   collapseNode(nodeId: string): void;
   selectNode(nodeId: string | null): Promise<void>;
@@ -53,15 +49,13 @@ export const useGraphStore = create<GraphStore>()(
     error: null,
     searchQuery: '',
     searchResults: [],
-    visibleLayers: { structural: true, potentials: false, capabilities: false },
-    globalLoaded: false,
+    visibleLayers: { structural: true },
 
     async loadSubgraph(databaseId) {
       set(s => { s.loading = true; s.error = null; });
       const types = 'table,form';
-      const includeGlobal = get().visibleLayers.potentials || get().visibleLayers.capabilities;
       const res = await api.get<SubgraphResponse>(
-        `/api/graph/subgraph?database_id=${encodeURIComponent(databaseId)}&types=${types}&include_global=${includeGlobal}`
+        `/api/graph/subgraph?database_id=${encodeURIComponent(databaseId)}&types=${types}`
       );
       if (!res.ok) {
         set(s => { s.loading = false; s.error = 'Failed to load graph'; });
@@ -72,19 +66,6 @@ export const useGraphStore = create<GraphStore>()(
         s.edges = new Map(res.data.edges.map(e => [e.id, e]));
         s.expandedNodes = new Set();
         s.loading = false;
-      });
-    },
-
-    async loadGlobalNodes() {
-      if (get().globalLoaded) return;
-      const res = await api.get<SubgraphResponse>(
-        '/api/graph/subgraph?types=potential,capability&include_global=true'
-      );
-      if (!res.ok) return;
-      set(s => {
-        for (const n of res.data.nodes) s.nodes.set(n.id, n);
-        for (const e of res.data.edges) s.edges.set(e.id, e);
-        s.globalLoaded = true;
       });
     },
 
@@ -157,11 +138,6 @@ export const useGraphStore = create<GraphStore>()(
 
     toggleLayer(layer) {
       set(s => { s.visibleLayers[layer] = !s.visibleLayers[layer]; });
-      // Load global nodes if toggling potentials/capabilities on
-      const vis = get().visibleLayers;
-      if ((vis.potentials || vis.capabilities) && !get().globalLoaded) {
-        get().loadGlobalNodes();
-      }
     },
 
     reset() {
@@ -175,8 +151,7 @@ export const useGraphStore = create<GraphStore>()(
         s.error = null;
         s.searchQuery = '';
         s.searchResults = [];
-        s.visibleLayers = { structural: true, potentials: false, capabilities: false };
-        s.globalLoaded = false;
+        s.visibleLayers = { structural: true };
       });
     },
   }))

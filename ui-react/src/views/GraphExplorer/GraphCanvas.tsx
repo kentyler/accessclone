@@ -12,8 +12,6 @@ const NODE_COLORS: Record<string, string> = {
   column: '#93c5fd',
   form: '#22c55e',
   control: '#86efac',
-  potential: '#f97316',
-  capability: '#a855f7',
 };
 
 const NODE_SHAPES: Record<string, string> = {
@@ -21,17 +19,12 @@ const NODE_SHAPES: Record<string, string> = {
   column: 'ellipse',
   form: 'round-rectangle',
   control: 'ellipse',
-  potential: 'triangle',
-  capability: 'star',
 };
 
 const EDGE_STYLES: Record<string, { lineColor: string; lineStyle: string; width: number }> = {
   contains: { lineColor: '#9ca3af', lineStyle: 'solid', width: 1 },
   references: { lineColor: '#3b82f6', lineStyle: 'dashed', width: 1.5 },
   bound_to: { lineColor: '#22c55e', lineStyle: 'solid', width: 2 },
-  serves: { lineColor: '#f97316', lineStyle: 'dotted', width: 1.5 },
-  actualizes: { lineColor: '#a855f7', lineStyle: 'dashed', width: 1.5 },
-  refines: { lineColor: '#6366f1', lineStyle: 'dotted', width: 1 },
 };
 
 const cyStyle: cytoscape.StylesheetStyle[] = [
@@ -92,17 +85,14 @@ const cyStyle: cytoscape.StylesheetStyle[] = [
 // Helper: convert store data → cytoscape elements
 // ============================================================
 
-function isNodeVisible(node: GraphNode, layers: { structural: boolean; potentials: boolean; capabilities: boolean }): boolean {
-  const t = node.node_type;
-  if (t === 'potential') return layers.potentials;
-  if (t === 'capability') return layers.capabilities;
+function isNodeVisible(node: GraphNode, layers: { structural: boolean }): boolean {
   return layers.structural;
 }
 
 function buildElements(
   nodes: Map<string, GraphNode>,
   edges: Map<string, GraphEdge>,
-  layers: { structural: boolean; potentials: boolean; capabilities: boolean },
+  layers: { structural: boolean },
 ): ElementDefinition[] {
   const visibleNodeIds = new Set<string>();
   const elements: ElementDefinition[] = [];

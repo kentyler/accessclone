@@ -121,18 +121,6 @@ export default function GraphExplorer() {
           >
             Structural
           </button>
-          <button
-            className={`layer-btn${visibleLayers.potentials ? ' active' : ''}`}
-            onClick={() => toggleLayer('potentials')}
-          >
-            Potentials
-          </button>
-          <button
-            className={`layer-btn${visibleLayers.capabilities ? ' active' : ''}`}
-            onClick={() => toggleLayer('capabilities')}
-          >
-            Capabilities
-          </button>
         </div>
 
         <div className="graph-toolbar-actions">
@@ -154,6 +142,4 @@ const TYPE_COLORS: Record<string, string> = {
   column: '#93c5fd',
   form: '#22c55e',
   control: '#86efac',
-  potential: '#f97316',
-  capability: '#a855f7',
 };

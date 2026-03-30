@@ -386,6 +386,11 @@ module.exports = function(pool) {
       // Execute in a read-only transaction (defense in depth)
       const client = await pool.connect();
       try {
+        // Set search_path on this dedicated client (middleware set it on a different pool connection)
+        if (req.schemaName) {
+          const quoted = '"' + req.schemaName.replace(/"/g, '""') + '"';
+          await client.query(`SET search_path = ${quoted}, shared, public`);
+        }
         await client.query('BEGIN READ ONLY');
         await client.query('SET statement_timeout = \'30s\'');
         const result = await client.query(cleanSql);

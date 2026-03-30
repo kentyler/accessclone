@@ -198,17 +198,18 @@ function createRouter(pool) {
 
       await client.query('COMMIT');
 
+      // Propagation tracking for ledger
+      const propagation = {};
+
       // Populate graph from report (outside transaction — non-critical side effect)
       try {
         const { populateFromReport } = require('../graph/populate');
-        if (populateFromReport) {
-          await populateFromReport(pool, reportName, content, databaseId);
-        }
+        const graphStats = await populateFromReport(pool, reportName, content, databaseId);
+        propagation.graph_nodes = graphStats.controls + 1;
+        propagation.graph_edges = graphStats.edges;
       } catch (graphErr) {
-        if (graphErr.code !== 'MODULE_NOT_FOUND' && !graphErr.message.includes('populateFromReport')) {
-          console.error('Error populating graph from report:', graphErr.message);
-          logEvent(pool, 'warning', 'PUT /api/reports/:name', 'Graph population failed after report save', { databaseId, details: { error: graphErr.message } });
-        }
+        console.error('Error populating graph from report:', graphErr.message);
+        logEvent(pool, 'warning', 'PUT /api/reports/:name', 'Graph population failed after report save', { databaseId, objectType: 'report', objectName: reportName, details: { error: graphErr.message } });
       }
 
       // Populate control-column mapping (outside transaction — non-critical side effect)
@@ -217,7 +218,7 @@ function createRouter(pool) {
         await populateControlColumnMap(pool, databaseId, reportName, content);
       } catch (mapErr) {
         console.error('Error populating control-column map for report:', mapErr.message);
-        logEvent(pool, 'warning', 'PUT /api/reports/:name', 'Control-column map population failed', { databaseId, details: { error: mapErr.message } });
+        logEvent(pool, 'warning', 'PUT /api/reports/:name', 'Control-column map population failed', { databaseId, objectType: 'report', objectName: reportName, details: { error: mapErr.message } });
       }
 
       // Populate control-event mapping (outside transaction — non-critical side effect)
@@ -226,7 +227,7 @@ function createRouter(pool) {
         await populateControlEventMap(pool, databaseId, reportName, content, 'report');
       } catch (evtErr) {
         console.error('Error populating control-event map for report:', evtErr.message);
-        logEvent(pool, 'warning', 'PUT /api/reports/:name', 'Control-event map population failed', { databaseId, details: { error: evtErr.message } });
+        logEvent(pool, 'warning', 'PUT /api/reports/:name', 'Control-event map population failed', { databaseId, objectType: 'report', objectName: reportName, details: { error: evtErr.message } });
       }
 
       // Post-save evaluation (deterministic checks recorded to shared.evaluations)
@@ -238,10 +239,19 @@ function createRouter(pool) {
           version: newVersion, definition: content,
           trigger: req.query.source === 'import' ? 'import' : 'save'
         });
+        if (evaluation?.id) {
+          propagation.evaluations = [evaluation.id];
+        }
       } catch (evalErr) {
         logEvent(pool, 'warning', 'PUT /api/reports/:name', 'Post-save evaluation failed',
-          { databaseId, details: { error: evalErr.message } });
+          { databaseId, objectType: 'report', objectName: reportName, details: { error: evalErr.message } });
       }
+
+      // Log the save event with propagation signature
+      logEvent(pool, 'action', 'PUT /api/reports/:name', `Report "${reportName}" saved (v${newVersion})`, {
+        databaseId, objectType: 'report', objectName: reportName,
+        propagation: Object.keys(propagation).length > 0 ? propagation : undefined
+      });
 
       // Post-import lint: detect issues for imported reports
       if (req.query.source === 'import' && req.query.import_log_id) {

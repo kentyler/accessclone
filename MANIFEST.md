@@ -48,7 +48,9 @@ Read in order for the full import workflow.
 | `skills/updatable-queries.md` | View write-target resolution — Access updatable queries vs PG read-only views, view_metadata table, INSTEAD OF triggers. |
 | `skills/database-patterns.md` | PostgreSQL function patterns — session-state access, validator/executor/orchestrator pattern, naming conventions. |
 | `skills/transform-architecture.md` | Pure transform architecture — 3 layers (transforms/flows/effects), 5 build phases, VBA intent mapping, domain registry. |
-| `skills/capability-ontology.md` | Three-layer model (Could Do / Should Do / Doing Now), four primitives (Boundary/Transduction/Resolution/Trace), Deleuzian reading. |
+| `skills/capability-ontology.md` | Three-layer model (Could Do / Should Do / Doing Now), four primitives (Boundary/Transduction/Resolution/Trace), Deleuzian reading. Theory reference — no longer stored in graph. |
+| `skills/engagement-surface.md` | Engagement surface theoretical framework — virtual/corona, asymmetry of engagement, ledger as calculus of balance. Grounds architectural decisions about what to store vs what the LLM holds. |
+| `skills/trace-convention.md` | Double-entry changelog format for HANDOFF.md — expression (what changed) + corona (what it is of). When and how to write traces that carry both sides. |
 | `skills/access-system-tables.md` | MSys* table handling — what to import, what to skip, graph/intent implications. |
 
 ## Skills — AI & Automation

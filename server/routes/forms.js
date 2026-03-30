@@ -200,13 +200,18 @@ function createRouter(pool) {
 
       await client.query('COMMIT');
 
+      // Propagation tracking for ledger
+      const propagation = {};
+
       // Populate graph from form (outside transaction — non-critical side effect)
       try {
         const { populateFromForm } = require('../graph/populate');
-        await populateFromForm(pool, formName, content, databaseId);
+        const graphStats = await populateFromForm(pool, formName, content, databaseId);
+        propagation.graph_nodes = graphStats.controls + 1;
+        propagation.graph_edges = graphStats.edges;
       } catch (graphErr) {
         console.error('Error populating graph from form:', graphErr.message);
-        logEvent(pool, 'warning', 'PUT /api/forms/:name', 'Graph population failed after form save', { databaseId, details: { error: graphErr.message } });
+        logEvent(pool, 'warning', 'PUT /api/forms/:name', 'Graph population failed after form save', { databaseId, objectType: 'form', objectName: formName, details: { error: graphErr.message } });
       }
 
       // Populate control-column mapping (outside transaction — non-critical side effect)
@@ -215,7 +220,7 @@ function createRouter(pool) {
         await populateControlColumnMap(pool, databaseId, formName, content);
       } catch (mapErr) {
         console.error('Error populating control-column map for form:', mapErr.message);
-        logEvent(pool, 'warning', 'PUT /api/forms/:name', 'Control-column map population failed', { databaseId, details: { error: mapErr.message } });
+        logEvent(pool, 'warning', 'PUT /api/forms/:name', 'Control-column map population failed', { databaseId, objectType: 'form', objectName: formName, details: { error: mapErr.message } });
       }
 
       // Populate control-event mapping (outside transaction — non-critical side effect)
@@ -224,7 +229,7 @@ function createRouter(pool) {
         await populateControlEventMap(pool, databaseId, formName, content, 'form');
       } catch (evtErr) {
         console.error('Error populating control-event map for form:', evtErr.message);
-        logEvent(pool, 'warning', 'PUT /api/forms/:name', 'Control-event map population failed', { databaseId, details: { error: evtErr.message } });
+        logEvent(pool, 'warning', 'PUT /api/forms/:name', 'Control-event map population failed', { databaseId, objectType: 'form', objectName: formName, details: { error: evtErr.message } });
       }
 
       // Post-save evaluation (deterministic checks recorded to shared.evaluations)
@@ -236,10 +241,19 @@ function createRouter(pool) {
           version: newVersion, definition: content,
           trigger: req.query.source === 'import' ? 'import' : 'save'
         });
+        if (evaluation?.id) {
+          propagation.evaluations = [evaluation.id];
+        }
       } catch (evalErr) {
         logEvent(pool, 'warning', 'PUT /api/forms/:name', 'Post-save evaluation failed',
-          { databaseId, details: { error: evalErr.message } });
+          { databaseId, objectType: 'form', objectName: formName, details: { error: evalErr.message } });
       }
+
+      // Log the save event with propagation signature
+      logEvent(pool, 'action', 'PUT /api/forms/:name', `Form "${formName}" saved (v${newVersion})`, {
+        databaseId, objectType: 'form', objectName: formName,
+        propagation: Object.keys(propagation).length > 0 ? propagation : undefined
+      });
 
       // Post-import lint: detect issues for imported forms
       if (req.query.source === 'import' && req.query.import_log_id) {

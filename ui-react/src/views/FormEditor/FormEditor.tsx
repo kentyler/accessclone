@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useFormStore } from '@/store/form';
 import { useUiStore } from '@/store/ui';
-import FormView from './FormView';
+import GeneratedFormWrapper from './GeneratedFormWrapper';
 import FormDesign from './FormDesign';
 import FormProperties from './FormProperties';
 import ControlPalette from './ControlPalette';
@@ -31,8 +31,8 @@ export default function FormEditor({ formName }: Props) {
   const definition = store.current;
   const lintErrors = store.lintErrors;
 
-  const popup = definition && (definition as Record<string, unknown>).popup !== 0;
-  const modal = popup && (definition as Record<string, unknown>).modal !== 0;
+  const popup = definition && Number((definition as Record<string, unknown>).popup) === 1;
+  const modal = popup && Number((definition as Record<string, unknown>).modal) === 1;
 
   return (
     <div className="form-editor">
@@ -99,13 +99,13 @@ export default function FormEditor({ formName }: Props) {
                   <span className="popup-title">{definition?.caption || definition?.name || 'Form'}</span>
                   <button className="popup-close" onClick={() => closeTab('forms', store.formId!)}>&#10005;</button>
                 </div>
-                <FormView />
+                <GeneratedFormWrapper />
               </div>
             </div>
           </div>
         ) : (
           <div className="editor-body view-mode">
-            <div className="editor-center"><FormView /></div>
+            <div className="editor-center"><GeneratedFormWrapper /></div>
           </div>
         )
       ) : (

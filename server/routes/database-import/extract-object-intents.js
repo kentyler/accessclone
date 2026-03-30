@@ -167,9 +167,13 @@ module.exports = function(router, pool, secrets) {
       const structureExtracted = results.structure.extracted.length;
       const structureFailed = results.structure.failed.length;
 
+      const intentTypes = [];
+      if (totalExtracted > 0) intentTypes.push('business');
+      if (structureExtracted > 0) intentTypes.push('structure');
       await logEvent(pool, 'info', 'POST /api/database-import/extract-object-intents',
         `Extracted intents: ${totalExtracted} business, ${structureExtracted} structure (${totalFailed + structureFailed} failed)`,
-        { databaseId: database_id, details: JSON.stringify(results) });
+        { databaseId: database_id, details: JSON.stringify(results),
+          propagation: { intents: intentTypes, intent_counts: { business: totalExtracted, structure: structureExtracted } } });
 
       res.json(results);
     } catch (err) {

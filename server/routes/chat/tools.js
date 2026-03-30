@@ -95,59 +95,6 @@ const graphTools = [
       required: ['node_type', 'node_name']
     }
   },
-  {
-    name: 'query_potential',
-    description: 'Find potentials a structure serves, or structures serving a potential. Use this to understand the purpose of database objects or find objects related to a business goal.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        query_type: {
-          type: 'string',
-          enum: ['potentials_for_structure', 'structures_for_potential'],
-          description: 'What to query: potentials for a structure, or structures for a potential'
-        },
-        node_name: {
-          type: 'string',
-          description: 'Name of the structure or potential to query'
-        },
-        node_type: {
-          type: 'string',
-          enum: ['table', 'column', 'form', 'control', 'potential'],
-          description: 'Type of node (required for structure queries)'
-        }
-      },
-      required: ['query_type', 'node_name']
-    }
-  },
-  {
-    name: 'propose_potential',
-    description: 'Create a new potential or link structures to a potential. Use this when the user describes what a table or form is for, or when documenting business purposes.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        potential_name: {
-          type: 'string',
-          description: 'Short name for the potential (e.g., "Track Inventory Costs")'
-        },
-        description: {
-          type: 'string',
-          description: 'Longer description of what this potential means'
-        },
-        structures: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              node_type: { type: 'string', enum: ['table', 'column', 'form', 'control'] },
-              name: { type: 'string' }
-            }
-          },
-          description: 'List of structures that serve this potential'
-        }
-      },
-      required: ['potential_name']
-    }
-  }
 ];
 
 // Query/function DDL tools — available when viewing a query or SQL function

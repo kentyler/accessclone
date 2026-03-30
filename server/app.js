@@ -35,6 +35,7 @@ const pipelineRoutes = require('./routes/pipeline');
 const attachmentsRoutes = require('./routes/attachments');
 const designCheckRoutes = require('./routes/design-check');
 const evaluationsRoutes = require('./routes/evaluations');
+const formGenRoutes = require('./routes/form-gen');
 
 function createApp({
   pool,
@@ -145,6 +146,7 @@ function createApp({
   app.use('/attachments', express.static(path.join(__dirname, 'uploads', 'attachments')));
   app.use('/api/design-check', designCheckRoutes(pool, secrets));
   app.use('/api/evaluations', evaluationsRoutes(pool));
+  app.use('/api/form-gen', formGenRoutes(pool, secrets));
   return { app, databasesRouter };
 }
 

@@ -130,15 +130,6 @@ AutoExec macros are now handled automatically by the import pipeline:
 - `export_table.ps1` uses a custom `ConvertTo-SafeJson` serializer instead of `ConvertTo-Json` — PowerShell's built-in cmdlet has known bugs with embedded double quotes in large strings (e.g. HTML in memo fields). The custom serializer handles escaping of `"`, `\`, `\r`, `\n`, `\t` correctly.
 - `list_modules.ps1`, `export_module.ps1`, `export_modules_batch.ps1` handle Form_/Report_ class modules (VBE type 100) with a design-view fallback: if `CodeModule.CountOfLines` is inaccessible (common with `AutomationSecurity=3`), the script opens the form/report in design view via `DoCmd.OpenForm`/`DoCmd.OpenReport` to force the code module to load, then closes it after reading. The listing script only skips type 100 modules with *confirmed* zero lines (not inaccessible ones).
 
-### Graph Primitives (server/graph/populate.js — seedPrimitives)
-Four architectural primitives seeded as capability nodes in the graph:
-- **Boundary** — Enclosure (schema isolation, tab workspaces, form/report sections)
-- **Transduction** — Isomorphism (SQL conversion, VBA→JS, intent extraction, graph population)
-- **Resolution** — Gradient descent (multi-pass retry, gap decisions, LLM fallback, lint)
-- **Trace** (invariant) — Lineage (append-only versioning, event logging, transcript persistence)
-- 21 potential nodes (manifestations) linked via `actualizes` edges, Trace linked to other 3 via `refines`
-- Endpoints: `POST /api/graph/seed-primitives`, also runs on `POST /api/graph/populate`
-- Idempotent — safe to call multiple times
 
 ### State Management
 State is split across three modules that share a single Reagent atom (`app-state`):
@@ -158,12 +149,13 @@ State is split across three modules that share a single Reagent atom (`app-state
 **Report state** (`ui/src/app/state_report.cljs`):
 - `set-report-definition!`, `load-report-for-editing!`, `save-report!`, `set-report-view-mode!`, `select-report-control!`, `update-report-control!`, `delete-report-control!`
 
-### Error Logging (shared.events)
-All errors are logged to the `shared.events` table for persistent diagnostics.
+### Event Ledger (shared.events)
+All errors and significant actions are logged to the `shared.events` table with propagation signatures.
 
 **Server-side** (`server/lib/events.js`):
-- `logError(pool, source, message, err, { databaseId })` — logs with stack trace, event_type='error'
-- `logEvent(pool, eventType, source, message, { databaseId, details })` — general events
+- `logError(pool, source, message, err, { databaseId, objectType, objectName })` — logs with stack trace, event_type='error'. Returns inserted event id.
+- `logEvent(pool, eventType, source, message, { databaseId, details, parentEventId, objectType, objectName, propagation })` — general events. Returns inserted event id.
+- **Ledger columns**: `parent_event_id` (causal chain), `object_type`/`object_name` (primary object), `propagation` (JSONB — graph nodes/edges touched, intents affected, evaluations generated, secondary objects)
 - Source naming convention: `"METHOD /api/path"` e.g. `"GET /api/tables"`, `"POST /api/data/:table"`
 - Use `logError` for actual errors; use `logEvent(pool, 'warning', ...)` for:
   - Graceful degradation (sessions GET returning empty `{}`)
@@ -206,17 +198,15 @@ Deterministic evaluation of form and report definitions, recorded in `shared.eva
 - **No FK to shared.objects** — objects use append-only versioning where rows get `is_current = false`. `object_id` stored for correlation only.
 - `runFormDeterministicChecks` and `runReportDeterministicChecks` both accept string (object name) or task object (pipeline path) as the `task` parameter — backward-compatible.
 
-### Dependency/Potential Graph (server/graph/)
-A unified graph in `shared._nodes` and `shared._edges` that tracks three layers:
-- **Structural nodes**: tables, columns, forms, controls (with database_id, scope='local')
-- **Capability nodes**: lightweight names whose meaning emerges from linked expressions (global, no database_id)
-- **Potential nodes**: what's implied or intended — the universal middle layer (global, no database_id)
-- **Edges**: contains, references, bound_to, serves (structure→potential), actualizes (potential→capability)
+### Dependency Graph (server/graph/)
+A structural graph in `shared._nodes` and `shared._edges`:
+- **Structural nodes**: tables, columns, forms, controls (all with database_id, scope='local')
+- **Edges**: contains, references, bound_to
 
-Populated once on first startup from schemas. Forms auto-update when saved.
+Populated once on first startup from schemas. Forms/reports auto-update when saved.
 After schema changes (new tables/columns), call `POST /api/graph/populate` to sync.
 
-LLM tools in chat: `query_dependencies`, `query_potential`, `propose_potential`
+LLM tools in chat: `query_dependencies`
 
 ### LLM Chat Context (server/routes/chat.js)
 The chat system prompt includes context based on the active tab:
@@ -261,6 +251,8 @@ See `MANIFEST.md` for a complete index of all `.md` files with summaries and sta
 3. `tasks.md` — pending/completed tasks
 
 All other files: consult the manifest summary, read in full only when working on that topic.
+
+**When recording significant changes** in HANDOFF.md, follow `skills/trace-convention.md` — double-entry format with expression (what changed) and corona (what it is of, by reference to theoretical documents).
 
 ## Testing
 

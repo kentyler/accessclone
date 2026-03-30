@@ -5,7 +5,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { logError } = require('../lib/events');
+const { logEvent, logError } = require('../lib/events');
 
 const {
   findNode,
@@ -22,17 +22,11 @@ const {
 const {
   populateFromSchemas,
   populateFromForm,
-  proposePotential,
-  confirmPotentialLink,
-  clearGraph,
-  seedPrimitives
+  clearGraph
 } = require('../graph/populate');
 
 const {
   renderDependenciesToProse,
-  renderPotentialsForStructure,
-  renderStructuresForPotential,
-  renderAllPotentialsToProse,
   renderDatabaseOverview,
   renderImpactAnalysis
 } = require('../graph/render');
@@ -220,103 +214,6 @@ module.exports = function(pool) {
   });
 
   /**
-   * GET /api/graph/potentials
-   * Get all potentials
-   */
-  router.get('/potentials', async (req, res) => {
-    try {
-      const potentials = await findNodesByType(pool, 'potential');
-      res.json({ potentials });
-    } catch (err) {
-      console.error('Error getting potentials:', err);
-      logError(pool, 'GET /api/graph/potentials', 'Failed to get potentials', err, { databaseId: req.databaseId });
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  /**
-   * GET /api/graph/potentials/prose
-   * Get all potentials as prose
-   */
-  router.get('/potentials/prose', async (req, res) => {
-    try {
-      const prose = await renderAllPotentialsToProse(pool);
-      res.json({ prose });
-    } catch (err) {
-      console.error('Error rendering potentials:', err);
-      logError(pool, 'GET /api/graph/potentials/prose', 'Failed to render potentials', err, { databaseId: req.databaseId });
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  /**
-   * GET /api/graph/potential/:id/structures
-   * Get structures that serve a potential
-   */
-  router.get('/potential/:id/structures', async (req, res) => {
-    try {
-      const prose = await renderStructuresForPotential(pool, req.params.id);
-      res.json({ prose });
-    } catch (err) {
-      console.error('Error getting structures for potential:', err);
-      logError(pool, 'GET /api/graph/potential/:id/structures', 'Failed to get structures for potential', err, { databaseId: req.databaseId });
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  /**
-   * GET /api/graph/structure/:id/potentials
-   * Get potentials a structure serves
-   */
-  router.get('/structure/:id/potentials', async (req, res) => {
-    try {
-      const prose = await renderPotentialsForStructure(pool, req.params.id);
-      res.json({ prose });
-    } catch (err) {
-      console.error('Error getting potentials for structure:', err);
-      logError(pool, 'GET /api/graph/structure/:id/potentials', 'Failed to get potentials for structure', err, { databaseId: req.databaseId });
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  /**
-   * POST /api/graph/potential
-   * Create a potential and optionally link structures
-   * Body: { name, description, origin, structures: [{ node_type, name, database_id }] }
-   */
-  router.post('/potential', async (req, res) => {
-    try {
-      const { name, description, origin, structures = [] } = req.body;
-      if (!name) {
-        return res.status(400).json({ error: 'name is required' });
-      }
-      const result = await proposePotential(pool, { name, description, origin }, structures);
-      res.json(result);
-    } catch (err) {
-      console.error('Error creating potential:', err);
-      logError(pool, 'POST /api/graph/potential', 'Failed to create potential', err, { databaseId: req.databaseId });
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  /**
-   * POST /api/graph/potential/confirm
-   * Confirm a proposed potential link
-   * Body: { structure_id, potential_id }
-   */
-  router.post('/potential/confirm', async (req, res) => {
-    try {
-      const { structure_id, potential_id } = req.body;
-      const confirmed = await confirmPotentialLink(pool, structure_id, potential_id);
-      res.json({ success: confirmed });
-    } catch (err) {
-      console.error('Error confirming potential:', err);
-      logError(pool, 'POST /api/graph/potential/confirm', 'Failed to confirm potential', err, { databaseId: req.databaseId });
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  /**
    * GET /api/graph/database/:databaseId/overview
    * Get database structure overview
    */
@@ -358,12 +255,9 @@ module.exports = function(pool) {
    */
   router.get('/subgraph', async (req, res) => {
     try {
-      const { database_id, types, include_global } = req.query;
+      const { database_id, types } = req.query;
       const typeList = types ? types.split(',').map(t => t.trim()) : ['table', 'form'];
-      const wantGlobal = include_global === 'true';
-
       // Build WHERE clause for nodes
-      const conditions = [];
       const params = [];
       let idx = 1;
 
@@ -375,15 +269,9 @@ module.exports = function(pool) {
         nodeQuery += ` AND database_id = $${idx++}`;
       }
 
-      // Global nodes (potentials + capabilities) when requested
-      let globalClause = '';
-      if (wantGlobal) {
-        globalClause = ` OR (node_type IN ('potential', 'capability') AND scope = 'global')`;
-      }
-
       const sql = `
         WITH matched_nodes AS (
-          SELECT * FROM shared._nodes WHERE (${nodeQuery})${globalClause}
+          SELECT * FROM shared._nodes WHERE (${nodeQuery})
         )
         SELECT 'node' AS _kind, n.id, n.node_type, n.name, n.database_id, n.scope, n.origin, n.metadata, NULL AS from_id, NULL AS to_id, NULL AS rel_type, NULL AS status
         FROM matched_nodes n
@@ -450,31 +338,19 @@ module.exports = function(pool) {
 
   /**
    * POST /api/graph/populate
-   * Trigger schema population + seed architectural primitives
+   * Trigger schema population
    */
   router.post('/populate', async (req, res) => {
     try {
       const schemaStats = await populateFromSchemas(pool);
-      const primitiveStats = await seedPrimitives(pool);
-      res.json({ success: true, stats: { schema: schemaStats, primitives: primitiveStats } });
+      logEvent(pool, 'action', 'POST /api/graph/populate', 'Graph populated from schemas', {
+        databaseId: req.databaseId,
+        propagation: { graph_nodes: schemaStats.tables + schemaStats.columns, graph_edges: schemaStats.edges }
+      });
+      res.json({ success: true, stats: { schema: schemaStats } });
     } catch (err) {
       console.error('Error populating graph:', err);
       logError(pool, 'POST /api/graph/populate', 'Failed to populate graph', err, { databaseId: req.databaseId });
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  /**
-   * POST /api/graph/seed-primitives
-   * Seed only the four architectural primitives (Boundary, Transduction, Resolution, Trace)
-   */
-  router.post('/seed-primitives', async (req, res) => {
-    try {
-      const stats = await seedPrimitives(pool);
-      res.json({ success: true, stats });
-    } catch (err) {
-      console.error('Error seeding primitives:', err);
-      logError(pool, 'POST /api/graph/seed-primitives', 'Failed to seed primitives', err, { databaseId: req.databaseId });
       res.status(500).json({ error: err.message });
     }
   });

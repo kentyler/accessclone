@@ -1,5 +1,9 @@
 # Event Runtime — Forms & Reports
 
+<!-- INTENTS EXTRACTED → intents.json:
+  key principle → intents-as-shorthand, no-silent-fallbacks
+-->
+
 How VBA event handlers execute client-side in AccessClone. VBA is parsed into JavaScript at import time, stored in the database, and eval'd at runtime via `window.AC` — a ClojureScript-backed runtime API.
 
 ## Architecture

@@ -1,5 +1,9 @@
 # Import Patterns
 
+<!-- INTENTS EXTRACTED → intents.json:
+  whole file → import-pattern-ledger
+-->
+
 Known patterns the pipeline must handle when importing Access databases. Each pattern has a status:
 - **Automated** — runs in the pipeline without manual intervention
 - **Partial** — some cases handled, others not

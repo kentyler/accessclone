@@ -8,6 +8,7 @@ Guide for AI agents. Files marked **STARTUP** should be read in full at session 
 |------|---------|
 | `CLAUDE.md` | **STARTUP** — Coding conventions, implementation details, state management, API routes, testing matrix, known issues. The primary reference for all code changes. |
 | `HANDOFF.md` | **STARTUP** — Session handoff: shipped features chronology, known landmines, in-progress work, conventions. Read this to understand current project state. |
+| `intents.json` | **STARTUP** — Four-layer project structure: orientations (how we work), directions (what we're accomplishing), patterns (approaches chosen and available), expressions (concrete artifacts). Read to understand why decisions were made, which patterns govern which code, and what alternatives exist. |
 | `tasks.md` | **STARTUP** — Pending and completed project tasks. Check before starting new work. |
 
 ## Root-Level Docs

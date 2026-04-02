@@ -1,5 +1,12 @@
 # Three-Layer Architecture — A Deleuzian Reading
 
+<!-- INTENTS EXTRACTED → intents.json:
+  §primitives → four-primitives, trace-invariant
+  NOTE: Graph node types, edge types, API endpoints, and chat tools sections
+  are STALE — potentials/capabilities were deleted from graph (2026-03-29).
+  The seeded-in-graph section no longer reflects reality.
+-->
+
 ## The Three Layers: Could Do / Should Do / Doing Now
 
 Every existing communication tool collapses a crucial distinction — it only shows you what the organization *is doing now* and you have to imagine what it *could do* or *should do*. This architecture makes all three visible simultaneously.

@@ -1,5 +1,10 @@
 # Transform Architecture (v2)
 
+<!-- INTENTS EXTRACTED → intents.json:
+  concept → transform-as-action-space
+  NOTE: Reflection document — considers how transforms make the system AI-composable.
+-->
+
 A plan for restructuring AccessClone's frontend state management around pure, enumerable, AI-composable transforms.
 
 ## Background

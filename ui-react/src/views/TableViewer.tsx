@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { useTableStore, type TableState, type TableActions } from '@/store/table';
 import { useUiStore } from '@/store/ui';
 import { filenameToDisplayName } from '@/lib/utils';
+import ColumnDropdown from '@/components/ColumnDropdown';
 
 type Store = TableState & TableActions;
 
@@ -31,6 +32,9 @@ export default function TableViewer({ tableName }: Props) {
           <button className={viewMode === 'design' ? 'active' : ''} onClick={() => setViewMode('design')}>
             Design View
           </button>
+          <button className={viewMode === 'intents' ? 'active' : ''} onClick={() => setViewMode('intents')}>
+            Intents
+          </button>
         </div>
       </div>
 
@@ -47,16 +51,53 @@ export default function TableViewer({ tableName }: Props) {
       {viewMode === 'design' && tableInfo && (
         <DesignView store={store} />
       )}
+
+      {viewMode === 'intents' && (
+        <IntentsView store={store} />
+      )}
     </div>
   );
 }
+
+function IntentsView({ store }: { store: Store }) {
+  const { intents, intentsLoading } = store;
+
+  if (intentsLoading) {
+    return <div className="intents-view"><div className="loading-indicator">Loading intents...</div></div>;
+  }
+
+  if (!intents || intents.length === 0) {
+    return (
+      <div className="intents-view">
+        <div className="no-intents-message">No intents extracted for this table.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="intents-view">
+      {intents.map((intent, i) => (
+        <pre key={i} className="intent-json">{JSON.stringify(intent, null, 2)}</pre>
+      ))}
+    </div>
+  );
+}
+
+// ColumnDropdown imported from @/components/ColumnDropdown
+
+// ============================================================
+// Datasheet
+// ============================================================
 
 function DatasheetView({ fields, records, store }: {
   fields: Array<{ name: string; type: string; pk?: boolean }>;
   records: Record<string, unknown>[];
   store: Store;
 }) {
-  const { selected, editing, startEditing, stopEditing, saveCell, selectCell, moveToNextCell } = store;
+  const { selected, editing, startEditing, stopEditing, saveCell, selectCell, moveToNextCell,
+    sortColumn, sortDirection, filters, activeFilterColumn } = store;
+
+  const filteredRecords = store.getFilteredRecords();
 
   const handleCellDblClick = (row: number, col: string) => {
     startEditing(row, col);
@@ -85,20 +126,47 @@ function DatasheetView({ fields, records, store }: {
     store.showContextMenu(e.clientX, e.clientY);
   };
 
+  const toggleDropdown = useCallback((col: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    store.setActiveFilterColumn(activeFilterColumn === col ? null : col);
+  }, [activeFilterColumn]);
+
   return (
     <div className="datasheet" onContextMenu={handleContextMenu}>
       <table className="data-table">
         <thead>
           <tr>
-            {fields.map(f => (
-              <th key={f.name} className={f.pk ? 'pk-col' : ''}>
-                {f.name}
-              </th>
-            ))}
+            {fields.map(f => {
+              const isSorted = sortColumn === f.name;
+              const isFiltered = !!(filters[f.name] && filters[f.name].length > 0);
+              return (
+                <th key={f.name} className={`${f.pk ? 'pk-col' : ''} ${isFiltered ? 'filtered-col' : ''}`}>
+                  <div className="column-header" onClick={e => toggleDropdown(f.name, e)}>
+                    <span className="column-header-name">
+                      {f.name}
+                      {isSorted && <span className="sort-indicator">{sortDirection === 'asc' ? ' \u2191' : ' \u2193'}</span>}
+                      {isFiltered && <span className="filter-indicator">{' \u0192'}</span>}
+                    </span>
+                    <span className="column-header-arrow">{'\u25BC'}</span>
+                  </div>
+                  {activeFilterColumn === f.name && (
+                    <ColumnDropdown
+                      column={f.name}
+                      records={records}
+                      currentExcluded={filters[f.name] || []}
+                      onSort={(col, dir) => store.sortBy(col, dir)}
+                      onSetFilter={(col, excl) => store.setFilter(col, excl)}
+                      onClearFilter={(col) => store.clearFilter(col)}
+                      onClose={() => store.setActiveFilterColumn(null)}
+                    />
+                  )}
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
-          {records.map((record, rowIdx) => (
+          {filteredRecords.map((record, rowIdx) => (
             <tr key={rowIdx} className={selected?.row === rowIdx ? 'selected-row' : ''}>
               {fields.map(f => {
                 const isSelected = selected?.row === rowIdx && selected?.col === f.name;
@@ -131,6 +199,13 @@ function DatasheetView({ fields, records, store }: {
         </tbody>
       </table>
 
+      {Object.keys(filters).length > 0 && (
+        <div className="filter-status-bar">
+          Filtered: {filteredRecords.length} of {records.length} records
+          <button className="clear-all-filters-btn" onClick={() => store.clearFilter()}>Clear All Filters</button>
+        </div>
+      )}
+
       {store.contextMenu.visible && (
         <div
           className="context-menu"
@@ -158,6 +233,105 @@ function DatasheetView({ fields, records, store }: {
   );
 }
 
+function PropertyRow({ label, value, na }: { label: string; value?: string | null; na?: boolean }) {
+  return (
+    <div className="field-property-row">
+      <div className="field-property-label">{label}</div>
+      <div className={`field-property-value${na ? ' property-na' : ''}`}>
+        {na ? '' : (value ?? '')}
+      </div>
+    </div>
+  );
+}
+
+function EditablePropertyRow({ label, value, onChange, options, type }: {
+  label: string;
+  value?: string | number | null;
+  onChange: (v: string) => void;
+  options?: string[];
+  type?: string;
+}) {
+  return (
+    <div className="field-property-row">
+      <div className="field-property-label">{label}</div>
+      <div className="field-property-value">
+        {options ? (
+          <select value={value ?? ''} onChange={e => onChange(e.target.value)}>
+            {options.map(o => <option key={o} value={o}>{o}</option>)}
+          </select>
+        ) : (
+          <input type={type || 'text'} value={value ?? ''} onChange={e => onChange(e.target.value)} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FieldPropertiesSheet({ field, fieldIdx, updateDesignField }: {
+  field: import('@/store/table').DesignField;
+  fieldIdx: number;
+  updateDesignField: (idx: number, prop: string, value: unknown) => void;
+}) {
+  return (
+    <div className="field-properties">
+      <div className="field-properties-header">Field Properties</div>
+      <div className="field-properties-tab">General</div>
+      <div className="field-properties-body">
+        {(field.type === 'Short Text' || field.type === 'character varying') && (
+          <EditablePropertyRow label="Field Size" value={field.maxLength ?? 255}
+            onChange={v => updateDesignField(fieldIdx, 'maxLength', parseInt(v, 10) || 255)} type="number" />
+        )}
+        {field.type === 'Number' && (
+          <EditablePropertyRow label="Field Size" value="Long Integer"
+            onChange={() => {}} options={['Byte', 'Integer', 'Long Integer', 'Single', 'Double', 'Decimal']} />
+        )}
+        <PropertyRow label="New Values" na />
+        <PropertyRow label="Format" na />
+        <PropertyRow label="Input Mask" na />
+        <EditablePropertyRow label="Caption" value={field.description}
+          onChange={v => updateDesignField(fieldIdx, 'description', v)} />
+        <EditablePropertyRow label="Default Value" value={field.defaultValue}
+          onChange={v => updateDesignField(fieldIdx, 'defaultValue', v)} />
+        <PropertyRow label="Validation Rule" />
+        <PropertyRow label="Validation Text" na />
+        <EditablePropertyRow label="Required" value={field.nullable ? 'No' : 'Yes'}
+          onChange={v => updateDesignField(fieldIdx, 'nullable', v === 'No')}
+          options={['No', 'Yes']} />
+        <PropertyRow label="Allow Zero Length" na />
+        <EditablePropertyRow label="Indexed"
+          value={field.indexed === 'unique' ? 'Yes (No Duplicates)' : field.indexed === 'yes' ? 'Yes (Duplicates OK)' : (field.indexed ? 'Yes (Duplicates OK)' : 'No')}
+          onChange={v => updateDesignField(fieldIdx, 'indexed',
+            v === 'Yes (Duplicates OK)' ? 'yes' : v === 'Yes (No Duplicates)' ? 'unique' : null)}
+          options={['No', 'Yes (Duplicates OK)', 'Yes (No Duplicates)']} />
+        <PropertyRow label="Primary Key" value={field.isPrimaryKey ? 'Yes' : 'No'} />
+        <PropertyRow label="Unicode Compression" na />
+        <PropertyRow label="IME Mode" na />
+        <PropertyRow label="Text Align" na />
+      </div>
+    </div>
+  );
+}
+
+function TablePropertiesSheet({ fields, tableDescription, updateTableDescription }: {
+  fields: import('@/store/table').DesignField[];
+  tableDescription: string | null;
+  updateTableDescription: (desc: string) => void;
+}) {
+  const pkName = fields.find(f => f.isPrimaryKey)?.name || '';
+  return (
+    <div className="field-properties">
+      <div className="field-properties-header">Table Properties</div>
+      <div className="field-properties-tab">General</div>
+      <div className="field-properties-body">
+        <EditablePropertyRow label="Description" value={tableDescription}
+          onChange={v => updateTableDescription(v)} />
+        <PropertyRow label="Primary Key" value={pkName} />
+        <PropertyRow label="Column Count" value={String(fields.length)} />
+      </div>
+    </div>
+  );
+}
+
 function DesignView({ store }: { store: Store }) {
   const {
     designFields, selectedField, selectDesignField,
@@ -170,121 +344,22 @@ function DesignView({ store }: { store: Store }) {
 
   if (!designFields) return null;
 
+  const selectedFieldData = selectedField != null ? designFields[selectedField] : null;
+
   return (
-    <div className="design-view">
-      <div className="design-split">
-        <div className="design-upper">
-          {newTable && (
-            <div className="new-table-name-row">
-              <label>Table Name:</label>
-              <input
-                className="text-input"
-                value={newTableName}
-                onChange={e => setNewTableName(e.target.value)}
-                placeholder="Enter table name"
-                autoFocus
-              />
-            </div>
-          )}
-          <table className="design-grid">
-            <thead>
-              <tr>
-                <th style={{ width: 24 }}></th>
-                <th>Field Name</th>
-                <th>Data Type</th>
-                <th>Description</th>
-              </tr>
-            </thead>
-            <tbody>
-              {designFields.map((field: import('@/store/table').DesignField, idx: number) => (
-                <tr
-                  key={idx}
-                  className={selectedField === idx ? 'selected' : ''}
-                  onClick={() => selectDesignField(idx)}
-                >
-                  <td className="pk-indicator" onClick={e => { e.stopPropagation(); toggleDesignPk(idx); }}>
-                    {field.isPrimaryKey ? 'PK' : ''}
-                  </td>
-                  <td>
-                    <input
-                      className="design-input"
-                      value={field.name}
-                      onChange={e => updateDesignField(idx, 'name', e.target.value)}
-                    />
-                  </td>
-                  <td>
-                    <select
-                      className="design-select"
-                      value={field.type}
-                      onChange={e => updateDesignField(idx, 'type', e.target.value)}
-                    >
-                      <option>Short Text</option>
-                      <option>Long Text</option>
-                      <option>Number</option>
-                      <option>Date/Time</option>
-                      <option>Yes/No</option>
-                      <option>OLE Object</option>
-                      <option>AutoNumber</option>
-                    </select>
-                  </td>
-                  <td>
-                    <input
-                      className="design-input"
-                      value={field.description || ''}
-                      onChange={e => updateDesignField(idx, 'description', e.target.value)}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <div className="design-actions">
-            <button className="btn-sm" onClick={addDesignField}>Add Field</button>
-            {selectedField != null && (
-              <button className="btn-sm" onClick={() => removeDesignField(selectedField)}>Remove Field</button>
-            )}
-          </div>
+    <div className="table-design-view">
+      {newTable && (
+        <div className="new-table-name-bar">
+          <label>Table Name: </label>
+          <input
+            className="design-field-input"
+            value={newTableName}
+            onChange={e => setNewTableName(e.target.value)}
+            placeholder="my_table_name"
+            autoFocus
+          />
         </div>
-
-        <div className="design-lower">
-          <div className="option-row">
-            <label>Table Description</label>
-            <input
-              className="text-input"
-              value={tableDescription || ''}
-              onChange={e => updateTableDescription(e.target.value)}
-            />
-          </div>
-
-          {selectedField != null && designFields[selectedField] && (
-            <div className="field-properties">
-              <h4>Field Properties: {designFields[selectedField].name}</h4>
-              <div className="option-row">
-                <label>Required</label>
-                <select
-                  value={designFields[selectedField].nullable ? 'No' : 'Yes'}
-                  onChange={e => updateDesignField(selectedField, 'nullable', e.target.value === 'No')}
-                >
-                  <option>No</option>
-                  <option>Yes</option>
-                </select>
-              </div>
-              {designFields[selectedField].type === 'Short Text' && (
-                <div className="option-row">
-                  <label>Field Size</label>
-                  <input
-                    className="text-input"
-                    type="number"
-                    value={designFields[selectedField].maxLength ?? 255}
-                    onChange={e => updateDesignField(selectedField, 'maxLength', parseInt(e.target.value, 10))}
-                  />
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
+      )}
 
       {designErrors && (
         <div className="design-errors">
@@ -293,6 +368,82 @@ function DesignView({ store }: { store: Store }) {
           ))}
         </div>
       )}
+
+      <div className="design-upper-pane">
+        <table className="structure-table">
+          <thead>
+            <tr>
+              <th>Field Name</th>
+              <th>Data Type</th>
+              <th>Description</th>
+              <th className="col-actions-header"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {designFields.map((field: import('@/store/table').DesignField, idx: number) => (
+              <tr
+                key={idx}
+                className={`${field.isPrimaryKey ? 'pk-row ' : ''}${selectedField === idx ? 'selected-field' : ''}`}
+                onClick={() => selectDesignField(idx)}
+              >
+                <td className="col-name">
+                  {field.isPrimaryKey && <span className="pk-icon" title="Primary Key">&#x1F511;</span>}
+                  <input
+                    className="design-field-input"
+                    value={field.name}
+                    onClick={e => { e.stopPropagation(); selectDesignField(idx); }}
+                    onChange={e => updateDesignField(idx, 'name', e.target.value)}
+                  />
+                </td>
+                <td className="col-type">
+                  <select
+                    className="design-type-select"
+                    value={field.type}
+                    onClick={e => e.stopPropagation()}
+                    onChange={e => updateDesignField(idx, 'type', e.target.value)}
+                  >
+                    <option>Short Text</option>
+                    <option>Long Text</option>
+                    <option>Number</option>
+                    <option>Date/Time</option>
+                    <option>Yes/No</option>
+                    <option>OLE Object</option>
+                    <option>AutoNumber</option>
+                  </select>
+                </td>
+                <td className="col-description">
+                  <input
+                    className="design-field-input"
+                    value={field.description || ''}
+                    onClick={e => { e.stopPropagation(); selectDesignField(idx); }}
+                    onChange={e => updateDesignField(idx, 'description', e.target.value)}
+                  />
+                </td>
+                <td className="col-actions">
+                  <button
+                    className="delete-field-btn"
+                    title="Delete field"
+                    onClick={e => { e.stopPropagation(); removeDesignField(idx); }}
+                  >&times;</button>
+                </td>
+              </tr>
+            ))}
+            <tr className="ghost-row" onClick={addDesignField}>
+              <td colSpan={4} style={{ color: 'var(--gray-400)', cursor: 'pointer', fontStyle: 'italic' }}>
+                Click to add a new field...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div className="design-lower-pane">
+        {selectedFieldData ? (
+          <FieldPropertiesSheet field={selectedFieldData} fieldIdx={selectedField!} updateDesignField={updateDesignField} />
+        ) : (
+          <TablePropertiesSheet fields={designFields} tableDescription={tableDescription} updateTableDescription={updateTableDescription} />
+        )}
+      </div>
 
       <div className="design-footer">
         {designDirty && (

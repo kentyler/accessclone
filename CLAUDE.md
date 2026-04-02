@@ -248,7 +248,8 @@ See `MANIFEST.md` for a complete index of all `.md` files with summaries and sta
 **On session start**, read these files in full:
 1. `CLAUDE.md` (this file)
 2. `HANDOFF.md` — current state, recent changes, known landmines
-3. `tasks.md` — pending/completed tasks
+3. `intents.json` — project orientations and directions (why decisions were made, what's in tension)
+4. `tasks.md` — pending/completed tasks
 
 All other files: consult the manifest summary, read in full only when working on that topic.
 
@@ -267,8 +268,11 @@ All other files: consult the manifest summary, read in full only when working on
 | VBA intent extractor (`server/lib/vba-intent-extractor.js`) | `npm test` | `server/__tests__/vba-intent-extractor.test.js` (~12 tests) |
 | Schema routing / multi-DB middleware | `npm run test:db` | `server/__tests__/db.schema-routing.test.js` (needs PostgreSQL) |
 | Electron utilities (`electron/lib/`) | `npm test` | `electron/__tests__/*.test.js` |
+| Pattern verification (intents.json patterns) | `npm test` or `npx jest --testPathPattern=patterns/` | `server/__tests__/patterns/*.test.js` (21 tests) |
 
 DB tests require a running PostgreSQL instance and are gated behind `ACCESSCLONE_DB_TESTS=1`. They do NOT run with `npm test` — use `npm run test:db` explicitly.
+
+Pattern tests verify that selected patterns in `intents.json` have their infrastructure, generated output, and pipeline integration intact. Each pattern with a `tests` field points to an executable Jest file. Run `npx jest --testPathPattern=patterns/` from `server/` for just pattern tests.
 
 See `skills/testing.md` for the full guide including how to write new tests.
 

@@ -1,5 +1,10 @@
 # Progressive Render Levels
 
+<!-- INTENTS EXTRACTED → intents.json:
+  concept → progressive-rendering
+  NOTE: Status is "watching" — partially superseded by per-form-generation pipeline.
+-->
+
 ## Concept
 
 A per-object debug/development tool that builds up rendering in 5 progressive layers. Each level adds to the previous. Useful for:

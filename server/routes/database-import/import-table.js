@@ -9,6 +9,7 @@ const { clearSchemaCache } = require('../data');
 const { convertAccessExpression, sanitizeName } = require('../../lib/query-converter');
 const { resolveType, mapAccessType, quoteIdent } = require('../../lib/access-types');
 const { makeLogImport, runPowerShell } = require('./helpers');
+const { saveObject } = require('../../lib/objects');
 
 module.exports = function(router, pool) {
 
@@ -206,6 +207,31 @@ module.exports = function(router, pool) {
 
       // 11. Clear schema cache
       clearSchemaCache(targetDatabaseId);
+
+      // 11b. Create shared.objects row for this table
+      try {
+        const objClient = await pool.connect();
+        try {
+          await objClient.query('BEGIN');
+          const definition = {
+            fields: columnInfo.map(c => ({
+              name: c.pgName,
+              type: c.pgType,
+              isAutoNumber: c.isAutoNumber,
+              isCalculated: c.isCalculated,
+            }))
+          };
+          await saveObject(objClient, targetDatabaseId, 'table', pgTableName, definition, { status: 'complete' });
+          await objClient.query('COMMIT');
+        } catch (err) {
+          await objClient.query('ROLLBACK');
+          console.error(`Failed to create objects row for table ${pgTableName}:`, err.message);
+        } finally {
+          objClient.release();
+        }
+      } catch (err) {
+        console.error(`Failed to connect for objects row:`, err.message);
+      }
 
       // 12. Log success
       const skippedNames = (tableData.skippedColumns || []).map(c => c.name);

@@ -1,5 +1,13 @@
 # AccessClone — Product Description
 
+<!-- INTENTS EXTRACTED → intents.json:
+  §problem → faithful-reproduction
+  §conversion-intelligence → intelligence-at-bounded-points
+  §transform-architecture → transform-as-action-space
+  §trajectory → three-phase-trajectory
+  §thesis → extraction-as-product
+-->
+
 ## The Problem
 
 There are roughly 100 million Microsoft Access databases in the world. They encode purchase orders, inventory tracking, patient intake, compliance workflows, fleet management, student records — the operational backbone of organizations that can't justify enterprise software but need more than spreadsheets.

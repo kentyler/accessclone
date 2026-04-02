@@ -1,0 +1,517 @@
+{
+  "_meta": {
+    "description": "Five-layer project structure. Not a tree. Gaps, tensions, and conflicts are expected and productive. Density follows the density of decisions.",
+    "updated": "2026-03-30",
+    "reading_order": "Start with _quickread. Then scan directions for active tensions. Consult patterns when working in a specific area. Full orientations for architectural decisions. Reflections for depth.",
+    "layers": {
+      "orientation": "How we work. Manner, lens, principle. Always active or removed.",
+      "direction": "What we're trying to accomplish. Has status and tensions.",
+      "pattern": "An approach that could satisfy a direction. Multiple patterns may exist per direction — some selected, some available. Selected patterns govern their expressions. Patterns can carry a 'tests' field pointing to executable Jest test files — run them for a shared picture of what's satisfied.",
+      "expression": "Concrete artifact — code file, data schema, or document — that implements a pattern or elaborates an orientation. Two types: 'code' (files, schemas) and 'document' (technical reference .md files that document how expressions work).",
+      "reflection": "Documents that step back and consider the other four layers. Not implementing a pattern — thinking about what the system means, where it's going, what's in tension. Read when you need depth on an orientation or when making architectural decisions."
+    },
+    "pattern_statuses": {
+      "selected": "This pattern is in use. It has expressions.",
+      "available": "A viable option that hasn't been chosen. Could be selected if conditions change.",
+      "superseded": "Was selected, now replaced by a different pattern."
+    }
+  },
+
+  "_quickread": {
+    "coding_orientations": [
+      "llm-legible-artifacts: Artifacts should be maximally useful to the LLM doing the work",
+      "intents-as-shorthand: Intents are shorthand for reasoning, not an abstract layer that generates artifacts",
+      "no-silent-fallbacks: If something fails, that's an error — no silent degradation",
+      "trace-invariant: Every operation carries provenance"
+    ],
+    "active_tensions": [
+      "query-fidelity: search_path fix untested, form-state cross-joins untested",
+      "evaluation-ledger: Phase 1 forms only, not in React import flow, no automated repair",
+      "per-form-generation: only frmLogin generated, tsc rejects generated code, batch untested",
+      "vba-js-coverage: DLookup, Do/While, For Each missing from deterministic parser",
+      "transform-as-action-space: React frontend has no transform catalog (CLJS only)"
+    ]
+  },
+
+  "intents": [
+
+    {
+      "id": "llm-legible-artifacts",
+      "kind": "orientation",
+      "intent": "Artifacts should be maximally useful to the LLM doing the work",
+      "ground": "The LLM is a collaborator, not a tool. The codebase is its working surface. Every structural and formatting decision should be tested against: does this help the LLM or hinder it?"
+    },
+
+    {
+      "id": "intents-as-shorthand",
+      "kind": "orientation",
+      "intent": "Intents are shorthand for reasoning about artifacts, not an abstract layer that generates them",
+      "ground": "The capability/potential layer failed because it was constructed top-down and expected to generate useful structure. Gesture intents work because they describe what VBA code actually does. Intents that don't touch ground in artifacts are overhead.",
+      "relates": ["llm-legible-artifacts"]
+    },
+
+    {
+      "id": "llm-holds-virtual",
+      "kind": "orientation",
+      "intent": "The LLM's presence holds the virtual field. No separate potential register is required.",
+      "ground": "The LLM trained on human expression instantiates the possibility space. Storing potentials as enumerable data was redundant with the LLM's presence. The graph begins at intentions and expressions.",
+      "forecloses": ["storing potentials as enumerable data", "capability/potential nodes in graph"]
+    },
+
+    {
+      "id": "asymmetric-engagement",
+      "kind": "orientation",
+      "intent": "Human engages with expression (the artifact). LLM engages with corona (what the artifact is of). The asymmetry is generative, not a gap to close.",
+      "ground": "These are different modes of engagement in contact with the same element. The human's engagement is enriched by the LLM's corona-reading. The LLM's reading is anchored by the human's engagement. Neither alone closes the circuit."
+    },
+
+    {
+      "id": "skill-files-as-calibration",
+      "kind": "orientation",
+      "intent": "Skill files activate a corona-reading orientation — they tune which part of the virtual the LLM foregrounds. They are field calibrations, not information stores.",
+      "ground": "A skill file that merely provides information could be a CLAUDE.md section. A skill file that changes how the LLM reads the system serves a different function."
+    },
+
+    {
+      "id": "no-silent-fallbacks",
+      "kind": "orientation",
+      "intent": "If something fails, that's an error. No silent degradation to guessing or alternative execution paths.",
+      "ground": "Fallbacks mask bugs. A handler with no JS code is a translation gap to fix, not a condition to work around. Caption-based guessing was removed for this reason."
+    },
+
+    {
+      "id": "four-primitives",
+      "kind": "orientation",
+      "intent": "System operations compose from four primitives: Boundary (enclosure), Transduction (shape across boundary), Resolution (failure as signal), Trace (lineage preservation).",
+      "ground": "Generating conditions, not metaphors. Schema isolation is Boundary. SQL conversion is Transduction. Multi-pass retry is Resolution. Append-only versioning is Trace.",
+      "relates": ["trace-invariant"]
+    },
+
+    {
+      "id": "trace-invariant",
+      "kind": "orientation",
+      "intent": "Trace is the invariant all other primitives must preserve. Every boundary, transduction, and resolution carries provenance.",
+      "ground": "Not a fourth primitive in the same sense — it's the constraint the other three must satisfy.",
+      "relates": ["four-primitives", "propagation-signatures", "double-entry-traces"]
+    },
+
+    {
+      "id": "double-entry-traces",
+      "kind": "orientation",
+      "intent": "Significant changes recorded as double-entry: expression (what changed) + corona (what it is of, by reference not summary).",
+      "ground": "Without the corona side, a trace is a changelog. The corona connects mechanical change to what the system is becoming.",
+      "relates": ["asymmetric-engagement", "trace-invariant"]
+    },
+
+    {
+      "id": "forecloses-opens-topology",
+      "kind": "orientation",
+      "intent": "Recording what a decision forecloses is as important as what it opens. This is topology, not pro/con.",
+      "ground": "Both closed and opened paths are real consequences that shape future engagement."
+    },
+
+    {
+      "id": "transduction-as-border",
+      "kind": "orientation",
+      "intent": "The engagement surface is a productive border zone where human and LLM modes of engagement make each other legible through translation.",
+      "ground": "Not a boundary that separates but a border where two modes of being-in-discourse are mutually constituted. Translation is always also transformation."
+    },
+
+    {
+      "id": "ledger-as-perturbation",
+      "kind": "orientation",
+      "intent": "Cause and effect in this system is field perturbation, not a chain. Every action propagates as ripples. The human sees the stone land; the LLM reads the water.",
+      "ground": "The large effects are visible to humans — the first few terms. The infinitesimal ripples are the corona.",
+      "relates": ["propagation-signatures", "asymmetric-engagement"]
+    }
+  ],
+
+  "directions": [
+
+    {
+      "id": "faithful-reproduction",
+      "intent": "Reproduce the Access application faithfully — same forms, navigation, business rules — not a generic database viewer.",
+      "ground": "The working specification in an Access database represents years of institutional knowledge. Rewriting from scratch throws away the most valuable part.",
+      "status": "active"
+    },
+
+    {
+      "id": "intelligence-at-bounded-points",
+      "intent": "Apply LLM intelligence at specific, bounded points. The LLM classifies and validates; it doesn't generate wholesale.",
+      "ground": "Unbounded generation produces artifacts that can't be verified. Bounded classification is testable.",
+      "status": "active",
+      "relates": ["intents-as-shorthand"]
+    },
+
+    {
+      "id": "transform-as-action-space",
+      "intent": "The application exposes a finite, named, enumerable action space that an AI agent can compose without writing code.",
+      "ground": "An agent reads intent graph + transform catalog + dependency graph — more tractable than 'read codebase and figure out what to do.'",
+      "status": "partial",
+      "tensions": ["React frontend is imperative, not transform-based", "transform catalog only exists in CLJS layer which is no longer default"]
+    },
+
+    {
+      "id": "three-phase-trajectory",
+      "intent": "Migration → AI-assisted operation → AI-automated operation. The same intent graph and transforms serve all three phases.",
+      "ground": "Business logic doesn't change across phases. What changes is who composes the transforms.",
+      "status": "watching",
+      "relates": ["transform-as-action-space", "faithful-reproduction"]
+    },
+
+    {
+      "id": "per-form-generation",
+      "intent": "Each form gets a concrete .tsx file the LLM can read and patch.",
+      "ground": "Generic renderer accumulated divergences hard to fix incrementally. Concrete files are better LLM working surfaces.",
+      "status": "seeded",
+      "tensions": ["generated code has type issues tsc rejects", "only frmLogin generated so far", "batch generation untested"],
+      "relates": ["llm-legible-artifacts", "generic-fallback"]
+    },
+
+    {
+      "id": "generic-fallback",
+      "intent": "Generic FormView remains as fallback for forms without generated components.",
+      "ground": "Can't generate all forms at once. Generic renderer handles the long tail while generation pipeline matures.",
+      "status": "active",
+      "relates": ["per-form-generation"]
+    },
+
+    {
+      "id": "propagation-signatures",
+      "intent": "Every action records its ripple — graph stats, evaluation IDs, intent types, secondary objects affected.",
+      "ground": "The ledger records leading visible terms of the perturbation series.",
+      "status": "active",
+      "relates": ["trace-invariant", "ledger-as-perturbation"]
+    },
+
+    {
+      "id": "query-fidelity",
+      "intent": "Every converted query executes correctly against its target schema.",
+      "ground": "Access queries assume a single namespace; PG has schemas.",
+      "status": "partial",
+      "tensions": ["search_path fix attempted but untested on dedicated clients", "form-state cross-joins untested at runtime"]
+    },
+
+    {
+      "id": "evaluation-ledger",
+      "intent": "Track what the pipeline was trying to accomplish per object, so regressions are caught and fixes become obligations not accidents.",
+      "ground": "northwind_15→16 regression: expression-to-record-source fix was lost because it was historical accident, not enforced obligation.",
+      "status": "partial",
+      "tensions": ["Phase 1 forms only", "not wired into React import flow", "no automated repair yet"]
+    },
+
+    {
+      "id": "progressive-rendering",
+      "intent": "Build rendering in progressive layers so each concern can be isolated.",
+      "ground": "Layout bugs, data bugs, and event bugs look the same at full render.",
+      "status": "watching",
+      "tensions": ["partially superseded by per-form generation"],
+      "relates": ["per-form-generation"]
+    },
+
+    {
+      "id": "import-pattern-ledger",
+      "intent": "Every solved import problem is recorded with scope, gotchas, and code location so it's never re-derived.",
+      "ground": "Import patterns recur across databases.",
+      "status": "active",
+      "relates": ["llm-legible-artifacts"]
+    },
+
+    {
+      "id": "vba-js-coverage",
+      "intent": "VBA-to-JS parser handles all common patterns found in real Access databases.",
+      "ground": "Coverage expands by testing against real databases and filling gaps.",
+      "status": "partial",
+      "tensions": ["DLookup/DCount not implemented", "Do/While loops missing", "For Each not implemented"]
+    },
+
+    {
+      "id": "multi-platform-migration",
+      "intent": "Expand beyond Access to FoxPro, Paradox, and other dead platforms.",
+      "ground": "Import pipeline folder renamed to database-import. FoxPro next.",
+      "status": "watching",
+      "relates": ["faithful-reproduction"]
+    },
+
+    {
+      "id": "extraction-as-product",
+      "intent": "The real output is a business process that a machine can read, understand, and execute. The browser UI is development/debugging tooling.",
+      "ground": "100 million Access databases encode operational business logic trapped in proprietary binary format.",
+      "status": "watching",
+      "relates": ["three-phase-trajectory", "transform-as-action-space", "llm-legible-artifacts"]
+    },
+
+    {
+      "id": "engagement-surface-as-product",
+      "intent": "The deeper product is deploying an engagement surface that gives organizations access to their own corona.",
+      "ground": "Database migration is the expression. The engagement surface is the corona. The LLM's presence makes this possible.",
+      "status": "watching",
+      "relates": ["asymmetric-engagement", "llm-holds-virtual", "extraction-as-product"]
+    }
+  ],
+
+  "patterns": [
+
+    {
+      "id": "regex-first-llm-fallback",
+      "serves": "intelligence-at-bounded-points",
+      "status": "selected",
+      "pattern": "Deterministic regex converter handles the common case. LLM fallback activates only when regex output fails PG execution — and only for genuine conversion errors, not missing dependencies.",
+      "ground": "Most Access SQL maps mechanically to PG. Dependency errors (42P01/42883) skip the LLM — the retry loop handles those.",
+      "alternatives": ["llm-translates-all-queries", "manual conversion"],
+      "expressions": [
+        {"artifact": "server/lib/query-converter/index.js", "type": "code", "role": "orchestrator — regex pipeline"},
+        {"artifact": "server/lib/query-converter/syntax.js", "type": "code", "role": "bracket/operator/schema-prefix transforms"},
+        {"artifact": "server/lib/query-converter/functions.js", "type": "code", "role": "Access→PG function mapping"},
+        {"artifact": "server/lib/query-converter/llm-fallback.js", "type": "code", "role": "LLM path when regex output fails execution"},
+        {"artifact": "skills/conversion-queries.md", "type": "document", "role": "full reference — retry loop, LLM fallback, form-state cross-joins"}
+      ]
+    },
+
+    {
+      "id": "llm-translates-all-queries",
+      "serves": "intelligence-at-bounded-points",
+      "status": "available",
+      "pattern": "Send every Access query to an LLM for translation with full schema context.",
+      "ground": "Would handle edge cases better but: non-reproducible output, expensive at scale, can't be tested deterministically. Could become relevant if regex coverage plateaus below acceptable threshold."
+    },
+
+    {
+      "id": "multi-pass-retry",
+      "serves": "query-fidelity",
+      "status": "selected",
+      "pattern": "Import what you can each pass. Retry failures. Stop when no progress. Up to 20 passes.",
+      "ground": "Dependency order is unknown at import time. Use failure as signal — Resolution primitive in action.",
+      "alternatives": ["topological-sort-dependencies", "user-specified import order"],
+      "expressions": [
+        {"artifact": "server/routes/database-import/import-query.js", "type": "code", "role": "single query import with error categorization"},
+        {"artifact": "ui/src/app/views/access_database_viewer.cljs", "type": "code", "role": "import-queries-phase retry loop"}
+      ]
+    },
+
+    {
+      "id": "topological-sort-dependencies",
+      "serves": "query-fidelity",
+      "status": "available",
+      "pattern": "Parse all queries first to build a dependency graph, then import in topological order.",
+      "ground": "Would eliminate retry overhead but requires parsing Access SQL well enough to extract dependencies — which is the same problem the converter solves. Front-loading the hard problem."
+    },
+
+    {
+      "id": "form-state-cross-join",
+      "serves": "query-fidelity",
+      "status": "selected",
+      "pattern": "Resolve [Forms]![frmX]![ctrl] references as cross-joins against shared.session_state, populated by form record navigation at runtime.",
+      "ground": "PG views can't have parameters. Cross-join against a session-scoped state table gives the same effect.",
+      "alternatives": ["parameterized views (PG doesn't support)", "server-side-query-rewriting"],
+      "expressions": [
+        {"artifact": "server/lib/query-converter/form-state.js", "type": "code", "role": "converts form references to cross-join SQL"},
+        {"artifact": "shared.session_state", "type": "schema", "role": "PG view on form_control_state filtered by session"},
+        {"artifact": "shared.control_column_map", "type": "schema", "role": "maps (db, form, control) → (table, column)"},
+        {"artifact": "shared.form_control_state", "type": "schema", "role": "runtime state table populated by record navigation"},
+        {"artifact": "skills/form-state-sync.md", "type": "document", "role": "full architecture — control mapping, session state, import ordering"}
+      ]
+    },
+
+    {
+      "id": "server-side-query-rewriting",
+      "serves": "query-fidelity",
+      "status": "available",
+      "pattern": "At execution time, intercept the query and replace form references with current values from the client.",
+      "ground": "Would avoid the cross-join complexity but means views can't be used by PG directly — every query goes through a middleware layer. Breaks `CREATE VIEW` semantics."
+    },
+
+    {
+      "id": "per-form-tsx-generation",
+      "serves": "per-form-generation",
+      "status": "selected",
+      "tests": "server/__tests__/patterns/form-generation.test.js",
+      "pattern": "5-step LLM pipeline builds each form's .tsx incrementally: layout shell → place controls → record source → wire bindings → event code.",
+      "ground": "A single LLM call can't reliably produce a complete form component. Steps mirror progressive render levels. Intermediate files enable debugging.",
+      "alternatives": ["single-prompt full generation", "template-based-form-generation"],
+      "expressions": [
+        {"artifact": "server/lib/form-gen/prompts.js", "type": "code", "role": "5-step prompt definitions"},
+        {"artifact": "server/lib/form-gen/writer.js", "type": "code", "role": "file writer with debug intermediate output"},
+        {"artifact": "server/routes/form-gen.js", "type": "code", "role": "API endpoints for single + batch generation"},
+        {"artifact": "ui-react/src/generated/", "type": "code", "role": "output directory for generated .tsx files"},
+        {"artifact": "skills/form-design.md", "type": "document", "role": "form definition JSON structure — control types, layout, binding, sections"}
+      ]
+    },
+
+    {
+      "id": "template-based-form-generation",
+      "serves": "per-form-generation",
+      "status": "available",
+      "pattern": "Map form JSON to .tsx via deterministic templates — one template per control type, composed by layout algorithm.",
+      "ground": "Would be faster and reproducible. But Access forms have too many interacting properties (conditional formatting, expressions, tab order, group dependencies) for static templates to handle. Could work for simple forms; LLM needed for complex ones."
+    },
+
+    {
+      "id": "fix-generic-renderer",
+      "serves": "faithful-reproduction",
+      "status": "superseded",
+      "pattern": "Incrementally fix the generic FormView.tsx to handle all Access form patterns.",
+      "ground": "Was the default approach. Accumulated divergences were hard to fix because each fix interacted with others. Superseded by per-form-generation.",
+      "superseded_by": "per-form-tsx-generation"
+    },
+
+    {
+      "id": "generated-with-generic-fallback",
+      "serves": "faithful-reproduction",
+      "status": "selected",
+      "tests": "server/__tests__/patterns/form-generation.test.js",
+      "pattern": "Check for generated .tsx; lazy-load if found; fall back to generic FormView if not.",
+      "ground": "Transitional. import.meta.glob discovers components at build time. Nothing breaks while generation coverage grows.",
+      "expressions": [
+        {"artifact": "ui-react/src/views/FormEditor/GeneratedFormWrapper.tsx", "type": "code", "role": "wrapper with lazy-load + fallback logic"},
+        {"artifact": "ui-react/src/views/FormEditor/FormEditor.tsx", "type": "code", "role": "uses wrapper in view mode"}
+      ]
+    },
+
+    {
+      "id": "deterministic-vba-parser",
+      "serves": "vba-js-coverage",
+      "status": "selected",
+      "pattern": "Deterministic parser converts VBA to JS strings at import time. No LLM in the parsing path. Eval'd at runtime via js/Function.",
+      "ground": "VBA event handlers are mostly mechanical. Deterministic parser produces predictable, testable output (118 tests).",
+      "alternatives": ["llm-translates-vba-to-js"],
+      "expressions": [
+        {"artifact": "server/lib/vba-to-js.js", "type": "code", "role": "parser — extractProcedures, translateStatement, parseIfBlock, etc."},
+        {"artifact": "ui/src/app/runtime.cljs", "type": "code", "role": "window.AC runtime API (CLJS)"},
+        {"artifact": "ui-react/src/lib/runtime.ts", "type": "code", "role": "window.AC runtime API (React)"},
+        {"artifact": "skills/event-runtime.md", "type": "document", "role": "full architecture — handler loading, execution, supported events"},
+        {"artifact": "skills/conversion-vba-js.md", "type": "document", "role": "VBA patterns reference, runtime API, common translations"}
+      ]
+    },
+
+    {
+      "id": "llm-translates-vba-to-js",
+      "serves": "vba-js-coverage",
+      "status": "available",
+      "pattern": "Send each VBA procedure to an LLM with full context for translation to JS.",
+      "ground": "Would handle complex patterns (DLookup, nested loops, error handling) that the deterministic parser can't. But non-reproducible, untestable, expensive. Could be a fallback tier for procedures the deterministic parser skips — analogous to regex-first-llm-fallback for queries."
+    },
+
+    {
+      "id": "intent-tree-walking",
+      "serves": "vba-js-coverage",
+      "status": "superseded",
+      "pattern": "Extract intents from VBA, then walk the intent tree at runtime to execute actions.",
+      "ground": "Was the original approach. Removed March 2021. Intents were too coarse to capture VBA control flow. Clicking a button shouldn't require interpreting an intent graph.",
+      "superseded_by": "deterministic-vba-parser"
+    },
+
+    {
+      "id": "fixed-vocabulary-classification",
+      "serves": "intelligence-at-bounded-points",
+      "status": "selected",
+      "pattern": "Intent extraction uses a fixed vocabulary of 30 types. LLM classifies, never invents. Unknown patterns produce gaps with questions.",
+      "ground": "Bounded classification is verifiable. Gaps are honest about the boundary.",
+      "alternatives": ["open-ended intent generation"],
+      "expressions": [
+        {"artifact": "server/lib/vba-intent-mapper.js", "type": "code", "role": "30 intent types, deterministic mapping"},
+        {"artifact": "skills/intent-extraction.md", "type": "document", "role": "LLM prompt with type definitions and examples"},
+        {"artifact": "skills/object-intent-extraction.md", "type": "document", "role": "business intent extraction prompt — purpose, category, data flows"},
+        {"artifact": "skills/structure-intent-extraction.md", "type": "document", "role": "structure archetype extraction — 11 archetypes, 11 subpatterns"}
+      ]
+    },
+
+    {
+      "id": "savetext-parsing",
+      "serves": "faithful-reproduction",
+      "status": "selected",
+      "pattern": "Export Access objects via Application.SaveAsText, parse the text output.",
+      "ground": "SaveAsText is complete and deterministic. COM property reading is fragile. Works reliably even on .mdb files with VBA compile errors.",
+      "alternatives": ["COM design-view property enumeration", "direct .accdb binary parsing"],
+      "expressions": [
+        {"artifact": "scripts/access/export_form.ps1", "type": "code", "role": "single form export + parse"},
+        {"artifact": "scripts/access/export_report.ps1", "type": "code", "role": "single report export + parse"},
+        {"artifact": "scripts/access/export_forms_batch.ps1", "type": "code", "role": "batch form export"},
+        {"artifact": "scripts/access/export_reports_batch.ps1", "type": "code", "role": "batch report export"},
+        {"artifact": "skills/conversion-forms.md", "type": "document", "role": "form import — twips→pixels, control mapping, property normalization"},
+        {"artifact": "skills/conversion.md", "type": "document", "role": "master import orchestrator — 7-phase workflow, import order"}
+      ]
+    },
+
+    {
+      "id": "schema-per-database",
+      "serves": ["faithful-reproduction", "query-fidelity"],
+      "status": "selected",
+      "pattern": "Each imported database gets its own PG schema (db_{slug}). Platform metadata lives in shared schema.",
+      "ground": "Access databases are isolated worlds. Schema-per-database preserves this.",
+      "alternatives": ["single schema with prefixed tables", "separate PG databases per import"],
+      "expressions": [
+        {"artifact": "server/app.js", "type": "code", "role": "middleware sets req.schemaName from X-Database-ID header"},
+        {"artifact": "sql/infrastructure.sql", "type": "schema", "role": "shared schema bootstrap"},
+        {"artifact": "ARCHITECTURE.md", "type": "document", "role": "multi-DB isolation, state management, data flow"}
+      ]
+    },
+
+    {
+      "id": "append-only-versioning",
+      "serves": ["evaluation-ledger", "trace-invariant"],
+      "status": "selected",
+      "pattern": "Form/report saves INSERT new row (is_current=true), mark previous row is_current=false. No UPDATE of content. No DELETE.",
+      "ground": "Every version preserved. Regressions diffable. Evaluations reference specific version.",
+      "alternatives": ["UPDATE in place", "git-based version control for definitions"],
+      "expressions": [
+        {"artifact": "server/routes/forms.js", "type": "code", "role": "PUT handler — INSERT + UPDATE is_current"},
+        {"artifact": "server/routes/reports.js", "type": "code", "role": "PUT handler — INSERT + UPDATE is_current"},
+        {"artifact": "shared.objects", "type": "schema", "role": "table with is_current flag and version column"}
+      ]
+    },
+
+    {
+      "id": "evaluation-on-save",
+      "serves": "evaluation-ledger",
+      "status": "selected",
+      "pattern": "Every save runs deterministic checks as post-commit side effect. Never blocks save. Results in shared.evaluations.",
+      "ground": "Pervasive but invisible. Save always succeeds; evaluation ledger always has data.",
+      "alternatives": ["evaluation blocks save on failure", "manual-only evaluation"],
+      "expressions": [
+        {"artifact": "server/lib/pipeline-evaluator.js", "type": "code", "role": "runFormDeterministicChecks, runReportDeterministicChecks, classifyFailure"},
+        {"artifact": "server/routes/evaluations.js", "type": "code", "role": "batch + single + history + latest endpoints"},
+        {"artifact": "shared.evaluations", "type": "schema", "role": "evaluation results table"}
+      ]
+    }
+  ],
+
+  "reflections": [
+
+    {
+      "id": "engagement-surface",
+      "document": "skills/engagement-surface.md",
+      "considers": ["asymmetric-engagement", "llm-holds-virtual", "transduction-as-border", "ledger-as-perturbation", "skill-files-as-calibration", "engagement-surface-as-product"],
+      "summary": "What the engagement surface is — human engages with expression, LLM engages with corona. The asymmetry is productive. The border zone (not boundary) is where mutual legibility happens. Skill files calibrate which part of the virtual the LLM foregrounds."
+    },
+
+    {
+      "id": "capability-ontology",
+      "document": "skills/capability-ontology.md",
+      "considers": ["four-primitives", "trace-invariant", "llm-holds-virtual"],
+      "summary": "Three-layer model (Could Do / Should Do / Doing Now), four primitives (Boundary, Transduction, Resolution, Trace). Trace is the invariant. NOTE: graph node/edge/API sections are stale — capability/potential layer was removed from graph March 29.",
+      "staleness": "§3-§5 (graph types, edge types, API endpoints) describe removed capability/potential system"
+    },
+
+    {
+      "id": "trace-convention",
+      "document": "skills/trace-convention.md",
+      "considers": ["double-entry-traces", "trace-invariant", "asymmetric-engagement", "forecloses-opens-topology"],
+      "summary": "Double-entry changelog format: expression (what changed) + corona (what it is of, by reference). What-changed forecloses; what-it-is-of opens. The topology of recording is itself a design choice."
+    },
+
+    {
+      "id": "product-thesis",
+      "document": "PRODUCT.md",
+      "considers": ["faithful-reproduction", "intelligence-at-bounded-points", "transform-as-action-space", "three-phase-trajectory", "extraction-as-product"],
+      "summary": "The bottleneck for automating business operations isn't AI capability — it's structured access to what the business actually does. 100M Access databases contain this, trapped in proprietary format. AccessClone is the extraction layer."
+    },
+
+    {
+      "id": "transform-architecture-theory",
+      "document": "skills/transform-architecture.md",
+      "considers": ["transform-as-action-space", "three-phase-trajectory", "llm-legible-artifacts"],
+      "summary": "Pure transforms make the application AI-composable. Every state change is named, enumerable, testable. An agent reads transforms + intents + dependency graph — doesn't need to understand the codebase. Currently CLJS-only; React frontend is imperative."
+    }
+  ]
+}

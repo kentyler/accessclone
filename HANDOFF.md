@@ -6,6 +6,81 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 
 ## Current State
 
+### Just Shipped (2026-04-01, evening session)
+
+**EVENT**: query-viewer-3-views
+
+**EXPRESSION** (what changed):
+- **Fixed query results bug**: `store/query.ts` line 82 had `res.data.rows` but server returns `{ data: [...], fields: [...], rowCount }`. Changed to `res.data.data`. Also mapped server field objects (name + OID number) to ColumnInfo with string types.
+- **Added Design view mode**: New state (`designData`, `designLoading`) + `loadDesignData()` action calling `GET /api/queries/:name/design`. Auto-loads when switching to design mode. TypeScript interfaces: `QBETable`, `QBEJoin`, `QBEField`, `QBEDesignData`.
+- **Added client-side sort/filter to query results**: Same pattern as table store — `sortBy()` (in-place sort with numeric-aware localeCompare), `setFilter()`, `clearFilter()`, `getFilteredResults()`.
+- **Extracted ColumnDropdown** to `ui-react/src/components/ColumnDropdown.tsx` — generic component accepting callbacks (`onSort`, `onSetFilter`, `onClearFilter`, `onClose`) instead of a store reference. `TableViewer.tsx` updated to import from shared component.
+- **Rewrote QueryViewer** (`ui-react/src/views/QueryViewer.tsx`) with 3 views:
+  - **Results**: Column headers with sort/filter dropdown arrows (reuses ColumnDropdown), filter status bar, read-only cells
+  - **Design**: Upper pane with table boxes + SVG join lines, lower pane with QBE grid (Field/Table/GroupBy/Sort/Show/Criteria, WHERE summary). Unparseable queries show graceful fallback message.
+  - **SQL View**: Editable textarea + Run button + Ctrl+Enter keyboard shortcut
+- **CSS**: Added `.qbe-unparseable` styling in `style.css`. All other QBE styles already existed.
+- Build: `npx vite build` run. All 666 tests pass (594 server + 72 electron).
+
+**Files changed**:
+- `ui-react/src/store/query.ts` — rewritten (bug fix + design + sort/filter state)
+- `ui-react/src/views/QueryViewer.tsx` — rewritten (3 views)
+- `ui-react/src/components/ColumnDropdown.tsx` — new shared component
+- `ui-react/src/views/TableViewer.tsx` — imports ColumnDropdown from shared component
+- `ui-react/public/css/style.css` — added `.qbe-unparseable` styles
+
+**WHAT TO VERIFY NEXT SESSION**:
+- Open a query in Results view — should show data (was broken before, now fixed)
+- Column header dropdowns should show sort/filter options
+- Switch to Design view — QBE grid should render for parseable queries, fallback for CTEs/UNIONs
+- Switch to SQL View — Ctrl+Enter should execute
+- Switching between queries should reset state cleanly
+- The query search_path fix (March 29) may still affect results — if queries return empty, investigate `SET search_path` on dedicated clients in `POST /api/queries/run`
+
+---
+
+### Just Shipped (2026-03-30, evening session)
+
+**EVENT**: pattern-tests-and-table-reconnaissance
+
+**EXPRESSION** (what changed):
+- New `server/__tests__/patterns/form-generation.test.js` — 21 tests in 3 tiers verifying the form generation pipeline: infrastructure exists (7), generated output valid (12), pipeline integration with DB (2, gated by `ACCESSCLONE_DB_TESTS`). 666 total tests (594 server + 72 electron).
+- `intents.json` updated: `tests` field added to `per-form-tsx-generation` and `generated-with-generic-fallback` patterns, pointing to the test file. `_meta.layers.pattern` description updated to note patterns can carry executable test references.
+- Reconnaissance of table rendering architecture completed — documented current state for tomorrow's session.
+
+**CORONA** (what this is of):
+- `intents.json` patterns layer (engagement-surface.md §expressions) — patterns now carry verification conditions as executable tests, making the pattern layer legible to both human and LLM via `npm test` output
+- `skills/testing.md` — new test category: pattern verification (static analysis + file checks, not unit tests in the traditional sense)
+
+**WHAT THIS FORECLOSES**:
+- Maintaining a separate task list to track pattern satisfaction — test output replaces manual status tracking for patterns with `tests` fields
+
+**WHAT THIS OPENS**:
+- Session-start pattern: LLM reads intents.json → runs pattern tests → shared picture of what's satisfied before discussion about direction
+- Same approach extensible to other patterns (query fidelity, VBA coverage, evaluation ledger)
+- Table rendering pipeline: architecture documented, ready for discussion about per-table generation vs testing the generic renderer
+
+**THEORETICAL GROUND**: engagement-surface.md (expressions as working surface), trace-convention.md (double-entry format)
+
+---
+
+### Table Architecture Notes (for next session)
+
+Tables differ fundamentally from forms: they are **not stored in `shared.objects`**. They are live PostgreSQL tables in the per-database schema. The "definition" is the schema itself (queried from `information_schema`), not a JSON blob.
+
+Current rendering is a **single generic component** (`ui-react/src/views/TableViewer.tsx`, ~310 lines) with two inline sub-components:
+- **DatasheetView**: editable HTML table, double-click to edit, Tab navigation, optimistic updates via `PUT /api/data/{table}/{pk}`
+- **DesignView**: split pane — upper field grid (Name | Type | Description) with row selection, lower context-aware property sheet (field props when selected, table description when not)
+
+State in `ui-react/src/store/table.ts` (Zustand + Immer). Server DDL in `server/routes/metadata.js` (8-step diff-based ALTER on save). Type mapping: Access names ↔ PG types (`PG_TO_ACCESS` in store, `resolveType()` on server).
+
+Open questions for next session:
+1. Does per-table `.tsx` generation make sense, or is the generic renderer the right pattern for tables?
+2. Chrome integration (`claude --chrome`) could enable DOM-level testing — tried `/chrome` but couldn't activate. Worth retrying with extension installed.
+3. Type mapping round-trip tests are high-value and need no browser — pure function tests for `resolveType()` and `PG_TO_ACCESS`.
+
+---
+
 ### Just Shipped (2026-03-29, evening session)
 
 **EVENT**: llm-form-generation-pipeline

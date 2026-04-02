@@ -17,6 +17,10 @@
 - **Trace `[object Object]` database_id bug** — 16 orphan rows found in forms/reports with `database_id = '[object Object]'`. Some code path is passing a JS object instead of a string slug. Cleaned up data but root cause unknown.
 - **Re-import existing stubs after generator fix** — The VBA stub generator fix (ParamArray/enum) only helps new stubs. Existing databases may have stubs with wrong signatures. Consider adding a "regenerate stubs" button or making `createStubFunctions` optionally overwrite existing stubs.
 
+- **Table type mapping tests** — Pure function tests for `resolveType()` (server, Access→PG) and `PG_TO_ACCESS` (store, PG→Access). Round-trip verification. No browser or DB needed. High value — bad mappings create tables with wrong column types.
+- **Chrome browser integration for testing** — `claude --chrome` enables DOM-level testing from CLI. Requires Chrome extension "Claude in Chrome" (v1.0.36+). Could enable real end-to-end table/form rendering verification. Attempted `/chrome` but couldn't activate — retry with extension installed.
+- **Pattern tests for other patterns** — Extend the pattern test approach (intents.json `tests` field → Jest file) to other selected patterns: `multi-pass-retry`, `deterministic-vba-parser`, `evaluation-on-save`. Each gets a tiered test file checking infrastructure → output → integration.
+
 ## In Progress
 
 ## Completed

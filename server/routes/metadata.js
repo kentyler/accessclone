@@ -9,10 +9,39 @@ const { logError } = require('../lib/events');
 const { clearPkCache } = require('./data');
 const { resolveType, quoteIdent } = require('../lib/access-types');
 const { parseQueryDesign } = require('../lib/query-design-parser');
+const { getObject, saveObject, getIntentsByObject } = require('../lib/objects');
 
 const NAME_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
 module.exports = function(pool) {
+
+  /**
+   * Ensure a table has a row in shared.objects (type='table').
+   * Creates one if missing, using column metadata as the definition.
+   */
+  async function ensureTableObject(databaseId, tableName, fields) {
+    try {
+      const existing = await getObject(pool, databaseId, 'table', tableName, { columns: ['id'] });
+      if (existing) return;
+
+      const definition = { fields: fields || [] };
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await saveObject(client, databaseId, 'table', tableName, definition, { status: 'complete' });
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+    } catch (err) {
+      // Fire-and-forget — don't break the tables list if this fails
+      console.error(`ensureTableObject failed for ${tableName}:`, err.message);
+    }
+  }
+
   /**
    * GET /api/tables
    * List all tables with their columns
@@ -177,10 +206,35 @@ module.exports = function(pool) {
       }
 
       res.json({ tables });
+
+      // Lazy-sync: ensure each table has a shared.objects row (fire-and-forget)
+      const databaseId = req.databaseId;
+      if (databaseId) {
+        for (const t of tables) {
+          ensureTableObject(databaseId, t.name, t.fields);
+        }
+      }
     } catch (err) {
       console.error('Error fetching tables:', err);
       logError(pool, 'GET /api/tables', 'Failed to fetch tables', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to fetch tables' });
+    }
+  });
+
+  /**
+   * GET /api/tables/:name/intents
+   * Get intents for a table object
+   */
+  router.get('/tables/:name/intents', async (req, res) => {
+    try {
+      const databaseId = req.databaseId;
+      const tableName = req.params.name;
+      const intents = await getIntentsByObject(pool, databaseId, 'table', tableName);
+      res.json(intents);
+    } catch (err) {
+      console.error('Error fetching table intents:', err);
+      logError(pool, 'GET /api/tables/:name/intents', 'Failed to fetch table intents', err, { databaseId: req.databaseId });
+      res.status(500).json({ error: 'Failed to fetch table intents' });
     }
   });
 

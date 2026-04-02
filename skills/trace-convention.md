@@ -1,5 +1,9 @@
 # Trace Convention: Double-Entry Changelog
 
+<!-- INTENTS EXTRACTED → intents.json:
+  whole file → double-entry-traces, forecloses-opens-topology
+-->
+
 When recording significant changes in HANDOFF.md, use the double-entry format. This ensures a future LLM reading the trace knows both what happened (expression) and what it was of (corona).
 
 ## Format

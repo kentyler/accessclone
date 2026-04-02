@@ -1,6 +1,14 @@
 # Engagement Surface: Theoretical Framework
 ## For the Formfold / Threehorse Architecture
 
+<!-- INTENTS EXTRACTED → intents.json:
+  §2 → llm-holds-virtual
+  §3 → asymmetric-engagement
+  §4 → transduction-as-border
+  §5 → ledger-as-perturbation, propagation-signatures
+  §7 → skill-files-as-calibration, engagement-surface-as-product
+-->
+
 ---
 
 ## 1. The Engagement Surface

@@ -17,7 +17,7 @@ export interface DesignField {
   description?: string;
   isPrimaryKey: boolean;
   defaultValue?: string;
-  indexed?: boolean;
+  indexed?: string | boolean | null;
   originalName?: string;
 }
 
@@ -29,8 +29,12 @@ export interface TableState {
   tableId: string | null;
   tableInfo: TableInfo | null;
   records: Record<string, unknown>[];
-  viewMode: 'datasheet' | 'design';
+  viewMode: 'datasheet' | 'design' | 'intents';
   loading: boolean;
+
+  // Intents
+  intents: unknown[] | null;
+  intentsLoading: boolean;
 
   // Datasheet editing
   selected: { row: number; col: string } | null;
@@ -50,6 +54,12 @@ export interface TableState {
   // New table
   newTable: boolean;
   newTableName: string;
+
+  // Sort / filter
+  sortColumn: string | null;
+  sortDirection: 'asc' | 'desc';
+  filters: Record<string, unknown[]>;        // column → excluded values
+  activeFilterColumn: string | null;         // which dropdown is open
 }
 
 // ============================================================
@@ -62,7 +72,10 @@ export interface TableActions {
   refreshTableData(): Promise<void>;
 
   // View mode
-  setViewMode(mode: 'datasheet' | 'design'): void;
+  setViewMode(mode: 'datasheet' | 'design' | 'intents'): void;
+
+  // Intents
+  loadTableIntents(): Promise<void>;
 
   // Cell selection / editing
   selectCell(row: number, col: string): void;
@@ -100,6 +113,13 @@ export interface TableActions {
   startNewTable(): void;
   setNewTableName(name: string): void;
   saveNewTable(): Promise<void>;
+
+  // Sort / filter
+  sortBy(col: string, dir: 'asc' | 'desc'): void;
+  setFilter(col: string, excludedValues: unknown[]): void;
+  clearFilter(col?: string): void;
+  setActiveFilterColumn(col: string | null): void;
+  getFilteredRecords(): Record<string, unknown>[];
 
   // Field helpers
   getPkField(): string;
@@ -159,8 +179,14 @@ export const useTableStore = create<TableStore>()(
     selectedField: null,
     tableDescription: null,
     originalDescription: null,
+    intents: null,
+    intentsLoading: false,
     newTable: false,
     newTableName: '',
+    sortColumn: null,
+    sortDirection: 'asc',
+    filters: {},
+    activeFilterColumn: null,
 
     // --------------------------------------------------------
     // Loading
@@ -179,29 +205,49 @@ export const useTableStore = create<TableStore>()(
         s.designDirty = false;
         s.designRenames = {};
         s.designErrors = null;
+        s.intents = null;
+        s.intentsLoading = false;
         s.newTable = false;
+        s.sortColumn = null;
+        s.sortDirection = 'asc';
+        s.filters = {};
+        s.activeFilterColumn = null;
       });
 
-      // Load table metadata
-      const metaRes = await api.get<TableInfo[]>('/api/tables');
+      // Load table metadata — API returns { tables: [...] }
+      // API returns isPrimaryKey but frontend uses pk
+      const metaRes = await api.get<{ tables: TableInfo[] }>('/api/tables');
       if (metaRes.ok) {
-        const info = metaRes.data.find(t => t.name === table.name);
-        if (info) set(s => { s.tableInfo = info; });
+        const tables = metaRes.data.tables || [];
+        const info = tables.find(t => t.name === table.name);
+        if (info) {
+          for (const f of info.fields) {
+            if ((f as any).isPrimaryKey != null) {
+              f.pk = (f as any).isPrimaryKey;
+            }
+          }
+          set(s => { s.tableInfo = info; });
+        }
       }
 
-      // Load records
-      const dataRes = await api.get<Record<string, unknown>[]>(`/api/data/${encodeURIComponent(table.name)}?limit=1000`);
+      // Load records — API returns { data: [...], pagination: {...} }
+      const dataRes = await api.get<{ data: Record<string, unknown>[] }>(`/api/data/${encodeURIComponent(table.name)}?limit=1000`);
       set(s => {
         s.loading = false;
-        if (dataRes.ok) s.records = dataRes.data;
+        if (dataRes.ok) s.records = dataRes.data.data || [];
       });
     },
 
     async refreshTableData() {
-      const name = get().tableInfo?.name;
+      const state = get();
+      const name = state.tableInfo?.name;
       if (!name) return;
-      const res = await api.get<Record<string, unknown>[]>(`/api/data/${encodeURIComponent(name)}?limit=1000`);
-      if (res.ok) set(s => { s.records = res.data; });
+      let url = `/api/data/${encodeURIComponent(name)}?limit=1000`;
+      if (state.sortColumn) {
+        url += `&orderBy=${encodeURIComponent(state.sortColumn)}&orderDir=${state.sortDirection}`;
+      }
+      const res = await api.get<{ data: Record<string, unknown>[] }>(url);
+      if (res.ok) set(s => { s.records = res.data.data || []; });
     },
 
     // --------------------------------------------------------
@@ -211,6 +257,21 @@ export const useTableStore = create<TableStore>()(
       set(s => { s.viewMode = mode; });
       if (mode === 'design') get().initDesignEditing();
       if (mode === 'datasheet') get().refreshTableData();
+      if (mode === 'intents') get().loadTableIntents();
+    },
+
+    // --------------------------------------------------------
+    // Intents
+    // --------------------------------------------------------
+    async loadTableIntents() {
+      const name = get().tableInfo?.name || get().tableId;
+      if (!name) return;
+      set(s => { s.intentsLoading = true; });
+      const res = await api.get<unknown[]>(`/api/tables/${encodeURIComponent(name)}/intents`);
+      set(s => {
+        s.intentsLoading = false;
+        s.intents = res.ok ? res.data : [];
+      });
     },
 
     // --------------------------------------------------------
@@ -444,10 +505,11 @@ export const useTableStore = create<TableStore>()(
       if (res.ok) {
         // Re-populate graph
         api.post('/api/graph/populate');
-        // Reload table metadata
-        const metaRes = await api.get<TableInfo[]>('/api/tables');
+        // Reload table metadata — API returns { tables: [...] }
+        const metaRes = await api.get<{ tables: TableInfo[] }>('/api/tables');
         if (metaRes.ok) {
-          const info = metaRes.data.find(t => t.name === state.tableInfo!.name);
+          const tables = metaRes.data.tables || [];
+          const info = tables.find(t => t.name === state.tableInfo!.name);
           if (info) {
             set(s => {
               s.tableInfo = info;
@@ -507,6 +569,61 @@ export const useTableStore = create<TableStore>()(
           s.designErrors = [{ message: typeof res.data === 'string' ? res.data : 'Create failed' }];
         });
       }
+    },
+
+    // --------------------------------------------------------
+    // Sort / filter
+    // --------------------------------------------------------
+    sortBy(col, dir) {
+      set(s => { s.sortColumn = col; s.sortDirection = dir; s.activeFilterColumn = null; });
+      get().refreshTableData();
+    },
+
+    setFilter(col, excludedValues) {
+      set(s => {
+        if (excludedValues.length === 0) {
+          delete s.filters[col];
+        } else {
+          s.filters[col] = excludedValues;
+        }
+        s.activeFilterColumn = null;
+      });
+    },
+
+    clearFilter(col) {
+      set(s => {
+        if (col) {
+          delete s.filters[col];
+        } else {
+          s.filters = {};
+        }
+      });
+    },
+
+    setActiveFilterColumn(col) {
+      set(s => { s.activeFilterColumn = col; });
+    },
+
+    getFilteredRecords() {
+      const state = get();
+      const { records, filters } = state;
+      const filterCols = Object.keys(filters);
+      if (filterCols.length === 0) return records;
+      return records.filter(rec => {
+        for (const col of filterCols) {
+          const excluded = filters[col];
+          const val = rec[col];
+          // Normalize: null/undefined/'' all treated as blank
+          const normalized = (val == null || val === '') ? null : val;
+          if (excluded.some(ex => {
+            const exNorm = (ex == null || ex === '') ? null : ex;
+            return exNorm === null ? normalized === null : String(exNorm) === String(normalized);
+          })) {
+            return false;
+          }
+        }
+        return true;
+      });
     },
 
     // --------------------------------------------------------

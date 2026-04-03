@@ -28,5 +28,5 @@
     }
   },
   "include": ["src"],
-  "exclude": ["src/generated/forms"]
+  "exclude": ["src/generated/forms", "src/generated/handlers"]
 }

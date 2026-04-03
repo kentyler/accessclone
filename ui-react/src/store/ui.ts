@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import * as api from '@/api/client';
+import { registerFnHandlers } from '@/generated/handlerRegistry';
 import type {
   Database, TableInfo, ColumnInfo, QueryInfo, FormListItem, ReportListItem,
   ModuleListItem, MacroListItem, SqlFunctionInfo, TabDescriptor,
@@ -336,6 +337,13 @@ export const useUiStore = create<UiStore>()(
         wrap(() => get().loadMacros()),
         wrap(() => get().loadSqlFunctions()),
       ]);
+
+      // Register fn.* handlers for cross-module function dispatch
+      const dbId = get().currentDatabase?.database_id;
+      if (dbId) {
+        const count = registerFnHandlers(dbId);
+        if (count > 0) console.log(`Registered ${count} fn.* handlers for ${dbId}`);
+      }
     },
 
     // Match CLJS: body.tables is array of objects, add synthetic 1-based id

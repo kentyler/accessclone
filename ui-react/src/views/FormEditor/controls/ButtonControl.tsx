@@ -1,19 +1,11 @@
-import { parseHotkeyText } from '@/lib/utils';
+import { parseHotkeyText, ctrlToKey } from '@/lib/utils';
 import { useFormStore } from '@/store/form';
+import { executeHandler } from '@/lib/runtime';
 import type { Control } from '@/api/types';
 
 interface Props {
   ctrl: Control;
   tabIdx?: number;
-}
-
-function runJsHandler(jsCode: string, contextLabel: string) {
-  try {
-    const f = new Function(jsCode);
-    f.call(null);
-  } catch (e: unknown) {
-    console.warn('Error in event handler', contextLabel, ':', (e as Error).message);
-  }
 }
 
 export default function ButtonControl({ ctrl, tabIdx }: Props) {
@@ -25,10 +17,10 @@ export default function ButtonControl({ ctrl, tabIdx }: Props) {
     const projection = useFormStore.getState().projection;
     if (!projection) return;
     const handlers = projection.eventHandlers || {};
-    const key = `${ctrlName}::on-click`;
+    const key = `${ctrlToKey(ctrlName)}.on-click`;
     const handler = handlers[key];
     if (handler?.js) {
-      runJsHandler(handler.js, ctrlName);
+      executeHandler(handler.js, ctrlName);
     } else {
       console.warn('No handler found for button:', ctrlName);
     }

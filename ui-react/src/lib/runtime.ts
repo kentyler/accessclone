@@ -206,10 +206,170 @@ function nz(value: unknown, defaultVal?: unknown): unknown {
   return value ?? defaultVal ?? '';
 }
 
+// ============================================================
+// TempVars — session-global variables (Access TempVars collection)
+// ============================================================
+
+const tempVars = new Map<string, unknown>();
+
+function getTempVar(name: string): unknown {
+  return tempVars.get(name) ?? null;
+}
+
+function setTempVar(name: string, value: unknown): void {
+  tempVars.set(name, value);
+}
+
+function removeTempVar(name: string): void {
+  tempVars.delete(name);
+}
+
+function removeAllTempVars(): void {
+  tempVars.clear();
+}
+
+function setFocus(controlName: string) {
+  // Try to find and focus the control element
+  const key = ctrlToKey(controlName);
+  const el = document.querySelector(`[data-control="${key}"] input, [data-control="${key}"] select, [data-control="${key}"] textarea`) as HTMLElement;
+  if (el) {
+    el.focus();
+  } else {
+    console.warn(`AC.setFocus: control "${controlName}" not found`);
+  }
+}
+
+function requeryControl(controlName: string) {
+  // Stub — future: refresh combo/listbox data source
+  console.warn(`AC.requeryControl("${controlName}"): stub — not yet implemented`);
+}
+
+function undo() {
+  // Stub — future: reload current record to discard changes
+  console.warn('AC.undo: stub — not yet implemented');
+}
+
+function setRecordSource(source: string) {
+  // Stub — future: change form's record source and reload data
+  console.warn(`AC.setRecordSource("${source}"): stub — not yet implemented`);
+}
+
+function setFormCaption(text: string) {
+  // Stub — future: update form title bar
+  console.warn(`AC.setFormCaption("${text}"): stub — not yet implemented`);
+}
+
+function setFilter(expr: string) {
+  // Stub — future: apply filter expression to form data
+  console.warn(`AC.setFilter("${expr}"): stub — not yet implemented`);
+}
+
+function setFilterOn(on: boolean) {
+  // Stub — future: toggle filter on/off
+  console.warn(`AC.setFilterOn(${on}): stub — not yet implemented`);
+}
+
 function runSQL(sql: string) {
   api.post('/api/queries/execute', { sql }).catch(err => {
     console.warn('AC.runSQL failed:', err);
   });
+}
+
+// ============================================================
+// Domain aggregate functions (DCount, DLookup, DMin, DMax, DSum)
+// ============================================================
+
+async function dCount(expr: string, domain: string, criteria?: string): Promise<number> {
+  const col = expr === '*' ? '*' : `"${expr}"`;
+  const sql = `SELECT COUNT(${col}) as result FROM ${domain}${criteria ? ' WHERE ' + criteria : ''}`;
+  const res = await api.post<{ data: Record<string, unknown>[] }>('/api/queries/run', { sql });
+  if (res.ok && res.data?.data?.[0]) return Number(res.data.data[0].result) || 0;
+  return 0;
+}
+
+async function dLookup(expr: string, domain: string, criteria?: string): Promise<unknown> {
+  const sql = `SELECT ${expr} as result FROM ${domain}${criteria ? ' WHERE ' + criteria : ''} LIMIT 1`;
+  const res = await api.post<{ data: Record<string, unknown>[] }>('/api/queries/run', { sql });
+  if (res.ok && res.data?.data?.[0]) return res.data.data[0].result;
+  return null;
+}
+
+async function dMin(expr: string, domain: string, criteria?: string): Promise<unknown> {
+  const sql = `SELECT MIN("${expr}") as result FROM ${domain}${criteria ? ' WHERE ' + criteria : ''}`;
+  const res = await api.post<{ data: Record<string, unknown>[] }>('/api/queries/run', { sql });
+  if (res.ok && res.data?.data?.[0]) return res.data.data[0].result;
+  return null;
+}
+
+async function dMax(expr: string, domain: string, criteria?: string): Promise<unknown> {
+  const sql = `SELECT MAX("${expr}") as result FROM ${domain}${criteria ? ' WHERE ' + criteria : ''}`;
+  const res = await api.post<{ data: Record<string, unknown>[] }>('/api/queries/run', { sql });
+  if (res.ok && res.data?.data?.[0]) return res.data.data[0].result;
+  return null;
+}
+
+async function dSum(expr: string, domain: string, criteria?: string): Promise<number> {
+  const sql = `SELECT SUM("${expr}") as result FROM ${domain}${criteria ? ' WHERE ' + criteria : ''}`;
+  const res = await api.post<{ data: Record<string, unknown>[] }>('/api/queries/run', { sql });
+  if (res.ok && res.data?.data?.[0]) return Number(res.data.data[0].result) || 0;
+  return 0;
+}
+
+// ============================================================
+// Cross-module function dispatch (fn.* handlers)
+// ============================================================
+
+/**
+ * Registry of fn.* handler code loaded from modules.
+ * Populated by the handler loading system; keyed by procedure name (case-insensitive).
+ */
+const fnHandlerRegistry = new Map<string, string>();
+
+/**
+ * Register a fn.* handler's JS code for cross-module dispatch.
+ */
+function registerFnHandler(name: string, jsCode: string): void {
+  fnHandlerRegistry.set(name.toLowerCase(), jsCode);
+}
+
+/**
+ * Call a registered fn.* handler by name.
+ * Generated JS emits `await AC.callFn("FuncName", arg1, arg2)`.
+ * Arguments are passed as local variables $0, $1, etc. within the handler body.
+ */
+async function callFn(name: string, ...args: unknown[]): Promise<unknown> {
+  const jsCode = fnHandlerRegistry.get(name.toLowerCase());
+  if (!jsCode) {
+    console.warn(`AC.callFn: function "${name}" not registered`);
+    return null;
+  }
+  try {
+    // Build argument bindings: let $0 = args[0]; let $1 = args[1]; ...
+    const argBindings = args.map((_, i) => `let $${i} = arguments[${i + 1}];`).join('\n');
+    const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+    const fn = new AsyncFunction('name', ...args.map((_, i) => `_arg${i}`), argBindings + '\n' + jsCode);
+    return await fn.call(null, name, ...args);
+  } catch (e) {
+    console.warn(`AC.callFn("${name}") failed:`, e);
+    return null;
+  }
+}
+
+// ============================================================
+// Async handler execution
+// ============================================================
+
+/**
+ * Execute a JS handler string using AsyncFunction so `await` works inside.
+ */
+export function executeHandler(jsCode: string, label: string) {
+  try {
+    const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+    const fn = new AsyncFunction(jsCode);
+    fn.call(null);
+  } catch (e) {
+    console.warn(`Handler ${label} failed:`, e);
+  }
 }
 
 /**
@@ -228,6 +388,13 @@ export function installRuntime() {
     setValue,
     setSubformSource,
     runSQL,
+    setFocus,
+    requeryControl,
+    undo,
+    setRecordSource,
+    setFormCaption,
+    setFilter,
+    setFilterOn,
     getValue,
     getVisible,
     getEnabled,
@@ -235,5 +402,16 @@ export function installRuntime() {
     isNewRecord,
     getOpenArgs,
     nz,
+    dCount,
+    dLookup,
+    dMin,
+    dMax,
+    dSum,
+    getTempVar,
+    setTempVar,
+    removeTempVar,
+    removeAllTempVars,
+    callFn,
+    registerFnHandler,
   };
 }

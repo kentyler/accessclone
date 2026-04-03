@@ -287,8 +287,10 @@ export interface ModuleDetail {
 }
 
 export interface HandlerEntry {
+  key?: string;
   event: string;
   control?: string;
+  procedure?: string;
   js?: string;
   confidence?: string;
   notes?: string;

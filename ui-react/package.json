@@ -11,7 +11,15 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.10.3",
+    "@codemirror/lang-javascript": "^6.2.5",
+    "@codemirror/lang-sql": "^6.10.0",
+    "@codemirror/language": "^6.12.3",
+    "@codemirror/legacy-modes": "^6.5.2",
+    "@codemirror/state": "^6.6.0",
+    "@codemirror/view": "^6.41.0",
     "@types/cytoscape": "^3.21.9",
+    "codemirror": "^6.0.2",
     "cytoscape": "^3.33.1",
     "immer": "^10.1.1",
     "react": "^18.3.1",

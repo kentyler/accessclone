@@ -6,6 +6,38 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 
 ## Current State
 
+### Just Shipped (2026-04-02)
+
+**EVENT**: vba-to-js-parser-step3-builtins-returns
+
+**EXPRESSION** (what changed):
+- **VBA_BUILTINS Map** (40+ entries) in `translateExpression`: Replace, Left/Left$/Right/Right$, Mid/Mid$, Len, InStr, Split, Trim variants, LCase/UCase, CStr/CInt/CLng/CDbl/CBool, UBound/LBound, IsArray, Abs/Int/Fix, Chr/Asc, Space, String, Nz. Checked before fnRegistry.
+- **Function return values**: VBA `FuncName = expr` → `return expr;`. `funcName` parameter threaded through translateBlock → parseIfBlock → parseSelectCaseBlock → parseForLoop. Functions pass `proc.name`, Subs pass `null`.
+- **parseFunctionCall regex fix**: `\w+\$?` handles typed-string functions (Left$, Mid$, Trim$).
+- **Set prefix handling**: `Set x = expr` → strip Set, treat as assignment. Was silently dropped.
+- **Const declarations**: `Const X As String = "&"` → `const X = "&";` with variable tracking.
+- **Dim adds to assignedVars**: VBA initializes Dim'd variables to defaults → "known" for expression resolution.
+- **Nz nested paren fix**: `Nz(DLookup(...), "")` was broken by regex. Now uses `parseFunctionCall` for proper nesting.
+- **For loop expression bounds**: `For n = 0 To UBound(arr)` → non-numeric bounds via translateExpression.
+- **translateAssignmentRHS fallback unconditional**: Removed `if (fnRegistry)` guard.
+- Translation rate: 52.7% (1124 code / 1007 comment). 63 handler files, 362 entries, 123 AC.callFn, 48 returns.
+- Build: `npx vite build` clean. 250 VBA parser tests + 726 total server tests pass.
+
+**Files changed**:
+- `server/lib/vba-to-js.js` — VBA_BUILTINS Map, funcName threading, Set/Const/Dim handling, parseFunctionCall regex, For expression bounds, Nz fix
+- `server/__tests__/vba-to-js.test.js` — 37 new tests (213→250): builtins, function returns, Const, Set, Nz nesting, For expression bounds
+
+**CORONA** (what it is of):
+Engagement surface: **event-runtime** — expanding deterministic VBA→JS parser coverage. The parser is the core mechanism that makes imported Access apps actually *do something* at runtime. 52.7% means roughly half the VBA codebase translates to executable JS. Remaining 47% is mostly: Do/While loops, For Each, With blocks, collection method calls, error handling, complex multi-line expressions.
+
+**WHAT TO VERIFY NEXT SESSION**:
+- Run `node server/scripts/regen-js-handlers.js northwind_18` — should produce 63 files, ~52.7% rate
+- Spot-check modStrings handlers — GetString should have `AC.nz(await AC.dLookup(...))`, StringFormat should have `return s;`
+- `npm test` — 726+ server tests should pass
+- Consider next parser expansion targets: Do/While loops, For Each, With blocks
+
+---
+
 ### Just Shipped (2026-04-01, evening session)
 
 **EVENT**: query-viewer-3-views

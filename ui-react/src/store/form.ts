@@ -5,6 +5,9 @@ import type {
   FormDefinition, Control, Section, Projection, RowSourceData,
   ColumnInfo, ContextMenuState, RecordPosition, HandlerEntry,
 } from '@/api/types';
+import { getFileHandlers } from '@/generated/handlerRegistry';
+import { executeHandler } from '@/lib/runtime';
+import { useUiStore } from '@/store/ui';
 
 // ============================================================
 // Subform cache entry
@@ -671,11 +674,7 @@ export const useFormStore = create<FormStore>()(
       if (!handlers) return;
       const handler = handlers[eventKey];
       if (handler?.js) {
-        try {
-          new Function(handler.js)();
-        } catch (err) {
-          console.warn(`Event handler ${eventKey} failed:`, err);
-        }
+        executeHandler(handler.js, eventKey);
       } else {
         console.warn(`No JS handler for event: ${eventKey}`);
       }
@@ -683,12 +682,35 @@ export const useFormStore = create<FormStore>()(
 
     async loadEventHandlers(formName) {
       const safeName = formName.replace(/\s+/g, '_');
-      const res = await api.get<Record<string, HandlerEntry>>(`/api/modules/Form_${encodeURIComponent(safeName)}/handlers`);
+      const moduleName = `Form_${safeName}`;
+      const databaseId = useUiStore.getState().currentDatabase?.database_id;
+
+      // Try file registry first (synchronous, no API call)
+      if (databaseId) {
+        const fileHandlers = getFileHandlers(databaseId, moduleName);
+        if (fileHandlers) {
+          set(s => {
+            if (s.projection) s.projection.eventHandlers = fileHandlers;
+          });
+          return;
+        }
+      }
+
+      // Fallback: API — convert array to Record if needed
+      const res = await api.get<HandlerEntry[] | Record<string, HandlerEntry>>(`/api/modules/${encodeURIComponent(moduleName)}/handlers`);
       if (res.ok && res.data) {
-        set(s => {
-          if (s.projection) {
-            s.projection.eventHandlers = res.data;
+        let handlers: Record<string, HandlerEntry>;
+        if (Array.isArray(res.data)) {
+          handlers = {};
+          for (const h of res.data) {
+            const k = (h as Record<string, unknown>).key as string;
+            if (k) handlers[k] = h;
           }
+        } else {
+          handlers = res.data;
+        }
+        set(s => {
+          if (s.projection) s.projection.eventHandlers = handlers;
         });
       }
     },

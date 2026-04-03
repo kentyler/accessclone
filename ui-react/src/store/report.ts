@@ -4,6 +4,9 @@ import * as api from '@/api/client';
 import type {
   ReportDefinition, Section, ColumnInfo, HandlerEntry,
 } from '@/api/types';
+import { getFileHandlers } from '@/generated/handlerRegistry';
+import { executeHandler } from '@/lib/runtime';
+import { useUiStore } from '@/store/ui';
 
 // ============================================================
 // State
@@ -274,20 +277,39 @@ export const useReportStore = create<ReportStore>()(
     // Events
     // --------------------------------------------------------
     async loadEventHandlers(reportName) {
-      const res = await api.get<Record<string, HandlerEntry>>(`/api/modules/Report_${encodeURIComponent(reportName)}/handlers`);
+      const moduleName = `Report_${reportName}`;
+      const databaseId = useUiStore.getState().currentDatabase?.database_id;
+
+      // Try file registry first (synchronous, no API call)
+      if (databaseId) {
+        const fileHandlers = getFileHandlers(databaseId, moduleName);
+        if (fileHandlers) {
+          set(s => { s.eventHandlers = fileHandlers; });
+          return;
+        }
+      }
+
+      // Fallback: API — convert array to Record if needed
+      const res = await api.get<HandlerEntry[] | Record<string, HandlerEntry>>(`/api/modules/${encodeURIComponent(moduleName)}/handlers`);
       if (res.ok && res.data) {
-        set(s => { s.eventHandlers = res.data; });
+        let handlers: Record<string, HandlerEntry>;
+        if (Array.isArray(res.data)) {
+          handlers = {};
+          for (const h of res.data) {
+            const k = (h as Record<string, unknown>).key as string;
+            if (k) handlers[k] = h;
+          }
+        } else {
+          handlers = res.data;
+        }
+        set(s => { s.eventHandlers = handlers; });
       }
     },
 
     fireReportEvent(eventKey) {
       const handler = get().eventHandlers[eventKey];
       if (handler?.js) {
-        try {
-          new Function(handler.js)();
-        } catch (err) {
-          console.warn(`Report event ${eventKey} failed:`, err);
-        }
+        executeHandler(handler.js, eventKey);
       }
     },
 

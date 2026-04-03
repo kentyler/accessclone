@@ -3453,6 +3453,9 @@ header.header {
   display: flex;
   flex-direction: column;
   background: white;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
 }
 
 .module-toolbar {
@@ -3670,6 +3673,120 @@ header.header {
   font-style: italic;
 }
 
+/* Module split layout (VBA left, JS right) */
+.module-split {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.module-split .module-vba-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid var(--gray-300);
+  max-height: none;
+  border-bottom: none;
+}
+
+.module-split .module-js-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.module-js-panel .panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.375rem 1rem;
+  font-weight: 500;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--gray-500);
+  background: var(--gray-100);
+  border-bottom: 1px solid var(--gray-200);
+  flex-shrink: 0;
+}
+
+.handlers-list {
+  flex: 1;
+  overflow: auto;
+  padding: 0.5rem;
+}
+
+.handler-entry {
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--gray-200);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.handler-key {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  background: var(--gray-50);
+  border-bottom: 1px solid var(--gray-200);
+  font-size: 0.8125rem;
+}
+
+.handler-event {
+  font-weight: 600;
+  color: var(--gray-700);
+}
+
+.handler-control {
+  color: var(--gray-500);
+  font-size: 0.75rem;
+}
+
+.handler-notes {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.75rem;
+  color: var(--gray-500);
+  background: var(--gray-50);
+  border-top: 1px solid var(--gray-200);
+}
+
+.confidence-badge {
+  font-size: 0.6875rem;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+.confidence-badge.high { background: #dcfce7; color: #166534; }
+.confidence-badge.medium { background: #fef9c3; color: #854d0e; }
+.confidence-badge.low { background: #fee2e2; color: #991b1b; }
+
+.empty-panel {
+  padding: 2rem;
+  text-align: center;
+  color: var(--gray-400);
+  font-style: italic;
+}
+
+/* CodeMirror panel sizing */
+.cm-panel {
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.cm-panel .cm-editor {
+  height: 100%;
+}
+
+.cm-handler-js .cm-editor {
+  height: auto;
+  max-height: 300px;
+}
+
 /* Intent Summary Panel */
 .intent-summary-panel {
   border: 1px solid var(--gray-200);
@@ -3784,6 +3901,107 @@ header.header {
 .badge-llm { background: #fff8e1; color: #f57f17; }
 .badge-gap { background: #ffebee; color: #c62828; }
 .badge-unknown { background: var(--gray-200); color: var(--gray-600); }
+
+/* Module two-tab layout */
+.module-tabs {
+  display: flex;
+  gap: 0;
+  background: var(--gray-100);
+  border-bottom: 1px solid var(--gray-300);
+  flex-shrink: 0;
+}
+
+.module-tabs .tab-btn {
+  padding: 0.5rem 1rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--gray-500);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+
+.module-tabs .tab-btn:hover {
+  color: var(--gray-700);
+  background: var(--gray-50);
+}
+
+.module-tabs .tab-btn.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+  background: white;
+}
+
+.module-handler-file-tab {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.handler-file-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 0.375rem 0.75rem;
+  background: var(--gray-50);
+  border-bottom: 1px solid var(--gray-200);
+  flex-shrink: 0;
+}
+
+.handler-file-toolbar .dirty-hint {
+  font-size: 0.75rem;
+  color: var(--warning-600, #d97706);
+  font-style: italic;
+}
+
+.handler-file-toolbar .btn-save {
+  padding: 0.25rem 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  background: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.handler-file-toolbar .btn-save:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
+.handler-file-toolbar .btn-save:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.handler-file-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 1rem;
+  color: var(--gray-400);
+  font-style: italic;
+}
+
+.handler-file-empty .btn-create {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  background: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.handler-file-empty .btn-create:hover {
+  background: var(--primary-hover);
+}
 
 .intent-detail {
   color: var(--gray-500);

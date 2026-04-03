@@ -1,7 +1,9 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useUiStore } from '@/store/ui';
 import * as api from '@/api/client';
 import { filenameToDisplayName } from '@/lib/utils';
+import CodeEditor from '@/components/CodeEditor';
+import { vbaLanguage, javascript, typescriptLanguage } from '@/lib/cm-languages';
 
 // ============================================================
 // Types
@@ -56,6 +58,28 @@ const STATUS_OPTIONS = [
   ['needs-review', 'Needs Review'],
   ['complete', 'Complete'],
 ] as const;
+
+const HANDLER_FILE_TEMPLATE = (moduleName: string, databaseId: string) =>
+`// Handler file for ${moduleName} | Database: ${databaseId}
+// Edit this file to customize event handler behavior.
+
+import type { HandlerMap } from '../../types';
+
+export const handlers: HandlerMap = {
+  // Add handlers here, e.g.:
+  // "form.on-load": {
+  //   key: "form.on-load",
+  //   control: "form",
+  //   event: "on-load",
+  //   procedure: "Form_Load",
+  //   js: "AC.openForm('MyForm');"
+  // },
+};
+
+export default handlers;
+`;
+
+type ModuleTab = 'handlers' | 'vba-translation';
 
 // ============================================================
 // Sub-components
@@ -166,11 +190,43 @@ export default function ModuleViewer({ moduleName }: Props) {
   const [extracting, setExtracting] = useState(false);
   const [intentsData, setIntentsData] = useState<IntentsData | null>(null);
 
+  // Two-tab state
+  const [activeTab, setActiveTab] = useState<ModuleTab>('handlers');
+  const [handlerFileContent, setHandlerFileContent] = useState<string | null>(null);
+  const [handlerFileExists, setHandlerFileExists] = useState(false);
+  const [handlerFileDirty, setHandlerFileDirty] = useState(false);
+  const [handlerFileSaving, setHandlerFileSaving] = useState(false);
+
   useEffect(() => {
     const mod = objects.modules.find(m => m.name === moduleName);
     if (mod) loadModuleForViewing(mod);
     setIntentsData(null);
+    setHandlerFileContent(null);
+    setHandlerFileExists(false);
+    setHandlerFileDirty(false);
   }, [moduleName]);
+
+  // Fetch handler file when module changes
+  useEffect(() => {
+    if (!moduleInfo?.name) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.get<{ exists: boolean; content: string | null }>(
+          `/api/modules/${encodeURIComponent(moduleInfo.name)}/handler-file`
+        );
+        if (cancelled) return;
+        if (res.ok && res.data) {
+          setHandlerFileExists(res.data.exists);
+          setHandlerFileContent(res.data.content);
+          setHandlerFileDirty(false);
+        }
+      } catch {
+        // non-fatal
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [moduleInfo?.name]);
 
   const handleStatusChange = useCallback(async (newStatus: string) => {
     if (!moduleInfo) return;
@@ -204,6 +260,38 @@ export default function ModuleViewer({ moduleName }: Props) {
       setExtracting(false);
     }
   }, [moduleInfo, objects, currentDatabase]);
+
+  const handleHandlerContentChange = useCallback((newContent: string) => {
+    setHandlerFileContent(newContent);
+    setHandlerFileDirty(true);
+  }, []);
+
+  const handleSaveHandlerFile = useCallback(async () => {
+    if (!moduleInfo?.name || handlerFileContent == null) return;
+    setHandlerFileSaving(true);
+    try {
+      const res = await api.put(`/api/modules/${encodeURIComponent(moduleInfo.name)}/handler-file`, {
+        content: handlerFileContent,
+      });
+      if (res.ok) {
+        setHandlerFileDirty(false);
+        setHandlerFileExists(true);
+      }
+    } finally {
+      setHandlerFileSaving(false);
+    }
+  }, [moduleInfo, handlerFileContent]);
+
+  const handleCreateHandlerFile = useCallback(() => {
+    if (!moduleInfo?.name || !currentDatabase?.database_id) return;
+    setHandlerFileContent(HANDLER_FILE_TEMPLATE(moduleInfo.name, currentDatabase.database_id));
+    setHandlerFileDirty(true);
+    setHandlerFileExists(false); // not yet on disk
+  }, [moduleInfo, currentDatabase]);
+
+  const vbaExtensions = useMemo(() => [vbaLanguage], []);
+  const jsExtensions = useMemo(() => [javascript()], []);
+  const tsExtensions = useMemo(() => [typescriptLanguage()], []);
 
   if (loading) return <div className="loading-indicator">Loading module...</div>;
   if (!moduleInfo) return <div className="empty-viewer">Module not found</div>;
@@ -256,52 +344,122 @@ export default function ModuleViewer({ moduleName }: Props) {
         </div>
       </div>
 
-      {/* Intent summary (if extracted) */}
-      {intentsData && <IntentSummaryPanel intentsData={intentsData} />}
+      {/* Tab bar */}
+      <div className="module-tabs">
+        <button
+          className={`tab-btn ${activeTab === 'handlers' ? 'active' : ''}`}
+          onClick={() => setActiveTab('handlers')}
+        >
+          JS Handlers{handlerFileDirty ? '*' : ''}
+        </button>
+        <button
+          className={`tab-btn ${activeTab === 'vba-translation' ? 'active' : ''}`}
+          onClick={() => setActiveTab('vba-translation')}
+        >
+          VBA / Translation
+        </button>
+      </div>
 
-      {/* Split view: VBA + JS handlers */}
-      <div className="module-split">
-        <div className="module-vba-panel">
-          <div className="panel-header">
-            <span>VBA Source</span>
-            {moduleInfo.vba_source && (
-              <div className="panel-actions">
+      {/* Tab 1: Handler file editor */}
+      {activeTab === 'handlers' && (
+        <div className="module-handler-file-tab">
+          {handlerFileContent != null ? (
+            <>
+              <div className="handler-file-toolbar">
+                {handlerFileDirty && <span className="dirty-hint">Unsaved changes</span>}
                 <button
-                  className="btn-primary btn-sm"
-                  onClick={handleExtractIntents}
-                  disabled={extracting}
+                  className="btn-save"
+                  disabled={!handlerFileDirty || handlerFileSaving}
+                  onClick={handleSaveHandlerFile}
                 >
-                  {extracting ? 'Extracting...' : 'Extract Intents'}
+                  {handlerFileSaving ? 'Saving...' : 'Save'}
                 </button>
               </div>
-            )}
-          </div>
-          <pre className="vba-source">{moduleInfo.vba_source || '(no VBA source)'}</pre>
-        </div>
-
-        <div className="module-js-panel">
-          <div className="panel-header">JS Handlers</div>
-          {moduleInfo.js_handlers && Object.keys(moduleInfo.js_handlers).length > 0 ? (
-            <div className="handlers-list">
-              {Object.entries(moduleInfo.js_handlers).map(([key, handler]) => (
-                <div key={key} className="handler-entry">
-                  <div className="handler-key">
-                    <span className="handler-event">{handler.event}</span>
-                    {handler.control && <span className="handler-control">{handler.control}</span>}
-                    {handler.confidence && (
-                      <span className={`confidence-badge ${handler.confidence}`}>{handler.confidence}</span>
-                    )}
-                  </div>
-                  {handler.js && <pre className="handler-js">{handler.js}</pre>}
-                  {handler.notes && <div className="handler-notes">{handler.notes}</div>}
-                </div>
-              ))}
-            </div>
+              <CodeEditor
+                value={handlerFileContent}
+                onChange={handleHandlerContentChange}
+                extensions={tsExtensions}
+                readOnly={false}
+                height="100%"
+                className="cm-panel"
+              />
+            </>
           ) : (
-            <div className="empty-panel">No JS handlers generated</div>
+            <div className="handler-file-empty">
+              <span>No handler file exists for this module.</span>
+              <button className="btn-create" onClick={handleCreateHandlerFile}>
+                Create Handler File
+              </button>
+            </div>
           )}
         </div>
-      </div>
+      )}
+
+      {/* Tab 2: VBA / Translation (original split view) */}
+      {activeTab === 'vba-translation' && (
+        <>
+          {intentsData && <IntentSummaryPanel intentsData={intentsData} />}
+          <div className="module-split">
+            <div className="module-vba-panel">
+              <div className="panel-header">
+                <span>VBA Source</span>
+                {moduleInfo.vba_source && (
+                  <div className="panel-actions">
+                    <button
+                      className="btn-primary btn-sm"
+                      onClick={handleExtractIntents}
+                      disabled={extracting}
+                    >
+                      {extracting ? 'Extracting...' : 'Extract Intents'}
+                    </button>
+                  </div>
+                )}
+              </div>
+              {moduleInfo.vba_source ? (
+                <CodeEditor
+                  value={moduleInfo.vba_source}
+                  extensions={vbaExtensions}
+                  readOnly
+                  height="100%"
+                  className="cm-panel"
+                />
+              ) : (
+                <div className="empty-panel">No VBA source</div>
+              )}
+            </div>
+
+            <div className="module-js-panel">
+              <div className="panel-header">JS Handlers</div>
+              {moduleInfo.js_handlers && Object.keys(moduleInfo.js_handlers).length > 0 ? (
+                <div className="handlers-list">
+                  {Object.entries(moduleInfo.js_handlers).map(([key, handler]) => (
+                    <div key={key} className="handler-entry">
+                      <div className="handler-key">
+                        <span className="handler-event">{handler.event}</span>
+                        {handler.control && <span className="handler-control">{handler.control}</span>}
+                        {handler.confidence && (
+                          <span className={`confidence-badge ${handler.confidence}`}>{handler.confidence}</span>
+                        )}
+                      </div>
+                      {handler.js && (
+                        <CodeEditor
+                          value={handler.js}
+                          extensions={jsExtensions}
+                          readOnly
+                          className="cm-panel cm-handler-js"
+                        />
+                      )}
+                      {handler.notes && <div className="handler-notes">{handler.notes}</div>}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty-panel">No JS handlers generated</div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
 
       {moduleInfo.description && (
         <div className="module-description">

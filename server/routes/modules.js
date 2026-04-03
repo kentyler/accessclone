@@ -9,7 +9,8 @@ const express = require('express');
 const router = express.Router();
 const { logEvent, logError } = require('../lib/events');
 const { extractReactions, toKw } = require('../lib/reactions-extractor');
-const { parseVbaToHandlers } = require('../lib/vba-to-js');
+const { parseVbaToHandlers, collectEnumValues } = require('../lib/vba-to-js');
+const { writeHandlerFile, deleteHandlerFile, readHandlerFile, writeHandlerFileRaw } = require('../lib/handler-gen/writer');
 
 function createRouter(pool) {
   /**
@@ -36,6 +37,61 @@ function createRouter(pool) {
       console.error('Error listing modules:', err);
       logError(pool, 'GET /api/modules', 'Failed to list modules', err, { databaseId: req.databaseId });
       res.status(500).json({ error: 'Failed to list modules' });
+    }
+  });
+
+  /**
+   * POST /api/modules/regenerate-handler-files
+   * Re-parse all modules with VBA source and write handler files to disk.
+   * For one-time migration of existing databases.
+   */
+  router.post('/regenerate-handler-files', async (req, res) => {
+    const databaseId = req.databaseId;
+    try {
+      const result = await pool.query(
+        `SELECT name, definition->>'vba_source' as vba_source
+         FROM shared.objects
+         WHERE database_id = $1 AND type = 'module' AND is_current = true
+           AND definition->>'vba_source' IS NOT NULL`,
+        [databaseId]
+      );
+
+      // Build combined enum map from all modules
+      const enumMap = new Map();
+      for (const row of result.rows) {
+        const moduleEnums = collectEnumValues(row.vba_source);
+        for (const [k, v] of moduleEnums) enumMap.set(k, v);
+      }
+
+      let written = 0;
+      let skipped = 0;
+      const errors = [];
+
+      for (const row of result.rows) {
+        try {
+          const parsed = parseVbaToHandlers(row.vba_source, row.name, enumMap);
+          if (parsed && parsed.length > 0) {
+            writeHandlerFile(databaseId, row.name, parsed);
+            written++;
+          } else {
+            skipped++;
+          }
+        } catch (e) {
+          errors.push({ module: row.name, error: e.message });
+        }
+      }
+
+      res.json({
+        success: true,
+        database_id: databaseId,
+        total: result.rows.length,
+        written,
+        skipped,
+        errors
+      });
+    } catch (err) {
+      logError(pool, 'POST /api/modules/regenerate-handler-files', 'Failed to regenerate handler files', err, { databaseId });
+      res.status(500).json({ error: 'Failed to regenerate handler files' });
     }
   });
 
@@ -274,6 +330,45 @@ function createRouter(pool) {
   });
 
   /**
+   * GET /api/modules/:name/handler-file
+   * Read the generated handler .ts file from disk
+   */
+  router.get('/:name/handler-file', async (req, res) => {
+    try {
+      const databaseId = req.databaseId;
+      const moduleName = req.params.name;
+      const result = readHandlerFile(databaseId, moduleName);
+      if (!result) {
+        return res.json({ exists: false, content: null });
+      }
+      res.json({ exists: true, content: result.content });
+    } catch (err) {
+      logError(pool, 'GET /api/modules/:name/handler-file', 'Failed to read handler file', err, { databaseId: req.databaseId });
+      res.status(500).json({ error: 'Failed to read handler file' });
+    }
+  });
+
+  /**
+   * PUT /api/modules/:name/handler-file
+   * Write raw content to the handler .ts file on disk
+   */
+  router.put('/:name/handler-file', async (req, res) => {
+    try {
+      const databaseId = req.databaseId;
+      const moduleName = req.params.name;
+      const { content } = req.body;
+      if (typeof content !== 'string') {
+        return res.status(400).json({ error: 'content must be a string' });
+      }
+      const { relativePath } = writeHandlerFileRaw(databaseId, moduleName, content);
+      res.json({ success: true, relativePath });
+    } catch (err) {
+      logError(pool, 'PUT /api/modules/:name/handler-file', 'Failed to write handler file', err, { databaseId: req.databaseId });
+      res.status(500).json({ error: 'Failed to write handler file' });
+    }
+  });
+
+  /**
    * GET /api/modules/:name
    * Read the current version of a module
    * Returns a flat object with vba_source, js_handlers, etc. extracted from definition JSONB
@@ -361,7 +456,24 @@ function createRouter(pool) {
       let finalJsHandlers = js_handlers !== undefined ? js_handlers : (prevDef.js_handlers || null);
       if (vba_source !== undefined && vba_source) {
         try {
-          const parsed = parseVbaToHandlers(vba_source, moduleName);
+          // Build enum map from all modules for cross-module enum resolution
+          const enumResult = await client.query(
+            `SELECT definition->>'vba_source' as vba_source
+             FROM shared.objects
+             WHERE database_id = $1 AND type = 'module' AND is_current = true
+               AND definition->>'vba_source' IS NOT NULL`,
+            [databaseId]
+          );
+          const enumMap = new Map();
+          for (const r of enumResult.rows) {
+            const moduleEnums = collectEnumValues(r.vba_source);
+            for (const [k, v] of moduleEnums) enumMap.set(k, v);
+          }
+          // Also collect from the new source being saved (may have new enums)
+          const newEnums = collectEnumValues(vba_source);
+          for (const [k, v] of newEnums) enumMap.set(k, v);
+
+          const parsed = parseVbaToHandlers(vba_source, moduleName, enumMap);
           finalJsHandlers = parsed.length > 0 ? parsed : null;
         } catch (e) {
           console.warn('Failed to parse VBA to JS handlers:', e.message);
@@ -403,6 +515,17 @@ function createRouter(pool) {
       }
 
       await client.query('COMMIT');
+
+      // Write handler file to disk (non-fatal)
+      try {
+        if (finalJsHandlers && finalJsHandlers.length > 0) {
+          writeHandlerFile(databaseId, moduleName, finalJsHandlers);
+        } else {
+          deleteHandlerFile(databaseId, moduleName);
+        }
+      } catch (fileErr) {
+        console.warn('Failed to write handler file:', fileErr.message);
+      }
 
       console.log(`Saved module: ${moduleName} v${newVersion} (database: ${databaseId})`);
       res.json({ success: true, name: moduleName, version: newVersion, database_id: databaseId });

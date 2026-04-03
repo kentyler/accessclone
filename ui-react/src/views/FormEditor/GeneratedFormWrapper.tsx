@@ -1,6 +1,7 @@
 import { Suspense, useMemo, useCallback, useEffect, lazy, ComponentType } from 'react';
 import { useFormStore } from '@/store/form';
 import { useUiStore } from '@/store/ui';
+import { ctrlToKey } from '@/lib/utils';
 import FormView from './FormView';
 import type { GeneratedFormProps } from '@/generated/types';
 
@@ -151,7 +152,7 @@ export default function GeneratedFormWrapper() {
 
   // Fire event through the store's event system
   const fireEvent = useCallback((controlName: string, eventKey: string) => {
-    const key = controlName ? `${controlName}::${eventKey}` : eventKey;
+    const key = controlName ? `${ctrlToKey(controlName)}.${eventKey}` : eventKey;
     store.fireFormEvent(key);
   }, []);
 

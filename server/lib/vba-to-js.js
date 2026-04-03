@@ -8,6 +8,382 @@
 
 const { toKw } = require('./reactions-extractor');
 
+/**
+ * Collect enum member values from VBA source.
+ * Parses `Public Enum ... End Enum` blocks and returns a Map of
+ * "EnumName.MemberName" → integer value.
+ * VBA enums auto-increment from 0 unless explicitly assigned.
+ */
+function collectEnumValues(vbaSource) {
+  const enumMap = new Map();
+  if (!vbaSource) return enumMap;
+
+  const lines = vbaSource.split(/\r?\n/);
+  let currentEnum = null;
+  let nextValue = 0;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+
+    // Start of enum block
+    const enumStart = line.match(/^(?:Public\s+|Private\s+)?Enum\s+(\w+)/i);
+    if (enumStart) {
+      currentEnum = enumStart[1];
+      nextValue = 0;
+      continue;
+    }
+
+    // End of enum block
+    if (currentEnum && /^End\s+Enum$/i.test(line)) {
+      currentEnum = null;
+      continue;
+    }
+
+    // Enum member line
+    if (currentEnum) {
+      // Skip comments and blank lines
+      if (!line || line.startsWith("'")) continue;
+
+      // Match: memberName = value  or  memberName (auto-increment)
+      // Strip inline comments first
+      const noComment = line.replace(/'.*$/, '').trim();
+      const assignMatch = noComment.match(/^(\w+)\s*=\s*(-?\d+)/);
+      if (assignMatch) {
+        const val = parseInt(assignMatch[2], 10);
+        enumMap.set(`${currentEnum}.${assignMatch[1]}`, val);
+        enumMap.set(assignMatch[1], val); // bare member name (VBA allows unqualified access)
+        nextValue = val + 1;
+      } else {
+        const nameOnly = noComment.match(/^(\w+)$/);
+        if (nameOnly) {
+          enumMap.set(`${currentEnum}.${nameOnly[1]}`, nextValue);
+          enumMap.set(nameOnly[1], nextValue); // bare member name
+          nextValue++;
+        }
+      }
+    }
+  }
+
+  return enumMap;
+}
+
+/**
+ * Parse a generic VBA function call: FuncName(arg1, arg2, ...)
+ * Returns { name, args: string[], endIdx } or null if not a function call.
+ * Handles nested parens and string literals within arguments.
+ */
+function parseFunctionCall(expr) {
+  const match = expr.match(/^(\w+\$?)\s*\(/);
+  if (!match) return null;
+
+  const name = match[1];
+  const startIdx = match[0].length;
+
+  // Find matching closing paren, tracking nesting and strings
+  let depth = 1;
+  let inString = false;
+  let i = startIdx;
+  for (; i < expr.length && depth > 0; i++) {
+    const ch = expr[i];
+    if (ch === '"') {
+      inString = !inString;
+    } else if (!inString) {
+      if (ch === '(') depth++;
+      else if (ch === ')') depth--;
+    }
+  }
+  if (depth !== 0) return null;
+
+  const argsStr = expr.substring(startIdx, i - 1);
+
+  // Split arguments on commas, respecting strings and parens
+  const args = [];
+  let current = '';
+  depth = 0;
+  inString = false;
+  for (const ch of argsStr) {
+    if (ch === '"') inString = !inString;
+    else if (!inString) {
+      if (ch === '(') depth++;
+      else if (ch === ')') depth--;
+      else if (ch === ',' && depth === 0) {
+        args.push(current.trim());
+        current = '';
+        continue;
+      }
+    }
+    current += ch;
+  }
+  if (current.trim()) args.push(current.trim());
+
+  return { name, args, endIdx: i };
+}
+
+/**
+ * Translate a VBA expression to JS, recursing into function calls (inside-out).
+ * Handles: literals, Me.ctrl, variables, enum values, known function calls,
+ * string concatenation (&), and domain aggregates.
+ *
+ * @param {string} expr - VBA expression
+ * @param {Set<string>} [assignedVars]
+ * @param {Map<string,number>} [enumMap]
+ * @param {Set<string>} [fnRegistry] - Known fn.* procedure names (lowercase)
+ * @returns {string|null} JS expression or null if untranslatable
+ */
+/**
+ * Find the index of the first comma at the top level (outside parens and strings).
+ * Returns -1 if none found.
+ */
+function findTopLevelComma(s) {
+  let depth = 0;
+  let inString = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+    else if (ch === ',' && depth === 0) return i;
+  }
+  return -1;
+}
+
+/**
+ * Split a condition string on a keyword (And/Or), respecting parens and strings.
+ * Returns array of parts or null if keyword not found at top level.
+ */
+function splitOnKeyword(cond, keyword) {
+  const parts = [];
+  let current = '';
+  let depth = 0;
+  let inString = false;
+  const kwLower = keyword.toLowerCase();
+  const kwLen = keyword.length;
+
+  for (let i = 0; i < cond.length; i++) {
+    const ch = cond[i];
+    if (ch === '"') { inString = !inString; current += ch; continue; }
+    if (inString) { current += ch; continue; }
+    if (ch === '(') { depth++; current += ch; continue; }
+    if (ch === ')') { depth--; current += ch; continue; }
+
+    // Check for keyword at top level with word boundaries (whitespace on both sides)
+    if (depth === 0 && i > 0 && /\s/.test(cond[i - 1])) {
+      const ahead = cond.substring(i, i + kwLen);
+      if (ahead.toLowerCase() === kwLower && i + kwLen < cond.length && /\s/.test(cond[i + kwLen])) {
+        parts.push(current);
+        current = '';
+        i += kwLen; // skip keyword (loop will advance past the trailing space)
+        continue;
+      }
+    }
+    current += ch;
+  }
+  parts.push(current);
+  return parts.length >= 2 ? parts : null;
+}
+
+function translateExpression(expr, assignedVars, enumMap, fnRegistry) {
+  if (!expr) return null;
+  const s = expr.trim();
+
+  // String literal
+  if (/^"[^"]*"$/.test(s)) return s;
+
+  // Numeric literal
+  if (/^\d+(\.\d+)?$/.test(s)) return s;
+
+  // Boolean literals
+  if (/^True$/i.test(s)) return 'true';
+  if (/^False$/i.test(s)) return 'false';
+
+  // Me.OpenArgs
+  if (/^Me\.OpenArgs$/i.test(s)) return 'AC.getOpenArgs()';
+
+  // TempVars
+  const tvMatch = s.match(/^TempVars[!.](\w+)$/i) || s.match(/^TempVars\s*\(\s*"([^"]+)"\s*\)$/i);
+  if (tvMatch) return `AC.getTempVar(${JSON.stringify(tvMatch[1])})`;
+
+  // Me.ControlName
+  const meCtrl = s.match(/^Me\.(\w+)$/i);
+  if (meCtrl) {
+    const name = meCtrl[1];
+    if (/^(Name|Caption|RecordSource|Filter|OrderBy|Section|Hwnd|HasModule|CurrentView|DefaultView)$/i.test(name)) {
+      return null;
+    }
+    return `AC.getValue(${JSON.stringify(name)})`;
+  }
+
+  // Known variable
+  if (/^\w+$/.test(s) && assignedVars && assignedVars.has(s.toLowerCase())) {
+    return s;
+  }
+
+  // Enum value (qualified EnumName.Member or bare member name)
+  if (enumMap && enumMap.has(s)) {
+    return String(enumMap.get(s));
+  }
+
+  // String concatenation with & — split and recurse
+  // Only split on & that's not inside parens or strings
+  const concatParts = splitOnOperator(s, '&');
+  if (concatParts && concatParts.length >= 2) {
+    const jsParts = [];
+    for (const part of concatParts) {
+      const translated = translateExpression(part.trim(), assignedVars, enumMap, fnRegistry);
+      if (translated === null) return null;
+      jsParts.push(translated);
+    }
+    return jsParts.join(' + ');
+  }
+
+  // Domain aggregate: DCount/DLookup/DMin/DMax/DSum
+  if (/^(DCount|DLookup|DMin|DMax|DSum)\s*\(/i.test(s)) {
+    const result = translateDomainCall(s, assignedVars, enumMap, fnRegistry);
+    if (result) return result.js;
+  }
+
+  // Function call — parse once, check builtins then fnRegistry
+  const funcCall = parseFunctionCall(s);
+  if (funcCall && funcCall.endIdx >= s.length) {
+    // Translate arguments recursively (shared by builtins and fnRegistry)
+    const jsArgs = [];
+    let allArgsOk = true;
+    for (const arg of funcCall.args) {
+      const translated = translateExpression(arg, assignedVars, enumMap, fnRegistry);
+      if (translated === null) { allArgsOk = false; break; }
+      jsArgs.push(translated);
+    }
+
+    // VBA built-in function (Nz, Replace, Left$, UBound, etc.)
+    if (allArgsOk) {
+      const builtinFn = VBA_BUILTINS.get(funcCall.name.toLowerCase());
+      if (builtinFn) {
+        const result = builtinFn(jsArgs);
+        if (result !== null) return result;
+      }
+    }
+
+    // fn.* registry function call
+    if (allArgsOk && fnRegistry && fnRegistry.has(funcCall.name.toLowerCase())) {
+      return `await AC.callFn(${JSON.stringify(funcCall.name)}, ${jsArgs.join(', ')})`;
+    }
+  }
+
+  // Bare function name without parens (VBA allows parameterless calls without ())
+  if (/^\w+$/.test(s) && fnRegistry && fnRegistry.has(s.toLowerCase())) {
+    return `await AC.callFn(${JSON.stringify(s)})`;
+  }
+
+  return null;
+}
+
+/**
+ * Split a VBA expression on a given operator, respecting parens and strings.
+ * Returns array of parts or null if operator not found at top level.
+ */
+function splitOnOperator(expr, op) {
+  const parts = [];
+  let current = '';
+  let depth = 0;
+  let inString = false;
+
+  for (let i = 0; i < expr.length; i++) {
+    const ch = expr[i];
+    if (ch === '"') {
+      inString = !inString;
+      current += ch;
+    } else if (inString) {
+      current += ch;
+    } else if (ch === '(') {
+      depth++;
+      current += ch;
+    } else if (ch === ')') {
+      depth--;
+      current += ch;
+    } else if (depth === 0 && ch === op && (op !== '&' || expr[i+1] !== '&')) {
+      // For &, make sure it's not && (though VBA doesn't have &&, be safe)
+      parts.push(current);
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  parts.push(current);
+
+  return parts.length >= 2 ? parts : null;
+}
+
+/**
+ * Map of VBA built-in functions to JS translation functions.
+ * Each entry takes an array of already-translated JS argument strings
+ * and returns a JS expression string, or null if args are insufficient.
+ */
+const VBA_BUILTINS = new Map([
+  // String functions
+  ['replace', (args) => args.length >= 3 ? `${args[0]}.replaceAll(${args[1]}, ${args[2]})` : null],
+  ['left', (args) => args.length >= 2 ? `${args[0]}.substring(0, ${args[1]})` : null],
+  ['left$', (args) => args.length >= 2 ? `${args[0]}.substring(0, ${args[1]})` : null],
+  ['right', (args) => args.length >= 2 ? `${args[0]}.slice(-${args[1]})` : null],
+  ['right$', (args) => args.length >= 2 ? `${args[0]}.slice(-${args[1]})` : null],
+  ['mid', (args) => {
+    if (args.length >= 3) return `${args[0]}.substring(${args[1]} - 1, ${args[1]} - 1 + ${args[2]})`;
+    if (args.length >= 2) return `${args[0]}.substring(${args[1]} - 1)`;
+    return null;
+  }],
+  ['mid$', (args) => {
+    if (args.length >= 3) return `${args[0]}.substring(${args[1]} - 1, ${args[1]} - 1 + ${args[2]})`;
+    if (args.length >= 2) return `${args[0]}.substring(${args[1]} - 1)`;
+    return null;
+  }],
+  ['len', (args) => args.length >= 1 ? `${args[0]}.length` : null],
+  ['instr', (args) => {
+    // VBA InStr: 2-arg = InStr(string, find), 3-arg = InStr(start, string, find) — 1-based
+    if (args.length === 2) return `(${args[0]}.indexOf(${args[1]}) + 1)`;
+    if (args.length >= 3) return `(${args[1]}.indexOf(${args[2]}, ${args[0]} - 1) + 1)`;
+    return null;
+  }],
+  ['split', (args) => args.length >= 2 ? `${args[0]}.split(${args[1]})` : null],
+  ['trim', (args) => args.length >= 1 ? `${args[0]}.trim()` : null],
+  ['trim$', (args) => args.length >= 1 ? `${args[0]}.trim()` : null],
+  ['ltrim', (args) => args.length >= 1 ? `${args[0]}.trimStart()` : null],
+  ['ltrim$', (args) => args.length >= 1 ? `${args[0]}.trimStart()` : null],
+  ['rtrim', (args) => args.length >= 1 ? `${args[0]}.trimEnd()` : null],
+  ['rtrim$', (args) => args.length >= 1 ? `${args[0]}.trimEnd()` : null],
+  ['lcase', (args) => args.length >= 1 ? `${args[0]}.toLowerCase()` : null],
+  ['lcase$', (args) => args.length >= 1 ? `${args[0]}.toLowerCase()` : null],
+  ['ucase', (args) => args.length >= 1 ? `${args[0]}.toUpperCase()` : null],
+  ['ucase$', (args) => args.length >= 1 ? `${args[0]}.toUpperCase()` : null],
+  ['string', (args) => args.length >= 2 ? `${args[1]}.repeat(${args[0]})` : null],
+  ['space', (args) => args.length >= 1 ? `" ".repeat(${args[0]})` : null],
+  // Type conversion
+  ['str', (args) => args.length >= 1 ? `String(${args[0]})` : null],
+  ['str$', (args) => args.length >= 1 ? `String(${args[0]})` : null],
+  ['cstr', (args) => args.length >= 1 ? `String(${args[0]})` : null],
+  ['cint', (args) => args.length >= 1 ? `parseInt(${args[0]})` : null],
+  ['clng', (args) => args.length >= 1 ? `parseInt(${args[0]})` : null],
+  ['cdbl', (args) => args.length >= 1 ? `parseFloat(${args[0]})` : null],
+  ['csng', (args) => args.length >= 1 ? `parseFloat(${args[0]})` : null],
+  ['cbool', (args) => args.length >= 1 ? `Boolean(${args[0]})` : null],
+  ['asc', (args) => args.length >= 1 ? `${args[0]}.charCodeAt(0)` : null],
+  ['chr', (args) => args.length >= 1 ? `String.fromCharCode(${args[0]})` : null],
+  ['chr$', (args) => args.length >= 1 ? `String.fromCharCode(${args[0]})` : null],
+  // Array functions
+  ['ubound', (args) => args.length >= 1 ? `(${args[0]}.length - 1)` : null],
+  ['lbound', (_args) => '0'],
+  ['isarray', (args) => args.length >= 1 ? `Array.isArray(${args[0]})` : null],
+  // Math
+  ['abs', (args) => args.length >= 1 ? `Math.abs(${args[0]})` : null],
+  ['int', (args) => args.length >= 1 ? `Math.floor(${args[0]})` : null],
+  ['fix', (args) => args.length >= 1 ? `Math.trunc(${args[0]})` : null],
+  // Nz → AC runtime
+  ['nz', (args) => {
+    if (args.length >= 2) return `AC.nz(${args[0]}, ${args[1]})`;
+    if (args.length >= 1) return `AC.nz(${args[0]})`;
+    return null;
+  }],
+]);
+
 // Map VBA event suffixes to our event keys
 const EVENT_MAP = {
   'click': 'on-click',
@@ -24,7 +400,61 @@ const EVENT_MAP = {
   'gotfocus': 'on-gotfocus',
   'lostfocus': 'on-lostfocus',
   'nodata': 'on-no-data',
+  'activate': 'on-activate',
+  'deactivate': 'on-deactivate',
+  'print': 'on-print',
+  'format': 'on-format',
+  'retreat': 'on-retreat',
+  'page': 'on-page',
 };
+
+/**
+ * Collect module-level variable names from VBA source.
+ * These are Dim/Private/Public declarations outside of Sub/Function bodies.
+ * Also collects Const declarations (treated as known variables).
+ * Returns a Set of lowercase variable names.
+ */
+function collectModuleVars(vbaSource) {
+  const vars = new Set();
+  const lines = vbaSource.split(/\r?\n/);
+  let inProc = false;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+
+    // Track procedure boundaries
+    if (/^(?:Private\s+|Public\s+)?(?:Static\s+)?(?:Sub|Function)\s+\w+\s*\(/i.test(line)) {
+      inProc = true;
+      continue;
+    }
+    if (/^End\s+(?:Sub|Function)$/i.test(line)) {
+      inProc = false;
+      continue;
+    }
+    if (inProc) continue;
+
+    // Const declarations (check before Dim/Private/Public to avoid false match)
+    const constMatch = line.match(/^(?:Private\s+|Public\s+)?Const\s+(\w+)/i);
+    if (constMatch) {
+      vars.add(constMatch[1].toLowerCase());
+      continue;
+    }
+
+    // Dim/Private/Public varName As Type  (possibly multiple on one line with commas)
+    const declMatch = line.match(/^(?:Dim|Private|Public)\s+(.+)$/i);
+    if (declMatch) {
+      const parts = declMatch[1].split(',');
+      for (const part of parts) {
+        const nameMatch = part.trim().match(/^(\w+)/);
+        if (nameMatch) {
+          vars.add(nameMatch[1].toLowerCase());
+        }
+      }
+    }
+  }
+
+  return vars;
+}
 
 /**
  * Extract Sub/Function procedures from VBA source.
@@ -38,15 +468,23 @@ function extractProcedures(vbaSource) {
   for (const rawLine of lines) {
     const line = rawLine.trim();
 
-    // Match: Private Sub cmdClose_Click() or Sub Form_Load()
-    const subMatch = line.match(/^(?:Private\s+|Public\s+)?Sub\s+(\w+)\s*\(/i);
-    if (subMatch && !current) {
-      current = { name: subMatch[1], bodyLines: [] };
+    // Match: Private Sub/Function cmdClose_Click() or Public Function StringFormatSQL(...)
+    const procMatch = line.match(/^(?:Private\s+|Public\s+)?(?:Static\s+)?(Sub|Function)\s+(\w+)\s*\(([^)]*)\)/i);
+    if (procMatch && !current) {
+      // Extract parameter names from signature
+      const params = [];
+      if (procMatch[3]) {
+        for (const param of procMatch[3].split(',')) {
+          const pMatch = param.trim().match(/^(?:Optional\s+)?(?:ByVal\s+|ByRef\s+)?(?:ParamArray\s+)?(\w+)/i);
+          if (pMatch) params.push(pMatch[1]);
+        }
+      }
+      current = { name: procMatch[2], kind: procMatch[1].toLowerCase(), bodyLines: [], params };
       continue;
     }
 
-    if (current && /^End\s+Sub/i.test(line)) {
-      procedures.push({ name: current.name, body: current.bodyLines.join('\n') });
+    if (current && new RegExp('^End\\s+' + current.kind + '$', 'i').test(line)) {
+      procedures.push({ name: current.name, body: current.bodyLines.join('\n'), kind: current.kind, params: current.params });
       current = null;
       continue;
     }
@@ -132,11 +570,156 @@ function stripBoilerplate(body) {
 }
 
 /**
+ * Translate a VBA criteria string (the third argument to DCount/DLookup/etc.)
+ * into a JS expression that builds a SQL WHERE clause at runtime.
+ *
+ * Common patterns:
+ *   "OrderID = " & Me.OrderID        → "OrderID = " + AC.getValue("OrderID")
+ *   "ProductID = " & Me.ProductID    → "ProductID = " + AC.getValue("ProductID")
+ *   strWhere  (variable)             → strWhere
+ *   "StatusID = 1"  (plain string)   → "StatusID = 1"
+ *
+ * Returns a JS expression string or null if the criteria is too complex.
+ */
+function translateCriteria(criteriaStr, assignedVars, enumMap, fnRegistry) {
+  if (!criteriaStr) return undefined; // no criteria → omit argument
+  const s = criteriaStr.trim();
+
+  // Plain string literal: "FieldName = 123"
+  if (/^"[^"]*"$/.test(s)) return s;
+
+  // Single variable reference
+  if (/^\w+$/.test(s)) {
+    if (assignedVars && assignedVars.has(s.toLowerCase())) return s;
+    return null;
+  }
+
+  // String concatenation with & — use paren-aware splitter and recursive translation
+  const concatParts = splitOnOperator(s, '&');
+  if (concatParts && concatParts.length >= 2) {
+    const jsParts = [];
+    for (const part of concatParts) {
+      const p = part.trim();
+      if (!p) continue;
+      // Recursively translate each part (handles function calls, Me.ctrl, literals, etc.)
+      const translated = translateExpression(p, assignedVars, enumMap, fnRegistry);
+      if (translated === null) return null;
+      jsParts.push(translated);
+    }
+    return jsParts.join(' + ');
+  }
+
+  // Fallback: try translateExpression for function calls, etc.
+  const exprResult = translateExpression(s, assignedVars, enumMap, fnRegistry);
+  if (exprResult !== null) return exprResult;
+
+  return null;
+}
+
+/**
+ * Parse a VBA domain aggregate function call: DCount("expr", "domain"[, criteria])
+ * Returns { func, expr, domain, criteria } or null if not parseable.
+ * Handles nested parens and string concatenation in the criteria argument.
+ */
+function parseDomainCall(vbaExpr) {
+  const match = vbaExpr.match(/^(DCount|DLookup|DMin|DMax|DSum)\s*\(/i);
+  if (!match) return null;
+
+  const func = match[1];
+  const startIdx = match[0].length;
+
+  // Find the matching closing paren, tracking nesting and string literals
+  let depth = 1;
+  let inString = false;
+  let i = startIdx;
+  for (; i < vbaExpr.length && depth > 0; i++) {
+    const ch = vbaExpr[i];
+    if (ch === '"') {
+      inString = !inString;
+    } else if (!inString) {
+      if (ch === '(') depth++;
+      else if (ch === ')') depth--;
+    }
+  }
+  if (depth !== 0) return null;
+
+  const argsStr = vbaExpr.substring(startIdx, i - 1);
+  const endIdx = i; // position after closing paren
+
+  // Split arguments on commas, respecting strings and parens
+  const args = [];
+  let current = '';
+  depth = 0;
+  inString = false;
+  for (const ch of argsStr) {
+    if (ch === '"') inString = !inString;
+    else if (!inString) {
+      if (ch === '(') depth++;
+      else if (ch === ')') depth--;
+      else if (ch === ',' && depth === 0) {
+        args.push(current.trim());
+        current = '';
+        continue;
+      }
+    }
+    current += ch;
+  }
+  args.push(current.trim());
+
+  if (args.length < 2) return null;
+
+  // First arg: expression (typically a string literal like "*" or "FieldName")
+  const expr = args[0];
+  // Second arg: domain (table/query name, string literal)
+  const domain = args[1];
+  // Third arg (optional): criteria
+  const criteria = args.length >= 3 ? args[2] : null;
+
+  // expr and domain should be string literals
+  const exprMatch = expr.match(/^"([^"]*)"$/);
+  const domainMatch = domain.match(/^"([^"]*)"$/);
+  if (!exprMatch || !domainMatch) return null;
+
+  return {
+    func: func,
+    expr: exprMatch[1],
+    domain: domainMatch[1],
+    criteria: criteria,
+    endIdx: endIdx,
+    fullMatch: vbaExpr.substring(0, endIdx),
+  };
+}
+
+/**
+ * Translate a VBA domain aggregate call (DCount, DLookup, etc.) to a JS expression.
+ * Returns a JS expression string or null if untranslatable.
+ */
+function translateDomainCall(vbaExpr, assignedVars, enumMap, fnRegistry) {
+  const parsed = parseDomainCall(vbaExpr);
+  if (!parsed) return null;
+
+  const funcName = parsed.func.charAt(0).toLowerCase() + parsed.func.slice(1); // DCount → dCount
+  const jsExpr = JSON.stringify(parsed.expr);
+  const jsDomain = JSON.stringify(parsed.domain);
+
+  if (parsed.criteria) {
+    const jsCriteria = translateCriteria(parsed.criteria, assignedVars, enumMap, fnRegistry);
+    if (jsCriteria === null) return null; // can't translate criteria
+    return { js: `await AC.${funcName}(${jsExpr}, ${jsDomain}, ${jsCriteria})`, endIdx: parsed.endIdx };
+  }
+
+  return { js: `await AC.${funcName}(${jsExpr}, ${jsDomain})`, endIdx: parsed.endIdx };
+}
+
+/**
  * Translate the right-hand side of a VBA variable assignment to JS.
  * Returns a JS expression string or null if untranslatable.
  * @param {string} rhs - The RHS of the assignment (already trimmed)
+ * @param {Set<string>} [assignedVars]
+ * @param {Map<string,number>} [enumMap]
+ * @param {Set<string>} [fnRegistry] - Known fn.* procedure names (lowercase)
  */
-function translateAssignmentRHS(rhs) {
+function translateAssignmentRHS(rhs, assignedVars, enumMap, fnRegistry) {
   if (!rhs) return null;
   const s = rhs.trim();
 
@@ -153,6 +736,10 @@ function translateAssignmentRHS(rhs) {
   // Me.OpenArgs
   if (/^Me\.OpenArgs$/i.test(s)) return 'AC.getOpenArgs()';
 
+  // TempVars!Name or TempVars("Name")
+  const tvRhsMatch = s.match(/^TempVars[!.](\w+)$/i) || s.match(/^TempVars\s*\(\s*"([^"]+)"\s*\)$/i);
+  if (tvRhsMatch) return `AC.getTempVar(${JSON.stringify(tvRhsMatch[1])})`;
+
   // Me.ControlName (simple property read — value)
   const meCtrl = s.match(/^Me\.(\w+)$/i);
   if (meCtrl) {
@@ -164,18 +751,30 @@ function translateAssignmentRHS(rhs) {
     return `AC.getValue(${JSON.stringify(name)})`;
   }
 
-  // Nz(Me.OpenArgs, default) or Nz(Me.OpenArgs)
-  const nzMatch = s.match(/^Nz\s*\(\s*(.+?)\s*(?:,\s*(.+?))?\s*\)$/i);
-  if (nzMatch) {
-    const inner = translateAssignmentRHS(nzMatch[1]);
-    if (!inner) return null;
-    if (nzMatch[2] !== undefined) {
-      const def = translateAssignmentRHS(nzMatch[2].trim());
-      if (!def) return null;
-      return `AC.nz(${inner}, ${def})`;
+  // Nz(inner, default) — use paren-aware parsing for nested calls like Nz(DLookup(...), "")
+  if (/^Nz\s*\(/i.test(s)) {
+    const nzCall = parseFunctionCall(s);
+    if (nzCall && nzCall.endIdx >= s.length && nzCall.args.length >= 1) {
+      const inner = translateAssignmentRHS(nzCall.args[0].trim(), assignedVars, enumMap, fnRegistry);
+      if (!inner) return null;
+      if (nzCall.args.length >= 2) {
+        const def = translateAssignmentRHS(nzCall.args[1].trim(), assignedVars, enumMap, fnRegistry);
+        if (!def) return null;
+        return `AC.nz(${inner}, ${def})`;
+      }
+      return `AC.nz(${inner})`;
     }
-    return `AC.nz(${inner})`;
   }
+
+  // Domain aggregate: DCount(...), DLookup(...), DMin(...), DMax(...), DSum(...)
+  if (/^(DCount|DLookup|DMin|DMax|DSum)\s*\(/i.test(s)) {
+    const result = translateDomainCall(s, assignedVars, enumMap, fnRegistry);
+    if (result) return result.js;
+  }
+
+  // Fallback: try translateExpression for function calls, concatenation, variables, etc.
+  const exprResult = translateExpression(s, assignedVars, enumMap, fnRegistry);
+  if (exprResult !== null) return exprResult;
 
   // Anything else — untranslatable
   return null;
@@ -186,9 +785,16 @@ function translateAssignmentRHS(rhs) {
  * Returns a JS string or null if unrecognized.
  * @param {string} stmt - VBA statement
  * @param {string} [formName] - Form name derived from module (e.g. "frmAbout" from "Form_frmAbout")
+ * @param {Map<string,number>} [enumMap] - Enum member → integer value map
+ * @param {Set<string>} [assignedVars] - Variables with translatable assignments
+ * @param {Set<string>} [fnRegistry] - Known fn.* procedure names (lowercase)
  */
-function translateStatement(stmt, formName) {
-  // DoCmd.Close acForm, Me.Name  or  DoCmd.Close
+function translateStatement(stmt, formName, enumMap, assignedVars, fnRegistry) {
+  // DoCmd.Close acForm, "formName", acSaveNo  or  DoCmd.Close
+  const closeFormMatch = stmt.match(/^DoCmd\.Close\s+acForm\s*,\s*"([^"]+)"/i);
+  if (closeFormMatch) {
+    return `AC.closeForm(${JSON.stringify(closeFormMatch[1])})`;
+  }
   if (/^DoCmd\.Close\b/i.test(stmt)) {
     return formName ? `AC.closeForm(${JSON.stringify(formName)})` : 'AC.closeForm()';
   }
@@ -230,10 +836,20 @@ function translateStatement(stmt, formName) {
     return 'AC.gotoRecord("previous")';
   }
 
-  // DoCmd.RunSQL "sql"
+  // DoCmd.RunSQL "sql" or DoCmd.RunSQL variable
   const runSqlMatch = stmt.match(/^DoCmd\.RunSQL\s+"([^"]+)"/i);
   if (runSqlMatch) {
     return `AC.runSQL(${JSON.stringify(runSqlMatch[1])})`;
+  }
+  const runSqlVarMatch = stmt.match(/^DoCmd\.RunSQL\s+(\w+)/i);
+  if (runSqlVarMatch && assignedVars && assignedVars.has(runSqlVarMatch[1].toLowerCase())) {
+    return `AC.runSQL(${runSqlVarMatch[1]})`;
+  }
+
+  // g_dbApp().Execute / CurrentDb.Execute / CurrentDb().Execute — SQL execution
+  const dbExecMatch = stmt.match(/^(?:g_dbApp\(\)|CurrentDb(?:\(\))?|db)\.Execute\s+(\w+)/i);
+  if (dbExecMatch && assignedVars && assignedVars.has(dbExecMatch[1].toLowerCase())) {
+    return `AC.runSQL(${dbExecMatch[1]})`;
   }
 
   // DoCmd.Quit
@@ -256,10 +872,36 @@ function translateStatement(stmt, formName) {
     return 'AC.saveRecord()';
   }
 
+  // MsgBox — multiple patterns
+  // MsgBox "text", vbExclamation/etc. → alert("text") (strip icon arg)
+  const msgBoxIconMatch = stmt.match(/^MsgBox\s+"([^"]+)"\s*,\s*(?:vb\w+)/i);
+  if (msgBoxIconMatch) {
+    return `alert(${JSON.stringify(msgBoxIconMatch[1])})`;
+  }
   // MsgBox "text"
-  const msgBoxMatch = stmt.match(/^MsgBox\s+"([^"]+)"/i);
+  const msgBoxMatch = stmt.match(/^MsgBox\s+"([^"]+)"\s*$/i);
   if (msgBoxMatch) {
     return `alert(${JSON.stringify(msgBoxMatch[1])})`;
+  }
+  // MsgBox variable (where variable is in assignedVars)
+  const msgBoxVarMatch = stmt.match(/^MsgBox\s+(\w+)\s*$/i);
+  if (msgBoxVarMatch && assignedVars && assignedVars.has(msgBoxVarMatch[1].toLowerCase())) {
+    return `alert(${msgBoxVarMatch[1]})`;
+  }
+  // MsgBox general — use translateExpression for first arg, strip icon/button args
+  const msgBoxGeneralMatch = stmt.match(/^MsgBox\s+(.+)$/i);
+  if (msgBoxGeneralMatch) {
+    let msgExpr = msgBoxGeneralMatch[1].trim();
+    // Strip trailing comma + vb* icon/button constants (e.g. ", vbExclamation")
+    // Use paren-aware split to find the first top-level comma
+    const topCommaIdx = findTopLevelComma(msgExpr);
+    if (topCommaIdx >= 0) {
+      msgExpr = msgExpr.substring(0, topCommaIdx).trim();
+    }
+    const translated = translateExpression(msgExpr, assignedVars, enumMap, fnRegistry);
+    if (translated) {
+      return `alert(${translated})`;
+    }
   }
 
   // Me.Requery
@@ -270,6 +912,29 @@ function translateStatement(stmt, formName) {
   // Me.Refresh
   if (/^Me\.Refresh\b/i.test(stmt)) {
     return 'AC.requery()';
+  }
+
+  // Me.Undo
+  if (/^Me\.Undo\b/i.test(stmt)) {
+    return 'AC.undo()';
+  }
+
+  // Me.ctrl.SetFocus
+  const setFocusMatch = stmt.match(/^Me\.(\w+)\.SetFocus\s*$/i);
+  if (setFocusMatch) {
+    return `AC.setFocus(${JSON.stringify(setFocusMatch[1])})`;
+  }
+
+  // Me.ctrl.Undo — revert control value
+  const undoCtrlMatch = stmt.match(/^Me\.(\w+)\.Undo\s*$/i);
+  if (undoCtrlMatch) {
+    return `AC.undo()`;
+  }
+
+  // Me.ctrl.Requery
+  const reqCtrlMatch = stmt.match(/^Me\.(\w+)\.Requery\s*$/i);
+  if (reqCtrlMatch) {
+    return `AC.requeryControl(${JSON.stringify(reqCtrlMatch[1])})`;
   }
 
   // Me.controlName.Visible = True/False
@@ -292,10 +957,93 @@ function translateStatement(stmt, formName) {
     return `AC.setSubformSource(${JSON.stringify(srcObjMatch[1])}, ${JSON.stringify(srcObjMatch[2])})`;
   }
 
+  // Me.Caption = expr (form caption — must be before generic controlName.Caption)
+  const formCaptionMatch = stmt.match(/^Me\.Caption\s*=\s*(.+)$/i);
+  if (formCaptionMatch) {
+    const raw = formCaptionMatch[1].trim();
+    if (/^"[^"]*"$/.test(raw)) {
+      return `AC.setFormCaption(${raw})`;
+    }
+    if (/^\w+$/.test(raw) && assignedVars && assignedVars.has(raw.toLowerCase())) {
+      return `AC.setFormCaption(${raw})`;
+    }
+    return null;
+  }
+
   // controlName.Caption = "text"
   const captionMatch = stmt.match(/^(?:Me\.)?(\w+)\.Caption\s*=\s*"([^"]+)"/i);
   if (captionMatch) {
     return `AC.setValue(${JSON.stringify(captionMatch[1])}, ${JSON.stringify(captionMatch[2])})`;
+  }
+
+  // TempVars("Name").Value = value  (set TempVar via .Value property)
+  const tvValueSetMatch = stmt.match(/^TempVars[!.](\w+)\.Value\s*=\s*(.+)$/i)
+    || stmt.match(/^TempVars\s*\(\s*"([^"]+)"\s*\)\.Value\s*=\s*(.+)$/i);
+  if (tvValueSetMatch) {
+    const tvName = tvValueSetMatch[1];
+    const raw = tvValueSetMatch[2].trim();
+    const rhs = translateAssignmentRHS(raw, assignedVars, enumMap, fnRegistry);
+    if (rhs !== null) {
+      return `AC.setTempVar(${JSON.stringify(tvName)}, ${rhs})`;
+    }
+    return `AC.setTempVar(${JSON.stringify(tvName)}, ${JSON.stringify(raw)})`;
+  }
+
+  // TempVars!Name = value  (set TempVar)
+  const tvSetMatch = stmt.match(/^TempVars[!.](\w+)\s*=\s*(.+)$/i)
+    || stmt.match(/^TempVars\s*\(\s*"([^"]+)"\s*\)\s*=\s*(.+)$/i);
+  if (tvSetMatch) {
+    const tvName = tvSetMatch[1];
+    const raw = tvSetMatch[2].trim();
+    const rhs = translateAssignmentRHS(raw, assignedVars, enumMap, fnRegistry);
+    if (rhs !== null) {
+      return `AC.setTempVar(${JSON.stringify(tvName)}, ${rhs})`;
+    }
+    return `AC.setTempVar(${JSON.stringify(tvName)}, ${JSON.stringify(raw)})`;
+  }
+
+  // Cancel = True → return false (event cancellation)
+  if (/^Cancel\s*=\s*True$/i.test(stmt)) {
+    return 'return false';
+  }
+
+  // Me.Dirty = False → save the current record
+  if (/^Me\.Dirty\s*=\s*False$/i.test(stmt)) {
+    return 'await AC.saveRecord()';
+  }
+
+  // Me.RecordSource = "..." or Me.RecordSource = variable
+  const recSrcMatch = stmt.match(/^Me\.RecordSource\s*=\s*(.+)$/i);
+  if (recSrcMatch) {
+    const raw = recSrcMatch[1].trim();
+    if (/^"[^"]*"$/.test(raw)) {
+      return `AC.setRecordSource(${raw})`;
+    }
+    if (/^\w+$/.test(raw) && assignedVars && assignedVars.has(raw.toLowerCase())) {
+      return `AC.setRecordSource(${raw})`;
+    }
+    return null;
+  }
+
+  // Me.Filter = "..."
+  const filterMatch = stmt.match(/^Me\.Filter\s*=\s*(.+)$/i);
+  if (filterMatch) {
+    const raw = filterMatch[1].trim();
+    if (/^"[^"]*"$/.test(raw)) {
+      return `AC.setFilter(${raw})`;
+    }
+    if (/^\w+$/.test(raw) && assignedVars && assignedVars.has(raw.toLowerCase())) {
+      return `AC.setFilter(${raw})`;
+    }
+    return null;
+  }
+
+  // Me.FilterOn = True/False
+  if (/^Me\.FilterOn\s*=\s*True$/i.test(stmt)) {
+    return 'AC.setFilterOn(true)';
+  }
+  if (/^Me\.FilterOn\s*=\s*False$/i.test(stmt)) {
+    return 'AC.setFilterOn(false)';
   }
 
   // Me.controlName = value  (set control value)
@@ -312,6 +1060,39 @@ function translateStatement(stmt, formName) {
     if (/^\d+$/.test(raw)) {
       return `AC.setValue(${JSON.stringify(ctrl)}, ${raw})`;
     }
+    // Enum value: Me.StatusID = enumOrderStatus.osClosed → AC.setValue("StatusID", 1)
+    if (enumMap && enumMap.has(raw)) {
+      return `AC.setValue(${JSON.stringify(ctrl)}, ${enumMap.get(raw)})`;
+    }
+    // Variable reference: Me.ctrl = someVar
+    if (/^\w+$/.test(raw) && assignedVars && assignedVars.has(raw.toLowerCase())) {
+      return `AC.setValue(${JSON.stringify(ctrl)}, ${raw})`;
+    }
+    // Fallback: try translateAssignmentRHS for complex expressions (DLookup, Nz, etc.)
+    const rhsJs = translateAssignmentRHS(raw, assignedVars, enumMap, fnRegistry);
+    if (rhsJs !== null) {
+      return `AC.setValue(${JSON.stringify(ctrl)}, ${rhsJs})`;
+    }
+  }
+
+  // Bare function/sub call as statement (no parens) — e.g. Ribbon_ShowReportsGroup
+  if (/^\w+$/.test(stmt) && fnRegistry && fnRegistry.has(stmt.toLowerCase())) {
+    return `await AC.callFn(${JSON.stringify(stmt)})`;
+  }
+
+  // Function call with parens as statement — e.g. SomeFunc(arg1, arg2)
+  const stmtFuncCall = parseFunctionCall(stmt);
+  if (stmtFuncCall && fnRegistry && fnRegistry.has(stmtFuncCall.name.toLowerCase())) {
+    const jsArgs = [];
+    let allOk = true;
+    for (const arg of stmtFuncCall.args) {
+      const translated = translateExpression(arg, assignedVars, enumMap, fnRegistry);
+      if (translated === null) { allOk = false; break; }
+      jsArgs.push(translated);
+    }
+    if (allOk) {
+      return `await AC.callFn(${JSON.stringify(stmtFuncCall.name)}, ${jsArgs.join(', ')})`;
+    }
   }
 
   // Unrecognized — return null
@@ -324,10 +1105,26 @@ function translateStatement(stmt, formName) {
  * skip than to execute the wrong branch).
  * @param {string} vbaCond - VBA condition expression
  * @param {Set<string>} [assignedVars] - Variables that have been assigned translatable values
+ * @param {Map<string,number>} [enumMap] - Enum member → integer value map
  */
-function translateCondition(vbaCond, assignedVars) {
+function translateCondition(vbaCond, assignedVars, enumMap, fnRegistry) {
   if (!vbaCond) return null;
   const cond = vbaCond.trim();
+
+  // Strip outer parentheses: (expr) → expr
+  if (cond.startsWith('(') && cond.endsWith(')')) {
+    // Verify the parens are matched (not just coincidental start/end)
+    let depth = 0;
+    let matched = true;
+    for (let i = 0; i < cond.length - 1; i++) {
+      if (cond[i] === '(') depth++;
+      else if (cond[i] === ')') depth--;
+      if (depth === 0) { matched = false; break; }
+    }
+    if (matched) {
+      return translateCondition(cond.slice(1, -1).trim(), assignedVars, enumMap, fnRegistry);
+    }
+  }
 
   // True / False literals
   if (/^True$/i.test(cond)) return 'true';
@@ -336,19 +1133,16 @@ function translateCondition(vbaCond, assignedVars) {
   // Not <condition> — recursive
   const notMatch = cond.match(/^Not\s+(.+)$/i);
   if (notMatch) {
-    const inner = translateCondition(notMatch[1], assignedVars);
+    const inner = translateCondition(notMatch[1], assignedVars, enumMap, fnRegistry);
     return inner ? `!(${inner})` : null;
   }
 
-  // And / Or — split and recurse (handle simple binary cases)
+  // And / Or — paren-aware split and recurse
   // Process Or first (lower precedence), then And
-  for (const [vbaOp, jsOp] of [
-    [/\s+Or\s+/i, ' || '],
-    [/\s+And\s+/i, ' && '],
-  ]) {
-    const parts = cond.split(vbaOp);
-    if (parts.length >= 2) {
-      const translated = parts.map(p => translateCondition(p.trim(), assignedVars));
+  for (const [keyword, jsOp] of [['Or', ' || '], ['And', ' && ']]) {
+    const parts = splitOnKeyword(cond, keyword);
+    if (parts && parts.length >= 2) {
+      const translated = parts.map(p => translateCondition(p.trim(), assignedVars, enumMap, fnRegistry));
       if (translated.every(t => t !== null)) {
         return translated.join(jsOp);
       }
@@ -364,6 +1158,19 @@ function translateCondition(vbaCond, assignedVars) {
 
   // IsNull(Me.OpenArgs) → AC.getOpenArgs() == null
   if (/^IsNull\s*\(\s*Me\.OpenArgs\s*\)$/i.test(cond)) return 'AC.getOpenArgs() == null';
+
+  // IsNull(TempVars!Name) or IsNull(TempVars("Name"))
+  const isNullTvMatch = cond.match(/^IsNull\s*\(\s*TempVars[!.](\w+)\s*\)$/i)
+    || cond.match(/^IsNull\s*\(\s*TempVars\s*\(\s*"([^"]+)"\s*\)\s*\)$/i);
+  if (isNullTvMatch) {
+    return `AC.getTempVar(${JSON.stringify(isNullTvMatch[1])}) == null`;
+  }
+
+  // TempVars!Name standalone as boolean (truthy check)
+  const tvCondMatch = cond.match(/^TempVars[!.](\w+)$/i) || cond.match(/^TempVars\s*\(\s*"([^"]+)"\s*\)$/i);
+  if (tvCondMatch) {
+    return `AC.getTempVar(${JSON.stringify(tvCondMatch[1])})`;
+  }
 
   // IsNull(Me.ctrl) → AC.getValue("ctrl") == null
   const isNullMeMatch = cond.match(/^IsNull\s*\(\s*Me\.(\w+)\s*\)$/i);
@@ -397,6 +1204,33 @@ function translateCondition(vbaCond, assignedVars) {
     return `confirm(${JSON.stringify(msgBoxYesMatch[1])})`;
   }
 
+  // Domain aggregate in comparison: DCount("*", "tbl", criteria) = 0
+  if (/^(DCount|DLookup|DMin|DMax|DSum)\s*\(/i.test(cond)) {
+    // Find the domain call, then check for trailing comparison operator
+    const parsed = parseDomainCall(cond);
+    if (parsed) {
+      const result = translateDomainCall(cond, assignedVars, enumMap, fnRegistry);
+      if (result) {
+        const rest = cond.substring(parsed.endIdx).trim();
+        if (!rest) {
+          // Standalone domain call used as boolean (truthy check)
+          return result.js;
+        }
+        // Check for comparison: = 0, > 5, <> "", etc.
+        const cmpRest = rest.match(/^(=|<>|<|>|<=|>=)\s*(.+)$/);
+        if (cmpRest) {
+          const jsOp = cmpRest[1] === '=' ? '===' : cmpRest[1] === '<>' ? '!==' : cmpRest[1];
+          const rhsTrimmed = cmpRest[2].trim();
+          const isLit = /^"[^"]*"$/.test(rhsTrimmed) || /^\d+(\.\d+)?$/.test(rhsTrimmed) || /^(True|False)$/i.test(rhsTrimmed);
+          if (isLit) {
+            const lit = /^True$/i.test(rhsTrimmed) ? 'true' : /^False$/i.test(rhsTrimmed) ? 'false' : rhsTrimmed;
+            return `${result.js} ${jsOp} ${lit}`;
+          }
+        }
+      }
+    }
+  }
+
   // Comparisons with simple string/number literals: expr = "value", expr > 0, etc.
   const cmpMatch = cond.match(/^(.+?)\s*(=|<>|<|>|<=|>=)\s*(.+)$/);
   if (cmpMatch) {
@@ -405,10 +1239,12 @@ function translateCondition(vbaCond, assignedVars) {
     const lhsTrimmed = lhs.trim();
     const rhsTrimmed = rhs.trim();
 
-    const isLiteral = (s) => /^"[^"]*"$/.test(s) || /^\d+(\.\d+)?$/.test(s) || /^(True|False)$/i.test(s);
+    const isLiteral = (s) => /^"[^"]*"$/.test(s) || /^\d+(\.\d+)?$/.test(s) || /^(True|False)$/i.test(s)
+      || (enumMap && enumMap.has(s));
     const toLiteral = (s) => {
       if (/^True$/i.test(s)) return 'true';
       if (/^False$/i.test(s)) return 'false';
+      if (enumMap && enumMap.has(s)) return String(enumMap.get(s));
       return s;
     };
 
@@ -431,10 +1267,25 @@ function translateCondition(vbaCond, assignedVars) {
       return `AC.getOpenArgs() ${jsOp} ${toLiteral(rhsTrimmed)}`;
     }
 
+    // TempVars!Name compared to literal
+    const tvLhs = lhsTrimmed.match(/^TempVars[!.](\w+)$/i) || lhsTrimmed.match(/^TempVars\s*\(\s*"([^"]+)"\s*\)$/i);
+    if (tvLhs && isLiteral(rhsTrimmed)) {
+      return `AC.getTempVar(${JSON.stringify(tvLhs[1])}) ${jsOp} ${toLiteral(rhsTrimmed)}`;
+    }
+
+    // General LHS via translateExpression (handles fn calls, variables, etc.)
+    const lhsExpr = translateExpression(lhsTrimmed, assignedVars, enumMap, fnRegistry);
+    if (lhsExpr && isLiteral(rhsTrimmed)) {
+      return `${lhsExpr} ${jsOp} ${toLiteral(rhsTrimmed)}`;
+    }
+
     return null; // Conservative: can't translate unknown comparisons
   }
 
-  // Anything else — untranslatable
+  // Fallback: standalone expression as boolean (fn calls, variables)
+  const exprResult = translateExpression(cond, assignedVars, enumMap, fnRegistry);
+  if (exprResult) return exprResult;
+
   return null;
 }
 
@@ -500,8 +1351,9 @@ function findEndKeyword(lines, startIdx, startWord, endWord) {
  * @param {string} formName
  * @param {Set<string>} [variables] - Declared variables
  * @param {Set<string>} [assignedVars] - Variables with translatable assignments
+ * @param {Map<string,number>} [enumMap] - Enum member → integer value map
  */
-function parseIfBlock(lines, startIdx, formName, variables, assignedVars) {
+function parseIfBlock(lines, startIdx, formName, variables, assignedVars, enumMap, fnRegistry, funcName) {
   // Collect branches: [{condition, bodyLines}]
   const branches = [];
   let depth = 0;
@@ -570,8 +1422,8 @@ function parseIfBlock(lines, startIdx, formName, variables, assignedVars) {
 
   // Check if all conditions are translatable
   const translatedBranches = branches.map(b => {
-    const jsCond = b.condition !== null ? translateCondition(b.condition, assignedVars) : null; // null condition = Else branch
-    const { jsLines: bodyJs } = translateBlock(b.bodyLines, 0, formName, variables, assignedVars);
+    const jsCond = b.condition !== null ? translateCondition(b.condition, assignedVars, enumMap, fnRegistry) : null; // null condition = Else branch
+    const { jsLines: bodyJs } = translateBlock(b.bodyLines, 0, formName, variables, assignedVars, enumMap, fnRegistry, funcName);
     return { condition: b.condition, jsCond, bodyJs, isElse: b.condition === null };
   });
 
@@ -621,7 +1473,7 @@ function parseIfBlock(lines, startIdx, formName, variables, assignedVars) {
  * Parse a Select Case block into a JS switch statement or if/else chain.
  * Returns { jsLines: string[], endIdx: number }.
  */
-function parseSelectCaseBlock(lines, startIdx, formName, variables, assignedVars) {
+function parseSelectCaseBlock(lines, startIdx, formName, variables, assignedVars, enumMap, fnRegistry, funcName) {
   const caseLine = lines[startIdx];
   const caseMatch = caseLine.match(/^Select\s+Case\s+(.+)$/i);
   if (!caseMatch) return { jsLines: [`// [VBA Select Case block skipped]`], endIdx: startIdx };
@@ -718,7 +1570,7 @@ function parseSelectCaseBlock(lines, startIdx, formName, variables, assignedVars
           jsLines.push(`} else if (${conds}) {`);
         }
       }
-      const { jsLines: bodyJs } = translateBlock(b.bodyLines, 0, formName, variables, assignedVars);
+      const { jsLines: bodyJs } = translateBlock(b.bodyLines, 0, formName, variables, assignedVars, enumMap, fnRegistry, funcName);
       for (const bodyLine of bodyJs) {
         jsLines.push('  ' + bodyLine);
       }
@@ -736,7 +1588,7 @@ function parseSelectCaseBlock(lines, startIdx, formName, variables, assignedVars
           jsLines.push(`  case ${lit}:`);
         }
       }
-      const { jsLines: bodyJs } = translateBlock(b.bodyLines, 0, formName, variables, assignedVars);
+      const { jsLines: bodyJs } = translateBlock(b.bodyLines, 0, formName, variables, assignedVars, enumMap, fnRegistry, funcName);
       for (const bodyLine of bodyJs) {
         jsLines.push('    ' + bodyLine);
       }
@@ -754,19 +1606,28 @@ function parseSelectCaseBlock(lines, startIdx, formName, variables, assignedVars
  * Parse a numeric For loop into a JS for statement.
  * Returns { jsLines: string[], endIdx: number } or null if non-numeric bounds.
  */
-function parseForLoop(lines, startIdx, formName, variables, assignedVars) {
+function parseForLoop(lines, startIdx, formName, variables, assignedVars, enumMap, fnRegistry, funcName) {
   const forLine = lines[startIdx];
-  const forMatch = forLine.match(/^For\s+(\w+)\s*=\s*(\S+)\s+To\s+(\S+)(?:\s+Step\s+(-?\d+))?$/i);
+  const forMatch = forLine.match(/^For\s+(\w+)\s*=\s*(.+?)\s+To\s+(.+?)(?:\s+Step\s+(-?\d+))?$/i);
   if (!forMatch) return null;
 
   const [, varName, startVal, endVal, stepVal] = forMatch;
-
-  // Only translate numeric bounds
-  if (!/^-?\d+$/.test(startVal) || !/^-?\d+$/.test(endVal)) return null;
-
   const step = stepVal ? parseInt(stepVal) : 1;
-  const start = parseInt(startVal);
-  const end = parseInt(endVal);
+
+  // Translate bounds — numeric literals or expressions (e.g. UBound(arr))
+  let jsStart, jsEnd;
+  if (/^-?\d+$/.test(startVal)) {
+    jsStart = startVal;
+  } else {
+    jsStart = translateExpression(startVal.trim(), assignedVars, enumMap, fnRegistry);
+    if (!jsStart) return null;
+  }
+  if (/^-?\d+$/.test(endVal)) {
+    jsEnd = endVal;
+  } else {
+    jsEnd = translateExpression(endVal.trim(), assignedVars, enumMap, fnRegistry);
+    if (!jsEnd) return null;
+  }
 
   const endIdx = findEndKeyword(lines, startIdx + 1, 'FOR');
   const bodyLines = lines.slice(startIdx + 1, endIdx);
@@ -777,11 +1638,11 @@ function parseForLoop(lines, startIdx, formName, variables, assignedVars) {
   const innerAssigned = new Set(assignedVars || []);
   innerAssigned.add(varName.toLowerCase());
 
-  const { jsLines: bodyJs } = translateBlock(bodyLines, 0, formName, innerVars, innerAssigned);
+  const { jsLines: bodyJs } = translateBlock(bodyLines, 0, formName, innerVars, innerAssigned, enumMap, fnRegistry, funcName);
 
   const cmp = step > 0 ? '<=' : '>=';
   const inc = step === 1 ? `${varName}++` : step === -1 ? `${varName}--` : `${varName} += ${step}`;
-  const jsLines = [`for (let ${varName} = ${start}; ${varName} ${cmp} ${end}; ${inc}) {`];
+  const jsLines = [`for (let ${varName} = ${jsStart}; ${varName} ${cmp} ${jsEnd}; ${inc}) {`];
   for (const bodyLine of bodyJs) {
     jsLines.push('  ' + bodyLine);
   }
@@ -799,8 +1660,11 @@ function parseForLoop(lines, startIdx, formName, variables, assignedVars) {
  * @param {string} formName
  * @param {Set<string>} [variables] - Declared variable names (lowercase)
  * @param {Set<string>} [assignedVars] - Variables with translatable RHS values (lowercase)
+ * @param {Map<string,number>} [enumMap]
+ * @param {Set<string>} [fnRegistry]
+ * @param {string} [funcName] - Current Function name (for return value pattern), null for Subs
  */
-function translateBlock(lines, startIdx, formName, variables, assignedVars) {
+function translateBlock(lines, startIdx, formName, variables, assignedVars, enumMap, fnRegistry, funcName) {
   const jsLines = [];
   let i = startIdx;
 
@@ -811,42 +1675,82 @@ function translateBlock(lines, startIdx, formName, variables, assignedVars) {
   while (i < lines.length) {
     const line = lines[i].trim();
 
-    // Dim x As Type → let x; (track variable)
+    // Dim x As Type → let x; (track variable as assigned — VBA initializes to defaults)
     const dimMatch = line.match(/^Dim\s+(\w+)/i);
     if (dimMatch) {
       const varName = dimMatch[1].toLowerCase();
       variables.add(varName);
+      assignedVars.add(varName);
       jsLines.push(`let ${dimMatch[1]};`);
       i++;
       continue;
     }
 
-    // Skip Set, Const, GoTo (VBA-only constructs)
-    if (/^(Set|Const|GoTo)\s+/i.test(line)) {
-      i++;
-      continue;
-    }
-
-    // Variable assignment: x = <rhs> where x is a declared variable
-    const assignMatch = line.match(/^(\w+)\s*=\s*(.+)$/);
-    if (assignMatch && variables.has(assignMatch[1].toLowerCase())) {
-      const varName = assignMatch[1];
-      const rhs = translateAssignmentRHS(assignMatch[2].trim());
+    // Const x = value → const x = value; (track as known variable)
+    const constMatch = line.match(/^(?:Private\s+|Public\s+)?Const\s+(\w+)\s*(?:As\s+\w+\s*)?=\s*(.+)$/i);
+    if (constMatch) {
+      const varName = constMatch[1];
+      variables.add(varName.toLowerCase());
+      assignedVars.add(varName.toLowerCase());
+      const rhs = translateAssignmentRHS(constMatch[2].trim(), assignedVars, enumMap, fnRegistry);
       if (rhs) {
-        assignedVars.add(varName.toLowerCase());
-        jsLines.push(`${varName} = ${rhs};`);
+        jsLines.push(`const ${varName} = ${rhs};`);
       } else {
-        // Untranslatable RHS — emit as comment but still track the variable
-        // (it was assigned, just to something we can't translate)
         jsLines.push(`// ${line}`);
       }
       i++;
       continue;
     }
 
+    // Skip GoTo (VBA-only constructs)
+    if (/^GoTo\s+/i.test(line)) {
+      i++;
+      continue;
+    }
+
+    // Strip Set prefix for object assignments: Set x = expr → x = expr
+    let assignLine = line;
+    if (/^Set\s+/i.test(line)) {
+      assignLine = line.replace(/^Set\s+/i, '');
+    }
+
+    // Assignment pattern: x = expr (handles both Set and non-Set)
+    const assignMatch = assignLine.match(/^(\w+)\s*=\s*(.+)$/);
+    if (assignMatch) {
+      const varNameLower = assignMatch[1].toLowerCase();
+
+      // Function return value: FuncName = expr → return expr
+      if (funcName && varNameLower === funcName.toLowerCase()) {
+        const rhs = translateAssignmentRHS(assignMatch[2].trim(), assignedVars, enumMap, fnRegistry);
+        if (rhs) {
+          jsLines.push(`return ${rhs};`);
+        } else {
+          jsLines.push(`// ${line}`);
+        }
+        i++;
+        continue;
+      }
+
+      // Variable assignment: x = <rhs> where x is a declared variable
+      if (variables.has(varNameLower)) {
+        const rhs = translateAssignmentRHS(assignMatch[2].trim(), assignedVars, enumMap, fnRegistry);
+        if (rhs) {
+          assignedVars.add(varNameLower);
+          jsLines.push(`${assignMatch[1]} = ${rhs};`);
+        } else {
+          // Untranslatable RHS — emit as comment but still track the variable
+          // so conditions like `If x = 0` remain translatable
+          assignedVars.add(varNameLower);
+          jsLines.push(`// ${line}`);
+        }
+        i++;
+        continue;
+      }
+    }
+
     // Block If ... Then (multi-line — no statement after Then)
     if (/^If\s+.+\s+Then\s*$/i.test(line)) {
-      const result = parseIfBlock(lines, i, formName, variables, assignedVars);
+      const result = parseIfBlock(lines, i, formName, variables, assignedVars, enumMap, fnRegistry, funcName);
       jsLines.push(...result.jsLines);
       i = result.endIdx + 1;
       continue;
@@ -855,8 +1759,8 @@ function translateBlock(lines, startIdx, formName, variables, assignedVars) {
     // Single-line If: If <cond> Then <stmt>
     const singleIfMatch = line.match(/^If\s+(.+?)\s+Then\s+(.+)$/i);
     if (singleIfMatch) {
-      const cond = translateCondition(singleIfMatch[1], assignedVars);
-      const stmt = translateStatement(singleIfMatch[2].trim(), formName);
+      const cond = translateCondition(singleIfMatch[1], assignedVars, enumMap, fnRegistry);
+      const stmt = translateStatement(singleIfMatch[2].trim(), formName, enumMap, assignedVars, fnRegistry);
       if (cond && stmt) {
         jsLines.push(`if (${cond}) { ${stmt}; }`);
       } else {
@@ -869,7 +1773,7 @@ function translateBlock(lines, startIdx, formName, variables, assignedVars) {
 
     // Select Case — try to translate, fall back to comment
     if (/^Select\s+Case\b/i.test(line)) {
-      const result = parseSelectCaseBlock(lines, i, formName, variables, assignedVars);
+      const result = parseSelectCaseBlock(lines, i, formName, variables, assignedVars, enumMap, fnRegistry, funcName);
       jsLines.push(...result.jsLines);
       i = result.endIdx + 1;
       continue;
@@ -885,7 +1789,7 @@ function translateBlock(lines, startIdx, formName, variables, assignedVars) {
 
     // Numeric For — try to translate
     if (/^For\s+/i.test(line)) {
-      const result = parseForLoop(lines, i, formName, variables, assignedVars);
+      const result = parseForLoop(lines, i, formName, variables, assignedVars, enumMap, fnRegistry, funcName);
       if (result) {
         jsLines.push(...result.jsLines);
         i = result.endIdx + 1;
@@ -923,9 +1827,12 @@ function translateBlock(lines, startIdx, formName, variables, assignedVars) {
     }
 
     // Regular statement — delegate to translateStatement
-    const js = translateStatement(line, formName);
+    const js = translateStatement(line, formName, enumMap, assignedVars, fnRegistry);
     if (js) {
       jsLines.push(js + ';');
+    } else {
+      // Untranslatable statement — preserve as comment
+      jsLines.push(`// ${line}`);
     }
 
     i++;
@@ -935,55 +1842,148 @@ function translateBlock(lines, startIdx, formName, variables, assignedVars) {
 }
 
 /**
+ * Count non-comment lines in a JS output string.
+ */
+function countCodeLines(js) {
+  if (!js) return 0;
+  return js.split('\n').filter(l => !l.trim().startsWith('//')).length;
+}
+
+/**
  * Parse VBA source and return handler descriptors with JS code.
+ * Uses a multi-pass approach: pass 1 translates everything it can and builds
+ * a function registry from fn.* procedures. Pass 2+ retries handlers that
+ * had comment-only output, now with the full registry available for inside-out
+ * resolution of nested function calls.
+ *
  * @param {string} vbaSource - VBA module source
- * @param {string} [moduleName] - Module name (e.g. "Form_frmAbout") — used to derive form name for DoCmd.Close
+ * @param {string} [moduleName] - Module name (e.g. "Form_frmAbout") -- used to derive form name for DoCmd.Close
+ * @param {Map<string,number>} [enumMap] - Pre-collected enum map (cross-module)
+ * @param {Set<string>} [fnRegistry] - Pre-populated function registry (cross-module)
  * Returns [{key, control, event, procedure, js}]
  */
-function parseVbaToHandlers(vbaSource, moduleName) {
+function parseVbaToHandlers(vbaSource, moduleName, enumMap, fnRegistry) {
   if (!vbaSource) return [];
 
-  // Derive form/report name from module name (Form_frmAbout → frmAbout, Report_rptSales → rptSales)
+  // Derive form/report name from module name (Form_frmAbout -> frmAbout, Report_rptSales -> rptSales)
   let objectName = null;
   if (moduleName) {
     const prefixMatch = moduleName.match(/^(?:Form_|Report_)(.+)$/i);
     if (prefixMatch) objectName = prefixMatch[1];
   }
 
+  // Collect enums from this module's own source if no external map provided
+  if (!enumMap) {
+    enumMap = collectEnumValues(vbaSource);
+  }
+
+  // Initialize function registry if not provided (cross-module callers provide one)
+  if (!fnRegistry) {
+    fnRegistry = new Set();
+  }
+
+  // Collect module-level variable names for condition/expression translation
+  const moduleVars = collectModuleVars(vbaSource);
+
   const procedures = extractProcedures(vbaSource);
-  const handlers = [];
 
-  for (const proc of procedures) {
-    // Parse controlName_EventName
+  // Build procedure metadata (key, control, event) once — reused across passes
+  const procMeta = procedures.map(proc => {
     const match = proc.name.match(/^(.+?)_(\w+)$/);
-    if (!match) continue;
+    let key, controlKw, eventKey;
 
-    const [, rawControl, rawEvent] = match;
-    const eventKey = EVENT_MAP[rawEvent.toLowerCase()];
-    if (!eventKey) continue;
+    if (match) {
+      const [, rawControl, rawEvent] = match;
+      eventKey = EVENT_MAP[rawEvent.toLowerCase()];
+      if (eventKey) {
+        controlKw = rawControl === 'Form' ? 'form'
+          : rawControl === 'Report' ? 'report'
+          : toKw(rawControl);
+        key = `${controlKw}.${eventKey}`;
+      }
+    }
 
-    const controlKw = rawControl === 'Form' ? 'form'
-      : rawControl === 'Report' ? 'report'
-      : toKw(rawControl);
+    if (!key) {
+      controlKw = 'fn';
+      eventKey = proc.name;
+      key = `fn.${proc.name}`;
+    }
 
-    const key = `${controlKw}.${eventKey}`;
+    return { proc, key, controlKw, eventKey };
+  });
 
-    // Parse the VBA body into JS statements (with control flow)
+  // Pass 1: translate without fnRegistry, build registry from results
+  const handlers = [];
+  const retryIndices = []; // indices into procMeta that may benefit from retry
+
+  for (let idx = 0; idx < procMeta.length; idx++) {
+    const { proc, key, controlKw, eventKey } = procMeta[idx];
     const cleanLines = stripBoilerplate(proc.body);
-    const { jsLines } = translateBlock(cleanLines, 0, objectName);
+    // Seed assignedVars with module vars + procedure parameters
+    const initVars = new Set(moduleVars);
+    if (proc.params) {
+      for (const p of proc.params) initVars.add(p.toLowerCase());
+    }
+    const funcName = proc.kind === 'function' ? proc.name : null;
+    const { jsLines } = translateBlock(cleanLines, 0, objectName, null, initVars, enumMap, fnRegistry, funcName);
 
-    // Filter out comment-only lines to check if we have real JS
-    const realLines = jsLines.filter(l => !l.trimStart().startsWith('//'));
+    // Register fn.* procedures in the registry
+    if (controlKw === 'fn') {
+      fnRegistry.add(proc.name.toLowerCase());
+    }
 
-    // Only emit handler if we could translate at least something
-    if (realLines.length > 0) {
+    if (jsLines.length > 0) {
+      const js = jsLines.join('\n');
+      const codeCount = countCodeLines(js);
+      const commentCount = jsLines.filter(l => /^\s*\/\//.test(l)).length;
       handlers.push({
         key,
         control: controlKw,
         event: eventKey,
         procedure: proc.name,
-        js: jsLines.join('\n'),
+        js,
       });
+      // If handler has any comment lines, mark for retry (fnRegistry may resolve them)
+      if (commentCount > 0) {
+        retryIndices.push(handlers.length - 1);
+      }
+    }
+  }
+
+  // Pass 2+: retry handlers that were all-comments, now with fnRegistry populated
+  if (fnRegistry.size > 0 && retryIndices.length > 0) {
+    const MAX_PASSES = 3;
+    for (let pass = 0; pass < MAX_PASSES; pass++) {
+      let improved = false;
+      const stillPending = [];
+
+      for (const hIdx of retryIndices) {
+        const handler = handlers[hIdx];
+        const meta = procMeta.find(m => m.proc.name === handler.procedure);
+        if (!meta) continue;
+
+        const cleanLines = stripBoilerplate(meta.proc.body);
+        const retryVars = new Set(moduleVars);
+        if (meta.proc.params) {
+          for (const p of meta.proc.params) retryVars.add(p.toLowerCase());
+        }
+        const retryFuncName = meta.proc.kind === 'function' ? meta.proc.name : null;
+        const { jsLines } = translateBlock(cleanLines, 0, objectName, null, retryVars, enumMap, fnRegistry, retryFuncName);
+        const js = jsLines.join('\n');
+        const codeCount = countCodeLines(js);
+
+        if (codeCount > countCodeLines(handler.js)) {
+          handler.js = js;
+          improved = true;
+        }
+        if (codeCount === 0) {
+          stillPending.push(hIdx);
+        }
+      }
+
+      if (!improved || stillPending.length === 0) break;
+      retryIndices.length = 0;
+      retryIndices.push(...stillPending);
     }
   }
 
@@ -994,4 +1994,6 @@ module.exports = {
   parseVbaToHandlers, extractProcedures, stripBoilerplate, translateStatement,
   translateCondition, translateBlock, parseIfBlock, findEndKeyword,
   translateAssignmentRHS, parseSelectCaseBlock, parseForLoop,
+  collectEnumValues, collectModuleVars, translateDomainCall, parseDomainCall, translateCriteria,
+  translateExpression, parseFunctionCall, splitOnOperator,
 };

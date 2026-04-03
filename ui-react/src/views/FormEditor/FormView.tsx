@@ -6,6 +6,7 @@ import {
   applyShadeTint
 } from '@/lib/utils';
 import { applyConditionalFormatting } from '@/lib/expressions';
+import { executeHandler } from '@/lib/runtime';
 import type { Control, FormDefinition, Section } from '@/api/types';
 
 // Controls
@@ -39,15 +40,6 @@ function sortByTabIndex(controls: Control[]): Control[] {
 // ============================================================
 // Run JS handler
 // ============================================================
-
-function runJsHandler(jsCode: string, contextLabel: string) {
-  try {
-    const f = new Function(jsCode);
-    f.call(null);
-  } catch (e: unknown) {
-    console.warn('Error in event handler', contextLabel, ':', (e as Error).message);
-  }
-}
 
 // ============================================================
 // Single control renderer
@@ -111,7 +103,7 @@ function FormViewControl({
     const projection = useFormStore.getState().projection;
     if (!projection) return;
     const handler = projection.eventHandlers?.[`${ctrlName}::${eventKey}`];
-    if (handler?.js) runJsHandler(handler.js, `${ctrlName}.${eventKey}`);
+    if (handler?.js) executeHandler(handler.js, `${ctrlName}.${eventKey}`);
   }, [ctrlName]);
 
   const focusProps: Record<string, unknown> = {};

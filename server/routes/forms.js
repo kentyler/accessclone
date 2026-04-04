@@ -311,8 +311,23 @@ function createRouter(pool) {
         }
       }
 
+      // Drift check against locked tests (per-object, non-blocking)
+      let drift = null;
+      try {
+        const { runLockedTestsForObject } = require('../lib/test-harness/locked-test-runner');
+        drift = await runLockedTestsForObject(pool, databaseId, 'form', formName);
+        if (drift && drift.drifted) {
+          logEvent(pool, 'drift', 'PUT /api/forms/:name', `Drift detected: ${drift.failed}/${drift.total} assertions failed`, {
+            databaseId, objectType: 'form', objectName: formName,
+            propagation: { drift: { passed: drift.passed, failed: drift.failed, total: drift.total } }
+          });
+        }
+      } catch (driftErr) {
+        console.warn('Drift check failed:', driftErr.message);
+      }
+
       console.log(`Saved form: ${formName} v${newVersion} (database: ${databaseId})`);
-      res.json({ success: true, name: formName, version: newVersion, database_id: databaseId, evaluation });
+      res.json({ success: true, name: formName, version: newVersion, database_id: databaseId, evaluation, drift });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
       console.error('Error saving form:', err);

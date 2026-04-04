@@ -285,7 +285,7 @@
       "alternatives": ["topological-sort-dependencies", "user-specified import order"],
       "expressions": [
         {"artifact": "server/routes/database-import/import-query.js", "type": "code", "role": "single query import with error categorization"},
-        {"artifact": "ui/src/app/views/access_database_viewer.cljs", "type": "code", "role": "import-queries-phase retry loop"}
+        {"artifact": "ui-react/src/store/import.ts", "type": "code", "role": "import-queries-phase retry loop"}
       ]
     },
 
@@ -377,8 +377,7 @@
       "alternatives": ["llm-translates-vba-to-js"],
       "expressions": [
         {"artifact": "server/lib/vba-to-js.js", "type": "code", "role": "parser — extractProcedures, translateStatement, parseIfBlock, etc."},
-        {"artifact": "ui/src/app/runtime.cljs", "type": "code", "role": "window.AC runtime API (CLJS)"},
-        {"artifact": "ui-react/src/lib/runtime.ts", "type": "code", "role": "window.AC runtime API (React)"},
+        {"artifact": "ui-react/src/lib/runtime.ts", "type": "code", "role": "window.AC runtime API"},
         {"artifact": "skills/event-runtime.md", "type": "document", "role": "full architecture — handler loading, execution, supported events"},
         {"artifact": "skills/conversion-vba-js.md", "type": "document", "role": "VBA patterns reference, runtime API, common translations"}
       ]

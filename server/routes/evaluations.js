@@ -112,6 +112,92 @@ function createRouter(pool) {
   });
 
   /**
+   * GET /api/evaluations/intent-coverage
+   * Per-module intent coverage stats for a database.
+   * Query params: database_id (optional, defaults to X-Database-ID header)
+   */
+  router.get('/intent-coverage', async (req, res) => {
+    try {
+      const databaseId = req.query.database_id || req.databaseId;
+
+      // Load all modules with js_handlers
+      const modulesResult = await pool.query(`
+        SELECT name, definition
+        FROM shared.objects
+        WHERE database_id = $1 AND type = 'module' AND is_current = true
+        ORDER BY name
+      `, [databaseId]);
+
+      // Load all gesture intents
+      const intentsResult = await pool.query(`
+        SELECT i.content, o.name as module_name
+        FROM shared.intents i
+        JOIN shared.objects o ON i.object_id = o.id
+        WHERE o.database_id = $1 AND i.intent_type = 'gesture' AND o.is_current = true
+        ORDER BY o.name
+      `, [databaseId]);
+
+      // Group intents by module
+      const intentsByModule = {};
+      let totalIntents = 0;
+      for (const row of intentsResult.rows) {
+        const data = typeof row.content === 'string' ? JSON.parse(row.content) : row.content;
+        const procedures = data.procedures || (Array.isArray(data) ? data : []);
+        intentsByModule[row.module_name] = procedures;
+        totalIntents += procedures.length;
+      }
+
+      // Check for generated test files
+      const fs = require('fs');
+      const path = require('path');
+      const generatedDir = path.join(__dirname, '..', '__tests__', 'generated', databaseId);
+
+      const modules = [];
+      let totalHandlersWithJs = 0;
+      let totalTestFiles = 0;
+
+      for (const row of modulesResult.rows) {
+        const def = typeof row.definition === 'string' ? JSON.parse(row.definition) : row.definition;
+        const handlers = def?.js_handlers || {};
+        const procedures = intentsByModule[row.name] || [];
+        const handlersWithJs = Object.values(handlers).filter(h => h && h.js).length;
+        totalHandlersWithJs += handlersWithJs;
+
+        const testFilePath = path.join(generatedDir, `${row.name}.test.js`);
+        const testFileExists = fs.existsSync(testFilePath);
+        if (testFileExists) totalTestFiles++;
+
+        modules.push({
+          module: row.name,
+          procedures: procedures.length,
+          intents_total: procedures.reduce((sum, p) => sum + (p.intents ? p.intents.length : 0), 0),
+          handlers_with_js: handlersWithJs,
+          test_file_exists: testFileExists
+        });
+      }
+
+      const handlerCoveragePct = totalIntents > 0
+        ? Math.round((totalHandlersWithJs / Math.max(totalIntents, 1)) * 1000) / 10
+        : 0;
+      const testCoveragePct = modulesResult.rows.length > 0
+        ? Math.round((totalTestFiles / modulesResult.rows.length) * 1000) / 10
+        : 0;
+
+      res.json({
+        modules,
+        summary: {
+          total_intents: totalIntents,
+          handler_coverage_pct: handlerCoveragePct,
+          test_coverage_pct: testCoveragePct
+        }
+      });
+    } catch (err) {
+      console.error('Error fetching intent coverage:', err);
+      res.status(500).json({ error: 'Failed to fetch intent coverage' });
+    }
+  });
+
+  /**
    * GET /api/evaluations/:type/:name
    * Paginated evaluation history for an object.
    * Query params: limit (default 10, max 100), offset (default 0)

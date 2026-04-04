@@ -138,6 +138,118 @@ describe('runFormDeterministicChecks — backward compat', () => {
 });
 
 // ============================================================
+// handler_intent_coverage + handler_runtime_validity checks
+// ============================================================
+
+describe('handler_intent_coverage check', () => {
+  test('passes when intents have matching handlers', async () => {
+    const evalPool = {
+      query: jest.fn().mockImplementation((sql) => {
+        if (sql.includes('shared.intents')) {
+          return { rows: [{ content: {
+            procedures: [
+              { procedure: 'btnSave_Click', intents: [{ type: 'save-record' }] },
+              { procedure: 'btnClose_Click', intents: [{ type: 'close-current' }] }
+            ]
+          }}]};
+        }
+        if (sql.includes('js_handlers')) {
+          return { rows: [{ handlers: {
+            'evt.btnSave_Click': { js: 'AC.saveRecord();' },
+            'evt.btnClose_Click': { js: 'AC.closeForm();' }
+          }}]};
+        }
+        // EXPLAIN / combo-box
+        return { rows: [] };
+      })
+    };
+
+    const definition = {
+      name: 'frmTest',
+      'record-source': 'employees',
+      detail: { height: 200, controls: [] }
+    };
+
+    const results = await runFormDeterministicChecks(evalPool, 'test_schema', 'frmTest', definition, schemaInfo);
+    const coverageCheck = results.find(r => r.check === 'handler_intent_coverage');
+    expect(coverageCheck).toBeDefined();
+    expect(coverageCheck.passed).toBe(true);
+    expect(coverageCheck.details.coverage_pct).toBe(100);
+  });
+
+  test('skipped when no intents found', async () => {
+    const results = await runFormDeterministicChecks(mockPool, 'test_schema', 'frmNoIntents', {
+      name: 'frmNoIntents', 'record-source': 'employees', detail: { height: 200, controls: [] }
+    }, schemaInfo);
+    const coverageCheck = results.find(r => r.check === 'handler_intent_coverage');
+    expect(coverageCheck).toBeDefined();
+    expect(coverageCheck.passed).toBe(true);
+  });
+});
+
+describe('handler_runtime_validity check', () => {
+  test('passes when handlers execute without error', async () => {
+    const evalPool = {
+      query: jest.fn().mockImplementation((sql) => {
+        if (sql.includes('js_handlers')) {
+          return { rows: [{ handlers: {
+            'evt.btnSave_Click': { js: 'AC.saveRecord();' }
+          }}]};
+        }
+        // intents query, EXPLAIN, etc
+        return { rows: [] };
+      })
+    };
+
+    const definition = {
+      name: 'frmTest',
+      'record-source': 'employees',
+      detail: { height: 200, controls: [] }
+    };
+
+    const results = await runFormDeterministicChecks(evalPool, 'test_schema', 'frmTest', definition, schemaInfo);
+    const validityCheck = results.find(r => r.check === 'handler_runtime_validity');
+    expect(validityCheck).toBeDefined();
+    expect(validityCheck.passed).toBe(true);
+    expect(validityCheck.details.tested).toBe(1);
+  });
+
+  test('fails when handler throws', async () => {
+    const evalPool = {
+      query: jest.fn().mockImplementation((sql) => {
+        if (sql.includes('js_handlers')) {
+          return { rows: [{ handlers: {
+            'evt.btnBad_Click': { js: 'throw new Error("bad handler");' }
+          }}]};
+        }
+        return { rows: [] };
+      })
+    };
+
+    const definition = {
+      name: 'frmBad',
+      'record-source': 'employees',
+      detail: { height: 200, controls: [] }
+    };
+
+    const results = await runFormDeterministicChecks(evalPool, 'test_schema', 'frmBad', definition, schemaInfo);
+    const validityCheck = results.find(r => r.check === 'handler_runtime_validity');
+    expect(validityCheck).toBeDefined();
+    expect(validityCheck.passed).toBe(false);
+    expect(validityCheck.details.errors_count).toBe(1);
+  });
+
+  test('skipped when no module found', async () => {
+    const results = await runFormDeterministicChecks(mockPool, 'test_schema', 'frmNoModule', {
+      name: 'frmNoModule', detail: { height: 200, controls: [] }
+    }, schemaInfo);
+    const validityCheck = results.find(r => r.check === 'handler_runtime_validity');
+    expect(validityCheck).toBeDefined();
+    expect(validityCheck.passed).toBe(true);
+  });
+});
+
+// ============================================================
 // runAndRecordEvaluation
 // ============================================================
 

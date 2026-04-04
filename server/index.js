@@ -10,15 +10,13 @@ const { createApp } = require('./app');
 
 // Load graph modules
 const { initializeGraph } = require('./graph/schema');
-const { populateFromSchemas } = require('./graph/populate');
+const { populateFromSchemas, populateFromRoutes } = require('./graph/populate');
 
 const PORT = config.server.port;
 
 // Directories
 const SETTINGS_DIR = path.join(__dirname, '..', 'settings');
-const UI_PUBLIC_DIR = process.env.USE_CLJS_UI
-  ? path.join(__dirname, '..', 'ui', 'resources', 'public')
-  : path.join(__dirname, '..', 'ui-react', 'dist');
+const UI_PUBLIC_DIR = path.join(__dirname, '..', 'ui-react', 'dist');
 
 // Database connection pool
 const pool = new Pool({
@@ -63,7 +61,15 @@ pool.query('SELECT NOW()')
         console.log('Graph is empty, populating from schemas...');
         await populateFromSchemas(pool);
       } else {
-        console.log(`Graph already has ${nodeCount} nodes, skipping population`);
+        console.log(`Graph already has ${nodeCount} nodes, skipping schema population`);
+      }
+
+      // Always refresh route/function contract nodes from source files
+      try {
+        const routeStats = await populateFromRoutes(pool);
+        console.log(`Route contracts: ${routeStats.routes} routes, ${routeStats.functions} functions`);
+      } catch (err) {
+        console.error('Route contract population error:', err.message);
       }
     } catch (err) {
       console.error('Schema initialization error:', err.message);

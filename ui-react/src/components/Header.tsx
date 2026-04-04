@@ -5,8 +5,8 @@ import type { AppMode } from '@/api/types';
 export default function Header() {
   const {
     availableDatabases, currentDatabase, loadingObjects,
-    appMode, setAppMode, switchDatabase, optionsDialogOpen,
-    openOptionsDialog,
+    appMode, setAppMode, switchDatabase, loadDatabases,
+    optionsDialogOpen, openOptionsDialog,
   } = useUiStore();
 
   const [newDbOpen, setNewDbOpen] = useState(false);
@@ -31,6 +31,7 @@ export default function Header() {
       setNewDbName('');
       setNewDbDesc('');
       const slug = newDbName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+      await loadDatabases();
       await switchDatabase(slug);
     }
   };

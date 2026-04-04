@@ -7,7 +7,8 @@
     "start": "node index.js",
     "dev": "node --watch index.js",
     "test": "jest --verbose",
-    "test:db": "node -e \"process.env.ACCESSCLONE_DB_TESTS='1'; require('jest').run(['__tests__/db.schema-routing.test.js'])\""
+    "test:db": "node -e \"process.env.ACCESSCLONE_DB_TESTS='1'; require('jest').run(['__tests__/db.schema-routing.test.js'])\"",
+    "test:generated": "jest --testPathPattern=__tests__/generated/"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -22,6 +23,9 @@
     "testEnvironment": "node",
     "testMatch": [
       "**/__tests__/**/*.test.js"
+    ],
+    "testPathIgnorePatterns": [
+      "__tests__/generated/"
     ],
     "verbose": true
   }

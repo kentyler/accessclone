@@ -38,7 +38,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_nodes_unique_null_db
 -- Migrate: remove capability/potential nodes and simplify constraint (for existing installs)
 DO $$ BEGIN
   -- Remove legacy node types that are no longer stored in the graph
-  DELETE FROM shared._nodes WHERE node_type IN ('capability', 'potential', 'intent', 'application');
+  DELETE FROM shared._nodes WHERE node_type IN ('capability', 'potential', 'application');
   IF EXISTS (
     SELECT 1 FROM pg_constraint
     WHERE conname = 'valid_scope' AND conrelid = 'shared._nodes'::regclass
@@ -629,6 +629,52 @@ CREATE TABLE IF NOT EXISTS shared.evaluations (
 );
 CREATE INDEX IF NOT EXISTS idx_evaluations_object ON shared.evaluations(object_id);
 CREATE INDEX IF NOT EXISTS idx_evaluations_lookup ON shared.evaluations(database_id, object_type, object_name);
+
+-- ============================================================
+-- Locked Tests — frozen test assertions from intent graph
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.locked_tests (
+    id SERIAL PRIMARY KEY,
+    database_id VARCHAR(100) NOT NULL,
+    object_type VARCHAR(50) NOT NULL,
+    object_name VARCHAR(255) NOT NULL,
+    intent_type VARCHAR(50) NOT NULL,
+    assertions JSONB NOT NULL,
+    assertion_count INTEGER NOT NULL,
+    frozen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    invalidated_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_locked_tests_lookup
+  ON shared.locked_tests(database_id, object_type, object_name, intent_type);
+CREATE INDEX IF NOT EXISTS idx_locked_tests_active
+  ON shared.locked_tests(database_id) WHERE invalidated_at IS NULL;
+
+-- ============================================================
+-- Freeze Points — snapshots marking when tests were locked
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.freeze_points (
+    id SERIAL PRIMARY KEY,
+    database_id VARCHAR(100) NOT NULL,
+    frozen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    status VARCHAR(20) NOT NULL DEFAULT 'active',
+    snapshot JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_freeze_points_db ON shared.freeze_points(database_id, status);
+
+-- ============================================================
+-- Andon Pulls — records of when the cord was pulled
+-- ============================================================
+CREATE TABLE IF NOT EXISTS shared.andon_pulls (
+    id SERIAL PRIMARY KEY,
+    database_id VARCHAR(100) NOT NULL,
+    signal_type VARCHAR(50) NOT NULL,
+    coverage_value NUMERIC(5,4),
+    heterogeneity_value NUMERIC(5,4),
+    thresholds JSONB,
+    affected_objects JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_andon_pulls_db ON shared.andon_pulls(database_id);
 `;
 
 /**

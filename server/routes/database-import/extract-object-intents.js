@@ -160,20 +160,76 @@ module.exports = function(router, pool, secrets) {
         }
       }
 
+      // Extract macro gesture intents (deterministic — no LLM needed)
+      results.macros = { extracted: [], failed: [] };
+      const { extractIntentsForObject } = require('../../lib/intent-pipeline');
+
+      const macrosResult = await pool.query(
+        `SELECT id, name, definition FROM shared.objects
+         WHERE database_id = $1 AND type = 'macro' AND is_current = true`,
+        [database_id]
+      );
+
+      for (const macro of macrosResult.rows) {
+        try {
+          const def = typeof macro.definition === 'string' ? JSON.parse(macro.definition) : macro.definition;
+          const result = await extractIntentsForObject(pool, {
+            databaseId: database_id, objectType: 'macro', objectName: macro.name,
+            objectId: macro.id, definition: def
+          });
+          if (result.extracted) {
+            results.macros.extracted.push(macro.name);
+          } else {
+            results.macros.failed.push({ name: macro.name, error: result.error || 'No actions found' });
+          }
+        } catch (err) {
+          results.macros.failed.push({ name: macro.name, error: err.message });
+        }
+      }
+
+      // Extract table schema snapshots (deterministic — no LLM needed)
+      results.tables = { extracted: [], failed: [] };
+
+      const tablesResult = await pool.query(
+        `SELECT table_name FROM information_schema.tables
+         WHERE table_schema = $1 AND table_type = 'BASE TABLE' ORDER BY table_name`,
+        [schemaName]
+      );
+
+      for (const tbl of tablesResult.rows) {
+        try {
+          const result = await extractIntentsForObject(pool, {
+            databaseId: database_id, schemaName, objectType: 'table',
+            objectName: tbl.table_name, objectId: null, definition: null
+          });
+          if (result.extracted) {
+            results.tables.extracted.push(tbl.table_name);
+          } else {
+            results.tables.failed.push({ name: tbl.table_name, error: result.error || 'No columns found' });
+          }
+        } catch (err) {
+          results.tables.failed.push({ name: tbl.table_name, error: err.message });
+        }
+      }
+
       const totalExtracted = results.forms.extracted.length +
-        results.reports.extracted.length + results.queries.extracted.length;
+        results.reports.extracted.length + results.queries.extracted.length +
+        results.macros.extracted.length + results.tables.extracted.length;
       const totalFailed = results.forms.failed.length +
-        results.reports.failed.length + results.queries.failed.length;
+        results.reports.failed.length + results.queries.failed.length +
+        results.macros.failed.length + results.tables.failed.length;
       const structureExtracted = results.structure.extracted.length;
       const structureFailed = results.structure.failed.length;
 
       const intentTypes = [];
       if (totalExtracted > 0) intentTypes.push('business');
       if (structureExtracted > 0) intentTypes.push('structure');
+      if (results.macros.extracted.length > 0) intentTypes.push('gesture');
+      if (results.tables.extracted.length > 0) intentTypes.push('schema');
       await logEvent(pool, 'info', 'POST /api/database-import/extract-object-intents',
-        `Extracted intents: ${totalExtracted} business, ${structureExtracted} structure (${totalFailed + structureFailed} failed)`,
+        `Extracted intents: ${results.forms.extracted.length + results.reports.extracted.length} business, ${structureExtracted} structure, ${results.macros.extracted.length} gesture, ${results.tables.extracted.length} schema (${totalFailed + structureFailed} failed)`,
         { databaseId: database_id, details: JSON.stringify(results),
-          propagation: { intents: intentTypes, intent_counts: { business: totalExtracted, structure: structureExtracted } } });
+          propagation: { intents: intentTypes, intent_counts: { business: results.forms.extracted.length + results.reports.extracted.length, structure: structureExtracted, gesture: results.macros.extracted.length, schema: results.tables.extracted.length } } });
 
       res.json(results);
     } catch (err) {

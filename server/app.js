@@ -36,12 +36,13 @@ const attachmentsRoutes = require('./routes/attachments');
 const designCheckRoutes = require('./routes/design-check');
 const evaluationsRoutes = require('./routes/evaluations');
 const formGenRoutes = require('./routes/form-gen');
+const andonRoutes = require('./routes/andon');
 
 function createApp({
   pool,
   secrets = {},
   settingsDir = path.join(__dirname, '..', 'settings'),
-  uiPublicDir = path.join(__dirname, '..', 'ui', 'resources', 'public'),
+  uiPublicDir = path.join(__dirname, '..', 'ui-react', 'dist'),
 } = {}) {
   if (!pool) {
     throw new Error('createApp requires a pg Pool instance');
@@ -147,6 +148,9 @@ function createApp({
   app.use('/api/design-check', designCheckRoutes(pool, secrets));
   app.use('/api/evaluations', evaluationsRoutes(pool));
   app.use('/api/form-gen', formGenRoutes(pool, secrets));
+  const andonRouter = andonRoutes(pool);
+  app.use('/api/andon', andonRouter);
+  app.use('/api', andonRouter);  // mounts /api/intents/:database_id/completeness
   return { app, databasesRouter };
 }
 

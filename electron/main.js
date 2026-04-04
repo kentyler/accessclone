@@ -28,8 +28,8 @@ const serverPath = isDev
   ? path.join(__dirname, '..', 'server')
   : path.join(process.resourcesPath, 'server');
 const uiPublicPath = isDev
-  ? path.join(__dirname, '..', 'ui', 'resources', 'public')
-  : path.join(process.resourcesPath, 'ui', 'public');
+  ? path.join(__dirname, '..', 'ui-react', 'dist')
+  : path.join(process.resourcesPath, 'ui-react', 'dist');
 const projectRoot = isDev
   ? path.join(__dirname, '..')
   : process.resourcesPath;

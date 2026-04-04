@@ -528,8 +528,31 @@ function createRouter(pool) {
         console.warn('Failed to write handler file:', fileErr.message);
       }
 
+      // Populate graph for this module (non-fatal side effect)
+      try {
+        const { populateFromModule } = require('../graph/populate');
+        await populateFromModule(pool, moduleName, databaseId, definition);
+      } catch (graphErr) {
+        console.error('Error populating graph:', graphErr.message);
+      }
+
+      // Drift check against locked tests (per-object, non-blocking)
+      let drift = null;
+      try {
+        const { runLockedTestsForObject } = require('../lib/test-harness/locked-test-runner');
+        drift = await runLockedTestsForObject(pool, databaseId, 'module', moduleName);
+        if (drift && drift.drifted) {
+          logEvent(pool, 'drift', 'PUT /api/modules/:name', `Drift detected: ${drift.failed}/${drift.total} assertions failed`, {
+            databaseId, objectType: 'module', objectName: moduleName,
+            propagation: { drift: { passed: drift.passed, failed: drift.failed, total: drift.total } }
+          });
+        }
+      } catch (driftErr) {
+        console.warn('Drift check failed:', driftErr.message);
+      }
+
       console.log(`Saved module: ${moduleName} v${newVersion} (database: ${databaseId})`);
-      res.json({ success: true, name: moduleName, version: newVersion, database_id: databaseId });
+      res.json({ success: true, name: moduleName, version: newVersion, database_id: databaseId, drift });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
       console.error('Error saving module:', err);

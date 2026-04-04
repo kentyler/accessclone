@@ -22,6 +22,8 @@ const {
 const {
   populateFromSchemas,
   populateFromForm,
+  populateFromIntents,
+  populateFromRoutes,
   clearGraph
 } = require('../graph/populate');
 
@@ -343,11 +345,28 @@ module.exports = function(pool) {
   router.post('/populate', async (req, res) => {
     try {
       const schemaStats = await populateFromSchemas(pool);
-      logEvent(pool, 'action', 'POST /api/graph/populate', 'Graph populated from schemas', {
+      let intentStats = { intents: 0, edges: 0 };
+      if (req.databaseId) {
+        try {
+          intentStats = await populateFromIntents(pool, req.databaseId);
+        } catch (err) {
+          console.error('Intent population failed (non-fatal):', err.message);
+        }
+      }
+      let routeStats = { routes: 0, functions: 0, edges: 0 };
+      try {
+        routeStats = await populateFromRoutes(pool);
+      } catch (err) {
+        console.error('Route population failed (non-fatal):', err.message);
+      }
+      logEvent(pool, 'action', 'POST /api/graph/populate', 'Graph populated from schemas + intents + routes', {
         databaseId: req.databaseId,
-        propagation: { graph_nodes: schemaStats.tables + schemaStats.columns, graph_edges: schemaStats.edges }
+        propagation: {
+          graph_nodes: schemaStats.tables + schemaStats.columns + intentStats.intents + routeStats.routes + routeStats.functions,
+          graph_edges: schemaStats.edges + intentStats.edges + routeStats.edges
+        }
       });
-      res.json({ success: true, stats: { schema: schemaStats } });
+      res.json({ success: true, stats: { schema: schemaStats, intents: intentStats, routes: routeStats } });
     } catch (err) {
       console.error('Error populating graph:', err);
       logError(pool, 'POST /api/graph/populate', 'Failed to populate graph', err, { databaseId: req.databaseId });

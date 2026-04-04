@@ -115,17 +115,53 @@ function createRouter(pool) {
       };
 
       // Insert new version as current
-      await client.query(
+      const insertResult = await client.query(
         `INSERT INTO shared.objects (database_id, type, name, definition, description, status, version, is_current)
-         VALUES ($1, 'macro', $2, $3, $4, $5, $6, true)`,
+         VALUES ($1, 'macro', $2, $3, $4, $5, $6, true)
+         RETURNING id`,
         [databaseId, macroName, JSON.stringify(definition), description || null,
          status || 'pending', newVersion]
       );
 
       await client.query('COMMIT');
 
+      // Extract gesture intents from macro (deterministic, non-blocking)
+      const objectId = insertResult.rows[0].id;
+      try {
+        const { extractIntentsForObject } = require('../lib/intent-pipeline');
+        await extractIntentsForObject(pool, {
+          databaseId, objectType: 'macro', objectName: macroName,
+          objectId, definition
+        });
+      } catch (err) {
+        console.warn(`Macro intent extraction failed for ${macroName}:`, err.message);
+      }
+
+      // Populate graph for this macro (non-fatal side effect)
+      try {
+        const { populateFromMacro } = require('../graph/populate');
+        await populateFromMacro(pool, macroName, databaseId, definition);
+      } catch (graphErr) {
+        console.error('Error populating graph:', graphErr.message);
+      }
+
+      // Drift check against locked tests (per-object, non-blocking)
+      let drift = null;
+      try {
+        const { runLockedTestsForObject } = require('../lib/test-harness/locked-test-runner');
+        drift = await runLockedTestsForObject(pool, databaseId, 'macro', macroName);
+        if (drift && drift.drifted) {
+          logEvent(pool, 'drift', 'PUT /api/macros/:name', `Drift detected: ${drift.failed}/${drift.total} assertions failed`, {
+            databaseId, objectType: 'macro', objectName: macroName,
+            propagation: { drift: { passed: drift.passed, failed: drift.failed, total: drift.total } }
+          });
+        }
+      } catch (driftErr) {
+        console.warn('Drift check failed:', driftErr.message);
+      }
+
       console.log(`Saved macro: ${macroName} v${newVersion} (database: ${databaseId})`);
-      res.json({ success: true, name: macroName, version: newVersion, database_id: databaseId });
+      res.json({ success: true, name: macroName, version: newVersion, database_id: databaseId, drift });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
       console.error('Error saving macro:', err);

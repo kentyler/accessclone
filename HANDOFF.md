@@ -6,6 +6,190 @@ Shared scratchpad for AI assistants working on this codebase. Read this at sessi
 
 ## Current State
 
+### Just Shipped (2026-04-04, session 2)
+
+**EVENT**: route-function-contract-nodes
+
+**EXPRESSION** (what changed):
+- **Route Contract Extractor** (`server/graph/extract-routes.js`): Regex parser scans all `server/routes/**/*.js` files. Extracts HTTP method, path pattern, `req.body` field names (from destructuring), `req.query` fields, and `req.params` from path. 162 routes extracted from current codebase.
+- **Frontend Function Extractor** (`server/graph/extract-functions.js`): Regex parser scans `ui-react/src/store/import.ts`. Extracts function name, API endpoint, HTTP method, and field names sent in request body. 14 functions extracted (6 single-object importers + 8 pipeline steps).
+- **`populateFromRoutes()`** in `populate.js`: Creates `route` and `function` nodes in `shared._nodes` with `database_id='_system'`. Creates `calls` edges from functions to their matched routes. Cleans up stale nodes on re-run.
+- **3 contract predicates** in `predicate-evaluator.js`: `route_accepts_fields` (route has expected body fields), `function_sends_fields` (function sends expected fields), `contract_fields_match` (function's sent fields are subset of route's accepted fields). Classifications: route/function → boundary, contract_match → resolution.
+- **Contract test templates** (`server/lib/test-harness/contract-test-templates.js`): Generates locked test assertions from route/function graph nodes. Wired into `generate-locked-tests.js`.
+- **Wiring**: `populateFromRoutes` runs on server startup (always, not just first run), on `POST /api/graph/populate`, and before contract predicate evaluation in `locked-test-runner.js`. This ensures the graph always reflects current source code.
+- 1013 server tests + 72 electron tests pass (up from 982+72). New: contract-extraction (31 tests).
+
+**Files created**:
+- `server/graph/extract-routes.js`
+- `server/graph/extract-functions.js`
+- `server/lib/test-harness/contract-test-templates.js`
+- `server/__tests__/contract-extraction.test.js`
+
+**Files modified**:
+- `server/graph/populate.js` — added `populateFromRoutes()`, exports
+- `server/routes/graph.js` — wired `populateFromRoutes` into populate endpoint
+- `server/index.js` — call `populateFromRoutes` on startup
+- `server/lib/test-harness/predicate-evaluator.js` — 3 new predicate types + classification
+- `server/lib/test-harness/locked-test-runner.js` — `buildRouteContext()`, contract predicate refresh
+- `server/lib/test-harness/generate-locked-tests.js` — contract assertion generation path
+
+**CORONA** (what this is of):
+- The parameter rename drift incident: Claude Code rewrote `databasePath` → `path`, `tableName` → `name` across import functions. Server returned 400s, frontend silently swallowed errors. Nothing in existing schema/structure/business predicates could detect it because those guard database objects, not API contracts.
+- Contract nodes make API field names visible in the dependency graph. Freeze → evaluate catches drift even between server restarts.
+
+**WHAT THIS FORECLOSES**:
+- Silent parameter renames — any change to req.body field names or frontend request fields triggers contract predicate failure
+- Invisible API contract drift — field names are now first-class graph nodes with edges between callers and callees
+
+**WHAT THIS OPENS**:
+- Extension to other store files beyond import.ts
+- Runtime validation middleware (currently static analysis only)
+- Cross-service contract verification if architecture grows
+
+---
+
+### Just Shipped (2026-04-04, session 1)
+
+**EVENT**: andon-cord-intent-graph-as-fixed-point
+
+**EXPRESSION** (what changed):
+- **Bug fix**: `intent_data` → `content` across 6 files querying `shared.intents` (column was `content` in DDL but code used `intent_data`). Fixed in: `populate.js`, `generate-intent-tests.js`, `pipeline-evaluator.js`, `evaluations.js`, `evaluations.test.js`.
+- **Macro Intent Parser** (`server/lib/macro-intent-parser.js`): Deterministic parser for Access macro SaveAsText format. Maps macro actions (OpenForm, Close, SetTempVar, RunSQL, MsgBox, etc.) to the existing 30-type gesture vocabulary. Handles both SaveAsText line format and XML format. Conditional actions wrapped in `branch` intents.
+- **Intent Pipeline Orchestrator** (`server/lib/intent-pipeline.js`): `extractIntentsForObject(pool, params)` dispatches to per-type extractors. Macros → deterministic parser. Modules → existing LLM extractor. Tables → schema snapshot. Forms/Reports → LLM structure + business extraction. `storeIntents()` replaces existing intents and **invalidates active locked tests** for the object.
+- **Schema Snapshot**: Tables get `intent_type='schema'` intents capturing columns, types, nullability, FKs, check constraints at import time. Creates `shared.objects` entries for tables if needed (for FK to intents).
+- **Report Structure Intent Extraction** (`skills/report-structure-intent-extraction.md`): Report archetypes: tabular-list, grouped-summary, master-detail-report, label-report, form-letter, summary-report, chart-report, cross-tab, invoice-report. Report subpatterns: group-aggregate, running-total, conditional-formatting, page-break-on-group, subreport-link, computed-display, etc.
+- **Predicate Evaluator** (`server/lib/test-harness/predicate-evaluator.js`): Deterministic switch on 17 predicate types. Four categories: boundary (structural existence), transduction (behavioral mapping), resolution (reference integrity), trace (semantic consistency). `classifyPredicate()` for heterogeneity computation.
+- **Test Template Generators**: `structure-test-templates.js` (sections, bands, subforms, record-source, grouping), `business-test-templates.js` (entity references, related objects, category evidence), `schema-test-templates.js` (columns, types, nullability, FKs, defaults). Gesture templates already existed.
+- **Generate Locked Tests** (`server/lib/test-harness/generate-locked-tests.js`): Unified generator producing structured JSON assertions from all intent types.
+- **Locked Test Runner** (`server/lib/test-harness/locked-test-runner.js`): Loads active locked_tests, builds per-object context, evaluates all predicates. Computes coverage (pass/total ratio) and heterogeneity (Shannon entropy of failure distribution across 4 categories, normalized [0,1]).
+- **Schema migrations**: 3 new tables: `shared.locked_tests` (assertions JSONB, frozen_at, invalidated_at), `shared.freeze_points` (snapshot JSONB, status), `shared.andon_pulls` (signal_type, coverage/heterogeneity values, affected_objects JSONB).
+- **Andon Routes** (`server/routes/andon.js`): 5 endpoints:
+  - `GET /api/intents/:database_id/completeness` — per-type intent coverage gate
+  - `GET /api/andon/:database_id/status` — cord state (clear/pulled/no-freeze)
+  - `POST /api/andon/:database_id/freeze` — generate + lock all test assertions
+  - `POST /api/andon/:database_id/evaluate` — run locked tests, compute signals, pull cord if threshold breached
+  - `GET /api/andon/:database_id/history` — past andon pulls
+- 982 server tests + 72 electron tests pass (up from 909+72). New: macro-intent-parser (18+1 tests), predicate-evaluator (25 tests), andon (15 tests), evaluations test fix.
+
+**Files created**:
+- `server/lib/macro-intent-parser.js`
+- `server/lib/intent-pipeline.js`
+- `server/lib/test-harness/structure-test-templates.js`
+- `server/lib/test-harness/business-test-templates.js`
+- `server/lib/test-harness/schema-test-templates.js`
+- `server/lib/test-harness/predicate-evaluator.js`
+- `server/lib/test-harness/generate-locked-tests.js`
+- `server/lib/test-harness/locked-test-runner.js`
+- `server/routes/andon.js`
+- `skills/report-structure-intent-extraction.md`
+- `server/__tests__/macro-intent-parser.test.js`
+- `server/__tests__/predicate-evaluator.test.js`
+- `server/__tests__/andon.test.js`
+- `server/scripts/test-andon.js` — test script: freeze + evaluate
+
+**Files modified**:
+- `server/graph/populate.js` — intent_data → content
+- `server/lib/pipeline-evaluator.js` — intent_data → content
+- `server/routes/evaluations.js` — intent_data → content
+- `server/scripts/generate-intent-tests.js` — intent_data → content
+- `server/__tests__/evaluations.test.js` — intent_data → content in mock
+- `server/graph/schema.js` — 3 new table DDLs (locked_tests, freeze_points, andon_pulls)
+- `server/app.js` — mount andon routes
+- `server/routes/macros.js` — intent extraction on macro save
+- `server/routes/database-import/import-table.js` — schema snapshot after table import
+- `server/routes/database-import/extract-object-intents.js` — batch extraction for macros + tables
+
+**CORONA** (what this is of):
+- ANDON-INTENT.md — the intent graph as fixed point. Tests generated from intents, locked, drift detected by coverage/heterogeneity signals. The cord fires when thresholds breach.
+- Key constraint preserved: LLM in generation path (intent extraction), but NOT in evaluation path (predicate evaluator is pure deterministic switch).
+
+**WHAT THIS FORECLOSES**:
+- Unbounded development drift — freeze points create checkpoints that must be maintained
+- Intent extraction as manual afterthought — pipeline orchestrator makes it a standard import step
+- LLM-based test evaluation — all predicates are deterministic, no LLM in the measurement loop
+
+**WHAT THIS OPENS**:
+- Import any database → all objects get intents automatically → freeze → andon cord active
+- Heterogeneity signal distinguishes systemic drift (entropy across categories) from localized regression
+- Intent change invalidation — modifying an object's intents opens the cord until re-freeze
+
+**End-to-end verified (2026-04-04, session 2)**:
+- Schema migration: 3 tables created (locked_tests, freeze_points, andon_pulls)
+- Intent pipeline wired into: `macros.js` (macro save), `import-table.js` (table import), `extract-object-intents.js` (batch)
+- northwind_18 completeness: Forms 40/40 (business+structure), Reports 15/15 business (0/15 structure - needs LLM), Modules 66/66, Macros 11/11, Tables 28/28
+- Freeze: 199 objects, 1562 assertions locked
+- Evaluate: 77.1% coverage (threshold 90%) - cord pulled. Breakdown: form:business 99.4%, form:structure 94.9%, macro:gesture 100%, module:gesture 48.2%, report:business 100%, table:schema 100%
+
+**Bugs found and fixed during verification**:
+1. macro_xml `{value: "..."}` wrapper: Stored as JSON object, parser expected raw string. Fixed in `intent-pipeline.js`.
+2. SaveAsText XML-detection false positive: `_AXL` comment embeds XML with `<Action`. Fixed in `macro-intent-parser.js`.
+3. Quoted action names: `Action ="OpenForm"` — parser didn't strip quotes. Fixed.
+4. Handler lookup mismatch: Array-like storage vs key lookup. Added `findHandler()` in `predicate-evaluator.js`.
+5. Macro gesture assertions wrong type: Generated handler predicates for macros. Fixed to use `macro_has_action`.
+6. Freeze didn't invalidate old locked_tests: Multiple freeze points accumulated. Fixed `andon.js`.
+
+**REMAINING**:
+- Report structure intents: 0/15 reports have structure intents (needs LLM extraction with API key)
+- Module gesture coverage at 48.2% — improve VBA-to-JS parser or add LLM fallback for untranslated handlers
+- Import a fresh database end-to-end to verify intent-pipeline fires automatically during import
+- `node server/scripts/test-andon.js [database_id]` — quick freeze + evaluate script
+
+### Just Shipped (2026-04-03)
+
+**EVENT**: intent-graph-nodes-auto-generated-tests
+
+**EXPRESSION** (what changed):
+- **Mock AC Runtime** (`server/lib/test-harness/mock-ac.js`): `createMockAC(overrides)` — recording mock of all 65 `window.AC` methods. `executeWithMockAC(jsCode, ac, globals)` — evaluates handler JS via AsyncFunction (mirrors real runtime). 15 tests.
+- **Intent Test Templates** (`server/lib/test-harness/intent-templates.js`): Maps all 30 INTENT_VOCABULARY types to test assertion templates (`calledWith`, `called`, `alertCalled`, `noThrow`).
+- **Test Generator** (`server/lib/test-harness/generate-tests.js`): `generateTestFile(databaseId, moduleName, handlers, intentData)` — produces complete Jest test files from intents + handlers. CLI: `node scripts/generate-intent-tests.js <database_id> [module_name]`.
+- **Intent Graph Nodes** (`server/graph/populate.js`): `populateFromIntents(pool, databaseId)` creates `intent` nodes (node_type='intent') with `expresses` edges from source modules and `targets` edges to referenced forms/tables. Helpers: `flattenIntents()`, `extractTargetObjectName()`, `targetNodeType()`. Schema migration updated to keep intent nodes (removed `'intent'` from DELETE in `schema.js:41`).
+- **Graph route wired**: `POST /api/graph/populate` now calls `populateFromIntents` after `populateFromSchemas` (non-fatal on failure). Response includes `stats.intents`.
+- **2 new evaluation checks** in `runFormDeterministicChecks` (`pipeline-evaluator.js`):
+  - Check 5 `handler_intent_coverage`: For `Form_{name}` module, verifies gesture intent procedures have JS handlers. Passes at ≥50%.
+  - Check 6 `handler_runtime_validity`: Executes each handler against mock AC (safe defaults), reports those that throw.
+- **Coverage endpoint**: `GET /api/evaluations/intent-coverage?database_id=X` — returns per-module stats (procedures, intents, handlers_with_js, test_file_exists) + summary (total_intents, handler_coverage_pct, test_coverage_pct).
+- `package.json`: Added `test:generated` script, `testPathIgnorePatterns` excludes `__tests__/generated/` from default `npm test`.
+- 909 server tests + 72 electron tests pass (up from ~900). 5 new test-harness tests, 5 new evaluation check tests.
+
+**Files changed**:
+- `server/lib/test-harness/mock-ac.js` — new: mock AC runtime
+- `server/lib/test-harness/intent-templates.js` — new: 30 intent type → assertion templates
+- `server/lib/test-harness/generate-tests.js` — new: Jest test file generator
+- `server/scripts/generate-intent-tests.js` — new: CLI for generating intent tests
+- `server/__tests__/test-harness.test.js` — new: 15 tests for mock-ac + executeWithMockAC
+- `server/graph/schema.js` — removed 'intent' from DELETE migration
+- `server/graph/populate.js` — added populateFromIntents, flattenIntents, extractTargetObjectName
+- `server/routes/graph.js` — wired populateFromIntents into populate endpoint
+- `server/lib/pipeline-evaluator.js` — added checks 5 (handler_intent_coverage) + 6 (handler_runtime_validity)
+- `server/routes/evaluations.js` — added GET /api/evaluations/intent-coverage
+- `server/__tests__/evaluations.test.js` — 5 new tests for new checks
+- `server/package.json` — test:generated script, testPathIgnorePatterns
+
+**CORONA** (what this is of):
+- Engagement surface: **evaluation-on-save** (intents.json) — intents become first-class graph citizens, connecting "what VBA intended" to "what JS actually does." The evaluation system now has runtime verification (mock execution) in addition to structural validation.
+- `skills/event-runtime.md` — intents were "for LLM reasoning only." They now also participate in the graph and evaluation pipeline, though still NOT in runtime event dispatch.
+
+**WHAT THIS FORECLOSES**:
+- Intents as purely ephemeral LLM artifacts — they now persist as graph nodes with typed edges
+- Manual handler coverage tracking — automated via `handler_intent_coverage` check on every form evaluation
+
+**WHAT THIS OPENS**:
+- `POST /api/graph/populate` now creates intent nodes → graph queries can traverse from form → module → intents → target objects
+- Auto-generated tests from `generate-intent-tests.js` can be run in CI to verify parser output satisfies intent contracts
+- `handler_runtime_validity` check catches handlers that crash at evaluation time (before any user sees them)
+- Coverage endpoint gives dashboard-ready metrics for the whole database
+
+**THEORETICAL GROUND**: engagement-surface.md (evaluation checks as engagement surface expressions), trace-convention.md
+
+**WHAT TO VERIFY NEXT SESSION**:
+- Run `node server/scripts/generate-intent-tests.js northwind_18` — should generate test files in `__tests__/generated/northwind_18/`
+- Run `cd server && npx jest --testPathPattern=generated/` to verify generated tests execute
+- `POST /api/graph/populate` with X-Database-ID northwind_18 — should return intent node counts
+- `POST /api/evaluations/form/frmLogin/run` — should return 6 checks (4 existing + 2 new)
+- `GET /api/evaluations/intent-coverage?database_id=northwind_18` — should return coverage stats
+
+---
+
 ### Just Shipped (2026-04-02)
 
 **EVENT**: vba-to-js-parser-step3-builtins-returns

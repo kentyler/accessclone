@@ -9,6 +9,7 @@
 const { validateForm, validateReport } = require('../routes/lint/structural');
 const { getSchemaInfo, validateFormCrossObject, validateComboBoxSql, validateReportCrossObject } = require('../routes/lint/cross-object');
 const { summarizeDefinition } = require('../routes/chat/context');
+const { createMockAC, executeWithMockAC } = require('./test-harness/mock-ac');
 
 /**
  * Run deterministic checks against a converted form definition.
@@ -92,6 +93,122 @@ async function runFormDeterministicChecks(pool, schemaName, task, definition, sc
   } catch (err) {
     results.push({
       check: 'combo_sql_valid',
+      passed: true,
+      details: { note: 'Check skipped: ' + err.message }
+    });
+  }
+
+  // 5. Handler intent coverage — verify gesture intent procedures have JS handlers
+  try {
+    const moduleName = `Form_${objectName}`;
+    const intentResult = await pool.query(`
+      SELECT i.content
+      FROM shared.intents i
+      JOIN shared.objects o ON i.object_id = o.id
+      WHERE o.database_id = (SELECT database_id FROM shared.databases WHERE schema_name = $1 LIMIT 1)
+        AND o.name = $2 AND i.intent_type = 'gesture' AND o.is_current = true
+      LIMIT 1
+    `, [schemaName, moduleName]);
+
+    if (intentResult.rows.length > 0) {
+      const intentData = typeof intentResult.rows[0].content === 'string'
+        ? JSON.parse(intentResult.rows[0].content)
+        : intentResult.rows[0].content;
+      const procedures = intentData.procedures || (Array.isArray(intentData) ? intentData : []);
+
+      // Load handlers
+      const handlerResult = await pool.query(`
+        SELECT definition->'js_handlers' as handlers
+        FROM shared.objects
+        WHERE database_id = (SELECT database_id FROM shared.databases WHERE schema_name = $1 LIMIT 1)
+          AND name = $2 AND type = 'module' AND is_current = true
+        LIMIT 1
+      `, [schemaName, moduleName]);
+
+      const handlers = handlerResult.rows.length > 0
+        ? (typeof handlerResult.rows[0].handlers === 'string'
+            ? JSON.parse(handlerResult.rows[0].handlers)
+            : handlerResult.rows[0].handlers) || {}
+        : {};
+
+      let covered = 0;
+      const total = procedures.length;
+      for (const proc of procedures) {
+        const procName = proc.procedure || proc.name;
+        const possibleKeys = [procName, `evt.${procName}`, `fn.${procName}`];
+        const hasHandler = possibleKeys.some(k => handlers[k] && handlers[k].js);
+        if (hasHandler) covered++;
+      }
+
+      const coveragePct = total > 0 ? Math.round((covered / total) * 100) : 100;
+      results.push({
+        check: 'handler_intent_coverage',
+        passed: coveragePct >= 50,
+        details: { covered, total, coverage_pct: coveragePct }
+      });
+    } else {
+      results.push({
+        check: 'handler_intent_coverage',
+        passed: true,
+        details: { note: 'No gesture intents found for module' }
+      });
+    }
+  } catch (err) {
+    results.push({
+      check: 'handler_intent_coverage',
+      passed: true,
+      details: { note: 'Check skipped: ' + err.message }
+    });
+  }
+
+  // 6. Handler runtime validity — execute handlers against mock AC, check for throws
+  try {
+    const moduleName = `Form_${objectName}`;
+    const handlerResult = await pool.query(`
+      SELECT definition->'js_handlers' as handlers
+      FROM shared.objects
+      WHERE database_id = (SELECT database_id FROM shared.databases WHERE schema_name = $1 LIMIT 1)
+        AND name = $2 AND type = 'module' AND is_current = true
+      LIMIT 1
+    `, [schemaName, moduleName]);
+
+    if (handlerResult.rows.length > 0) {
+      const handlers = (typeof handlerResult.rows[0].handlers === 'string'
+        ? JSON.parse(handlerResult.rows[0].handlers)
+        : handlerResult.rows[0].handlers) || {};
+
+      const errors = [];
+      let tested = 0;
+      for (const [key, handler] of Object.entries(handlers)) {
+        if (!handler || !handler.js) continue;
+        tested++;
+        try {
+          const { ac } = createMockAC({ getValue: null, dLookup: 0, dCount: 0, dSum: 0, callFn: null });
+          await executeWithMockAC(handler.js, ac);
+        } catch (err) {
+          errors.push({ handler: key, error: err.message });
+        }
+      }
+
+      results.push({
+        check: 'handler_runtime_validity',
+        passed: errors.length === 0,
+        details: {
+          tested,
+          errors_count: errors.length,
+          errors: errors.slice(0, 10)
+        }
+      });
+    } else {
+      results.push({
+        check: 'handler_runtime_validity',
+        passed: true,
+        details: { note: 'No module found' }
+      });
+    }
+  } catch (err) {
+    results.push({
+      check: 'handler_runtime_validity',
       passed: true,
       details: { note: 'Check skipped: ' + err.message }
     });

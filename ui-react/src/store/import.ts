@@ -301,10 +301,14 @@ export const useImportStore = create<Store>()(
     // --------------------------------------------------------
     // Single-object imports
     // --------------------------------------------------------
-    async importForm(path, name) {
-      const res = await api.post<Record<string, unknown>>('/api/database-import/export-form', { path, name });
+    async importForm(databasePath, name) {
+      const targetDatabaseId = api.getDatabaseId();
+      const res = await api.post<Record<string, unknown>>('/api/database-import/export-form', {
+        databasePath, formName: name, targetDatabaseId,
+      });
       if (!res.ok || !res.data) return false;
-      const definition = convertAccessForm(res.data);
+      const formData = (res.data.formData ?? res.data) as Record<string, unknown>;
+      const definition = convertAccessForm(formData);
       const filename = sanitizeName(name);
       const saveRes = await api.put(`/api/forms/${encodeURIComponent(filename)}?source=import`, {
         name, ...definition,
@@ -312,10 +316,14 @@ export const useImportStore = create<Store>()(
       return saveRes.ok;
     },
 
-    async importReport(path, name) {
-      const res = await api.post<Record<string, unknown>>('/api/database-import/export-report', { path, name });
+    async importReport(databasePath, name) {
+      const targetDatabaseId = api.getDatabaseId();
+      const res = await api.post<Record<string, unknown>>('/api/database-import/export-report', {
+        databasePath, reportName: name, targetDatabaseId,
+      });
       if (!res.ok || !res.data) return false;
-      const definition = convertAccessReport(res.data);
+      const reportData = (res.data.reportData ?? res.data) as Record<string, unknown>;
+      const definition = convertAccessReport(reportData);
       const filename = sanitizeName(name);
       const saveRes = await api.put(`/api/reports/${encodeURIComponent(filename)}?source=import`, {
         name, ...definition,
@@ -323,33 +331,51 @@ export const useImportStore = create<Store>()(
       return saveRes.ok;
     },
 
-    async importModule(path, name) {
-      const res = await api.post<{ source?: string }>('/api/database-import/export-module', { path, name });
-      if (!res.ok || !res.data?.source) return false;
+    async importModule(databasePath, name) {
+      const targetDatabaseId = api.getDatabaseId();
+      const res = await api.post<Record<string, unknown>>('/api/database-import/export-module', {
+        databasePath, moduleName: name, targetDatabaseId,
+      });
+      if (!res.ok || !res.data) return false;
+      const moduleData = (res.data.moduleData ?? res.data) as Record<string, unknown>;
+      const source = (moduleData.code ?? moduleData.source) as string | undefined;
+      if (!source) return false;
       const filename = sanitizeName(name);
       const saveRes = await api.put(`/api/modules/${encodeURIComponent(filename)}`, {
-        name, vba_source: res.data.source,
+        name, vba_source: source,
       });
       return saveRes.ok;
     },
 
-    async importMacro(path, name) {
-      const res = await api.post<{ xml?: string }>('/api/database-import/export-macro', { path, name });
-      if (!res.ok || !res.data?.xml) return false;
+    async importMacro(databasePath, name) {
+      const targetDatabaseId = api.getDatabaseId();
+      const res = await api.post<Record<string, unknown>>('/api/database-import/export-macro', {
+        databasePath, macroName: name, targetDatabaseId,
+      });
+      if (!res.ok || !res.data) return false;
+      const macroData = (res.data.macroData ?? res.data) as Record<string, unknown>;
+      const xml = (macroData.definition ?? macroData.xml) as string | undefined;
+      if (!xml) return false;
       const filename = sanitizeName(name);
       const saveRes = await api.put(`/api/macros/${encodeURIComponent(filename)}`, {
-        name, definition: res.data.xml,
+        name, macro_xml: xml,
       });
       return saveRes.ok;
     },
 
-    async importTable(path, name) {
-      const res = await api.post<{ ok?: boolean }>('/api/database-import/import-table', { path, name });
+    async importTable(databasePath, name) {
+      const targetDatabaseId = api.getDatabaseId();
+      const res = await api.post<{ ok?: boolean }>('/api/database-import/import-table', {
+        databasePath, tableName: name, targetDatabaseId,
+      });
       return res.ok;
     },
 
-    async importQuery(path, name) {
-      const res = await api.post<{ ok?: boolean; category?: string; error?: string }>('/api/database-import/import-query', { path, name });
+    async importQuery(databasePath, name) {
+      const targetDatabaseId = api.getDatabaseId();
+      const res = await api.post<{ ok?: boolean; category?: string; error?: string }>('/api/database-import/import-query', {
+        databasePath, queryName: name, targetDatabaseId,
+      });
       if (res.ok && res.data.ok !== false) return { ok: true };
       return { ok: false, category: res.data?.category || 'conversion-error' };
     },
@@ -418,6 +444,13 @@ export const useImportStore = create<Store>()(
     async importAll(force = false) {
       if (get().importAllActive) return;
       set(s => { s.importAllActive = true; s.importing = true; s.autoImportPhase = 'importing'; });
+
+      // Ensure all selected databases are loaded before proceeding
+      for (const path of get().selectedPaths) {
+        if (!get().cache[path]) {
+          await get().loadAccessDatabase(path);
+        }
+      }
 
       const state = get();
       const allTypes: ObjectType[] = ['tables', 'forms', 'reports', 'modules', 'queries', 'macros'];
@@ -492,33 +525,34 @@ export const useImportStore = create<Store>()(
 
         // Post-import pipeline steps
         set(s => { s.autoImportPhase = 'translating'; });
+        const dbId = api.getDatabaseId();
 
-        // Apply fixes
+        // Apply fixes (reads X-Database-ID header)
         try { await api.post('/api/database-import/apply-fixes', {}); } catch { /* non-fatal */ }
 
         // Create function stubs
-        try { await api.post('/api/database-import/create-function-stubs', {}); } catch { /* non-fatal */ }
+        try { await api.post('/api/database-import/create-function-stubs', { targetDatabaseId: dbId }); } catch { /* non-fatal */ }
 
         // Translate modules
-        try { await api.post('/api/database-import/translate-modules', {}); } catch { /* non-fatal */ }
+        try { await api.post('/api/database-import/translate-modules', { database_id: dbId }); } catch { /* non-fatal */ }
 
         // Resolve expressions
-        try { await api.post('/api/database-import/resolve-expressions', {}); } catch { /* non-fatal */ }
+        try { await api.post('/api/database-import/resolve-expressions', { database_id: dbId }); } catch { /* non-fatal */ }
 
-        // Wire events
+        // Wire events (reads X-Database-ID header)
         try { await api.post('/api/database-import/wire-events', {}); } catch { /* non-fatal */ }
 
         // Validation pipeline
         try {
-          await api.post('/api/database-import/repair-pass', {});
-          await api.post('/api/database-import/validation-pass', {});
-          await api.post('/api/database-import/autofix-pass', {});
+          await api.post('/api/database-import/repair-pass', { database_id: dbId });
+          await api.post('/api/database-import/validation-pass', { database_id: dbId });
+          await api.post('/api/database-import/autofix-pass', { database_id: dbId });
         } catch { /* non-fatal */ }
 
         set(s => { s.autoImportPhase = 'complete'; });
       } finally {
-        await get().loadTargetExisting();
-        await get().loadImportLog();
+        try { await get().loadTargetExisting(); } catch { /* non-fatal */ }
+        try { await get().loadImportLog(); } catch { /* non-fatal */ }
         set(s => { s.importing = false; s.importAllActive = false; });
       }
     },

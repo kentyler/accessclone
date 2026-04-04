@@ -233,6 +233,42 @@ module.exports = function(router, pool) {
         console.error(`Failed to connect for objects row:`, err.message);
       }
 
+      // 11c. Populate graph for this table (non-fatal side effect)
+      try {
+        const { populateFromTable } = require('../../graph/populate');
+        await populateFromTable(pool, pgTableName, targetDatabaseId, schemaName);
+      } catch (graphErr) {
+        console.error('Error populating graph:', graphErr.message);
+      }
+
+      // 11d. Extract schema snapshot intent (deterministic, non-blocking)
+      try {
+        const { extractIntentsForObject } = require('../../lib/intent-pipeline');
+        await extractIntentsForObject(pool, {
+          databaseId: targetDatabaseId, schemaName,
+          objectType: 'table', objectName: pgTableName,
+          objectId: null, definition: null
+        });
+      } catch (err) {
+        console.warn(`Schema snapshot failed for ${pgTableName}:`, err.message);
+      }
+
+      // 11d. Drift check against locked schema tests (per-object, non-blocking)
+      let drift = null;
+      try {
+        const { runLockedTestsForObject } = require('../../lib/test-harness/locked-test-runner');
+        drift = await runLockedTestsForObject(pool, targetDatabaseId, 'table', pgTableName);
+        if (drift && drift.drifted) {
+          const { logEvent } = require('../../lib/events');
+          logEvent(pool, 'drift', 'POST /api/database-import/import-table', `Schema drift detected: ${drift.failed}/${drift.total} assertions failed`, {
+            databaseId: targetDatabaseId, objectType: 'table', objectName: pgTableName,
+            propagation: { drift: { passed: drift.passed, failed: drift.failed, total: drift.total } }
+          });
+        }
+      } catch (driftErr) {
+        console.warn('Schema drift check failed:', driftErr.message);
+      }
+
       // 12. Log success
       const skippedNames = (tableData.skippedColumns || []).map(c => c.name);
       const calculatedCols = columnInfo.filter(c => c.isCalculated);
@@ -281,7 +317,8 @@ module.exports = function(router, pool) {
         rowCount: rows.length,
         skippedColumns: skippedNames,
         calculatedColumns: calculatedCols.map(c => c.originalName),
-        calculatedWarnings
+        calculatedWarnings,
+        drift
       });
     } catch (err) {
       console.error(`Error importing table "${tableName}":`, err);

@@ -62,8 +62,8 @@
         "to": "forms"
       },
       {
-        "from": "../ui/resources/public",
-        "to": "ui/public"
+        "from": "../ui-react/dist",
+        "to": "ui-react/dist"
       }
     ],
     "win": {

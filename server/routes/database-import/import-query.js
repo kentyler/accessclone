@@ -258,6 +258,14 @@ module.exports = function(router, pool, secrets) {
         }
       }
 
+      // 6b. Populate graph for this query (non-fatal side effect)
+      try {
+        const { populateFromQuery } = require('../../graph/populate');
+        await populateFromQuery(pool, pgName, targetDatabaseId, schemaName, result.pgObjectType);
+      } catch (graphErr) {
+        console.error('Error populating graph:', graphErr.message);
+      }
+
       // 7. Clear schema cache
       clearSchemaCache(targetDatabaseId);
 

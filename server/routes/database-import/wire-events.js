@@ -8,7 +8,7 @@ const { populateControlEventMap } = require('../../lib/event-mapping');
 
 module.exports = function (router, pool) {
   router.post('/wire-events', async (req, res) => {
-    const databaseId = req.databaseId;
+    const databaseId = req.databaseId || req.headers['x-database-id'];
     if (!databaseId) {
       return res.status(400).json({ error: 'Missing X-Database-ID header' });
     }

@@ -7,7 +7,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "GetRandomPkValue",
     procedure: "GetRandomPkValue",
-    js: "let rs;\n// Set rs = CurrentDb.OpenRecordset(strTable, dbOpenSnapshot)\n// [VBA With block skipped]"
+    js: "let rs;\n// Set rs = CurrentDb.OpenRecordset(strTable, dbOpenSnapshot)\n// [VBA With block - target not translatable: rs]\n//   .MoveLast\n//   .MoveFirst\n//   .Move GetRandom(0, .RecordCount - 1)\n//   GetRandomPkValue = .Fields(strPkField)\n//   .Close\n// End With"
   },
   "fn.HasDataMacro": {
     key: "fn.HasDataMacro",
@@ -21,14 +21,14 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "HasField",
     procedure: "HasField",
-    js: "let fld;\n// Set fld = td.Fields(strField)\n// HasField = (Err.Number = 0)\n// Set fld = Nothing"
+    js: "let fld;\n// Set fld = td.Fields(strField)\n// HasField = (Err.Number = 0)\nfld = null;"
   },
   "fn.HasProperty": {
     key: "fn.HasProperty",
     control: "fn",
     event: "HasProperty",
     procedure: "HasProperty",
-    js: "let blnResult;\nlet strName;\n// strName = o.Properties(propName).Name   'All properties have a Name property.\n// blnResult = (Err.Number = 0)\nreturn blnResult;"
+    js: "let blnResult;\nlet strName;\n// strName = o.Properties(propName).Name\n// blnResult = (Err.Number = 0)\nreturn blnResult;"
   }
 };
 

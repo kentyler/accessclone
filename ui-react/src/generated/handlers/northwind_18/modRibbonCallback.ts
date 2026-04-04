@@ -28,7 +28,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "cmdAddPurchaseOrder_OnAction",
     procedure: "cmdAddPurchaseOrder_OnAction",
-    js: "// OpenPurchaseOrderDetailsForm"
+    js: "await AC.callFn(\"OpenPurchaseOrderDetailsForm\");"
   },
   "fn.cmdAdmin_OnAction": {
     key: "fn.cmdAdmin_OnAction",
@@ -63,7 +63,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "cmdExportToExcel_OnAction",
     procedure: "cmdExportToExcel_OnAction",
-    js: "// RunCommand acCmdExportExcel"
+    js: "/* RunCommand acCmdExportExcel — not supported in web */;"
   },
   "fn.cmdFeatures_OnAction": {
     key: "fn.cmdFeatures_OnAction",
@@ -84,7 +84,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "cmdNorthwindDocumentation_OnAction",
     procedure: "cmdNorthwindDocumentation_OnAction",
-    js: "// Application.FollowHyperlink \"https://support.microsoft.com/topic/32eb79d2-bede-4ea4-b575-0714ca8dc1e2\""
+    js: "window.open(\"https://support.microsoft.com/topic/32eb79d2-bede-4ea4-b575-0714ca8dc1e2\");"
   },
   "fn.cmdOrders_OnAction": {
     key: "fn.cmdOrders_OnAction",
@@ -119,7 +119,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "ddMRU_GetItemCount",
     procedure: "ddMRU_GetItemCount",
-    js: "// [VBA If block - condition not translatable]\n// If m_rsMRU Is Nothing Then\n//   Set m_rsMRU = CurrentDb.OpenRecordset(\"qryMRU\", dbOpenDynaset)      'Dynaset because we may be deleting rows that no longer apply.\n// End If\n// [VBA With block skipped]"
+    js: "// [VBA If block - condition not translatable]\n// If m_rsMRU Is Nothing Then\n//   Set m_rsMRU = CurrentDb.OpenRecordset(\"qryMRU\", dbOpenDynaset)\n// End If\n// [VBA With block - target not translatable: m_rsMRU]\n//   .Requery\n//   If .RecordCount > 0 Then\n//   .MoveLast\n//   .MoveFirst\n//   End If\n//   count = Nz(m_rsMRU.RecordCount, 0)\n// End With"
   },
   "fn.ddMRU_GetItemID": {
     key: "fn.ddMRU_GetItemID",
@@ -133,21 +133,21 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "ddMRU_GetItemLabel",
     procedure: "ddMRU_GetItemLabel",
-    js: "let varCompanyID;\n// [VBA If block - condition not translatable]\n// If m_rsMRU.RecordCount > 0 Then\n//   m_rsMRU.MoveFirst\n//   m_rsMRU.Move Index\n//   Select Case m_rsMRU!TableName\n//   Case \"Orders\"\n//   varCompanyID = DLookup(\"CustomerID\", \"Orders\", \"OrderID = \" & m_rsMRU!PKValue)\n//   If IsNull(varCompanyID) Then\n//   m_rsMRU.Delete     'MRU record points to a no longer existing order.\n//   Else\n//   Label = StringFormat(\"Order {0}, {1}\", m_rsMRU!PKValue, DLookup(\"CompanyName\", \"Companies\", \"CompanyID = \" & varCompanyID))\n//   End If\n//   Case \"PurchaseOrders\"\n//   varCompanyID = DLookup(\"VendorID\", \"PurchaseOrders\", \"PurchaseOrderID = \" & m_rsMRU!PKValue)\n//   If IsNull(varCompanyID) Then\n//   m_rsMRU.Delete     'MRU record points to a no longer existing purchase order.\n//   Else\n//   Label = StringFormat(\"PO {0}, {1}\", m_rsMRU!PKValue, DLookup(\"CompanyName\", \"Companies\", \"CompanyID = \" & varCompanyID))\n//   End If\n//   Case Else\n//   Debug.Assert False      'Support for this tablename not yet implemented.\n//   End Select\n// End If"
+    js: "let varCompanyID;\n// [VBA If block - condition not translatable]\n// If m_rsMRU.RecordCount > 0 Then\n//   m_rsMRU.MoveFirst\n//   m_rsMRU.Move Index\n//   Select Case m_rsMRU!TableName\n//   Case \"Orders\"\n//   varCompanyID = DLookup(\"CustomerID\", \"Orders\", \"OrderID = \" & m_rsMRU!PKValue)\n//   If IsNull(varCompanyID) Then\n//   m_rsMRU.Delete\n//   Else\n//   Label = StringFormat(\"Order {0}, {1}\", m_rsMRU!PKValue, DLookup(\"CompanyName\", \"Companies\", \"CompanyID = \" & varCompanyID))\n//   End If\n//   Case \"PurchaseOrders\"\n//   varCompanyID = DLookup(\"VendorID\", \"PurchaseOrders\", \"PurchaseOrderID = \" & m_rsMRU!PKValue)\n//   If IsNull(varCompanyID) Then\n//   m_rsMRU.Delete\n//   Else\n//   Label = StringFormat(\"PO {0}, {1}\", m_rsMRU!PKValue, DLookup(\"CompanyName\", \"Companies\", \"CompanyID = \" & varCompanyID))\n//   End If\n//   Case Else\n//   Debug.Assert False\n//   End Select\n// End If"
   },
   "fn.ddMRU_GetSelectedItemIndex": {
     key: "fn.ddMRU_GetSelectedItemIndex",
     control: "fn",
     event: "ddMRU_GetSelectedItemIndex",
     procedure: "ddMRU_GetSelectedItemIndex",
-    js: "// Index = 0       'Select first item in the list.\n// [VBA If block - condition not translatable]\n// If Screen.ActiveForm.Name = \"frmOrderDetails\" Then\n//   m_rsMRU.FindFirst \"PKValue = \" & Screen.ActiveForm.OrderID\n//   Index = m_rsMRU.AbsolutePosition\n// End If\n// [VBA If block - condition not translatable]\n// If Screen.ActiveForm.Name = \"frmPurchaseOrderDetails\" Then\n//   m_rsMRU.FindFirst \"PKValue = \" & Screen.ActiveForm.PurchaseOrderID\n//   Index = m_rsMRU.AbsolutePosition\n// End If"
+    js: "Index = 0;\n// [VBA If block - condition not translatable]\n// If Screen.ActiveForm.Name = \"frmOrderDetails\" Then\n//   m_rsMRU.FindFirst \"PKValue = \" & Screen.ActiveForm.OrderID\n//   Index = m_rsMRU.AbsolutePosition\n// End If\n// [VBA If block - condition not translatable]\n// If Screen.ActiveForm.Name = \"frmPurchaseOrderDetails\" Then\n//   m_rsMRU.FindFirst \"PKValue = \" & Screen.ActiveForm.PurchaseOrderID\n//   Index = m_rsMRU.AbsolutePosition\n// End If"
   },
   "fn.ddMRU_OnAction": {
     key: "fn.ddMRU_OnAction",
     control: "fn",
     event: "ddMRU_OnAction",
     procedure: "ddMRU_OnAction",
-    js: "// m_rsMRU.FindFirst \"MRU_ID = \" & selectedId\n// Debug.Assert Not m_rsMRU.NoMatch            'If this asserts, a record that was added to the dropdown is no longer there.\n// [VBA Select Case - expression not translatable]\n// Select Case m_rsMRU!TableName\n// Case \"Orders\"\n// OpenOrderDetailsForm m_rsMRU!PKValue\n// Case \"PurchaseOrders\"\n// OpenPurchaseOrderDetailsForm m_rsMRU!PKValue\n// Case Else\n// Debug.Assert False      'Support for this tablename not yet implemented.\n// End Select"
+    js: "// m_rsMRU.FindFirst \"MRU_ID = \" & selectedId\n// Debug.Assert Not m_rsMRU.NoMatch\n// [VBA Select Case - expression not translatable]\n// Select Case m_rsMRU!TableName\n// Case \"Orders\"\n// OpenOrderDetailsForm m_rsMRU!PKValue\n// Case \"PurchaseOrders\"\n// OpenPurchaseOrderDetailsForm m_rsMRU!PKValue\n// Case Else\n// Debug.Assert False\n// End Select"
   },
   "fn.ddMRU_OnChange": {
     key: "fn.ddMRU_OnChange",
@@ -168,14 +168,14 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "RibbonFinish",
     procedure: "RibbonFinish",
-    js: "// m_rsMRU.Close\n// Set m_rsMRU = Nothing"
+    js: "// m_rsMRU.Close\nm_rsMRU = null;"
   },
   "fn.ribbonLoaded": {
     key: "fn.ribbonLoaded",
     control: "fn",
     event: "ribbonLoaded",
     procedure: "ribbonLoaded",
-    js: "// Set m_Ribbon = ribbonUI\n// ActivateTab \"tHome\""
+    js: "m_Ribbon = ribbonUI;\nawait AC.callFn(\"ActivateTab\", \"tHome\");"
   },
   "fn.Ribbon_RefreshMRU": {
     key: "fn.Ribbon_RefreshMRU",

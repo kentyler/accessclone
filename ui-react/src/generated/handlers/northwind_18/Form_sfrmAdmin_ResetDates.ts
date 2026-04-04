@@ -7,7 +7,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "cmd-reset-dates",
     event: "on-click",
     procedure: "cmdResetDates_Click",
-    js: "// SetDatesToCurrent\nalert(\"Done. Reopen your forms to see the new dates.\");"
+    js: "await AC.callFn(\"SetDatesToCurrent\");\nalert(\"Done. Reopen your forms to see the new dates.\");"
   }
 };
 

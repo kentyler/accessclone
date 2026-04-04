@@ -21,28 +21,28 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "CreateRandomOrders",
     procedure: "CreateRandomOrders",
-    js: "let rsOrders;\nlet rsOrderDetails;\nlet intAvailable;\nlet intOrder;\nlet intDetail;\nlet intDetails;\nlet lngOrderID;\n// Set rsOrders = CurrentDb.OpenRecordset(\"Orders\", dbOpenDynaset)\n// Set rsOrderDetails = CurrentDb.OpenRecordset(\"OrderDetails\", dbOpenDynaset)\nfor (let intOrder = 1; intOrder <= intOrderCount; intOrder++) {\n  // [VBA With block skipped]\n  // intDetails = GetRandom(2, 5)\n  for (let intDetail = 2; intDetail <= intDetails; intDetail++) {\n    // [VBA With block skipped]\n  }\n  // AddToMRU \"Orders\", lngOrderID\n}\n// rsOrderDetails.Close\n// rsOrders.Close"
+    js: "let rsOrders;\nlet rsOrderDetails;\nlet intAvailable;\nlet intOrder;\nlet intDetail;\nlet intDetails;\nlet lngOrderID;\n// Set rsOrders = CurrentDb.OpenRecordset(\"Orders\", dbOpenDynaset)\n// Set rsOrderDetails = CurrentDb.OpenRecordset(\"OrderDetails\", dbOpenDynaset)\nfor (let intOrder = 1; intOrder <= intOrderCount; intOrder++) {\n  // [VBA With block - target not translatable: rsOrders]\n  //   .AddNew\n  //   !EmployeeID = INTERNET_SALES_EMPLOYEEID\n  //   !CustomerID = GetRandomCustomerID()\n  //   !OrderDate = Now\n  //   !TaxRate = GetSystemSetting(ssTaxRate)\n  //   !TaxStatusID = GetTaxStatusID(!CustomerID)\n  //   !OrderStatusID = enumOrderStatus.osNew\n  //   !Notes = \"Internet Order\"\n  //   .Update\n  //   .Move 0, .LastModified\n  //   lngOrderID = !OrderID\n  // End With\n  intDetails = await AC.callFn(\"GetRandom\", 2, 5);\n  for (let intDetail = 2; intDetail <= intDetails; intDetail++) {\n    // [VBA With block - target not translatable: rsOrderDetails]\n    //   .AddNew\n    //   !OrderID = lngOrderID\n    //   !ProductID = GetRandomProductID()\n    //   !Quantity = GetRandom(5, 50)\n    //   intAvailable = ProductAvailable(!ProductID)\n    //   If intAvailable >= !Quantity Then\n    //   !OrderDetailStatusID = enumOrderDetailStatus.odsAllocated\n    //   Else\n    //   !OrderDetailStatusID = enumOrderDetailStatus.odsNoStock\n    //   End If\n    //   !UnitPrice = DLookup(\"UnitPrice\", \"Products\", \"ProductID = \" & !ProductID)\n    //   .Update\n    //   .Move 0, .LastModified\n    //   If !OrderDetailStatusID = enumOrderDetailStatus.odsNoStock Then AllocateInventory !ProductID\n    // End With\n  }\n  await AC.callFn(\"AddToMRU\", \"Orders\", lngOrderID);\n}\n// rsOrderDetails.Close\n// rsOrders.Close"
   },
   "fn.GetRandomProductID": {
     key: "fn.GetRandomProductID",
     control: "fn",
     event: "GetRandomProductID",
     procedure: "GetRandomProductID",
-    js: "// GetRandomProductID = GetRandomPkValue(\"Products\", \"ProductID\")"
+    js: "return await AC.callFn(\"GetRandomPkValue\", \"Products\", \"ProductID\");"
   },
   "fn.OpenOrderDetailsForm": {
     key: "fn.OpenOrderDetailsForm",
     control: "fn",
     event: "OpenOrderDetailsForm",
     procedure: "OpenOrderDetailsForm",
-    js: "let frm;\n// If g_colOrderDetailsForms Is Nothing Then Set g_colOrderDetailsForms = New Collection\n// If Not IsMissing(varOrderID) Then TempVars!OpenArgs = \"OrderID=\" & varOrderID     'Make OpenArgs self-describing by using name=value pairs like a querystring. StringToDictionary function can be used to pick it apart.\n// Set frm = New Form_frmOrderDetails\n// frm.Visible = True\n// g_colOrderDetailsForms.Add frm, CStr(frm.Hwnd)\n// Set frm = Nothing"
+    js: "let frm;\n// If g_colOrderDetailsForms Is Nothing Then Set g_colOrderDetailsForms = New Collection\n// If Not IsMissing(varOrderID) Then TempVars!OpenArgs = \"OrderID=\" & varOrderID\n// Set frm = New Form_frmOrderDetails\nAC.setVisible(frm, true);\n// g_colOrderDetailsForms.Add frm, CStr(frm.Hwnd)\nfrm = null;"
   },
   "fn.SetDatesToCurrent": {
     key: "fn.SetDatesToCurrent",
     control: "fn",
     event: "SetDatesToCurrent",
     procedure: "SetDatesToCurrent",
-    js: "let dtMax;\nlet intDelta;\nlet td;\nlet fld;\nlet db;\nlet sql;\n// dtMax = Nz(DMax(\"OrderDate\", \"Orders\"), Date)       'Nz in case there are no orders, and DMax returns Null.\n// intDelta = DateDiff(\"d\", dtMax, Date)\n// If intDelta < 0 Then GoTo Exit_Handler              'Prevent error 3316: Shipped Date and Paid Date must be on or after the Order Date\n// Set db = CurrentDb\n// [VBA For Each loop skipped]"
+    js: "let dtMax;\nlet intDelta;\nlet td;\nlet fld;\nlet db;\nlet sql;\ndtMax = AC.nz(await AC.dMax(\"OrderDate\", \"Orders\"), new Date());\nintDelta = AC.dateDiff(\"d\", dtMax, new Date());\n// If intDelta < 0 Then GoTo Exit_Handler\n// Set db = CurrentDb\n// [VBA For Each - collection not translatable: db.TableDefs]\n//   If td.Attributes And DAO.TableDefAttributeEnum.dbSystemObject Then\n//   Else\n//   For Each fld In td.Fields\n//   If fld.Type = DAO.DataTypeEnum.dbDate Then\n//   Debug.Print td.Name, fld.Name\n//   sql = StringFormat(\"update {0} set {1} = dateadd('d', {2}, {1})\", td.Name, fld.Name, intDelta)\n//   db.Execute sql, dbFailOnError\n//   End If\n//   Next fld\n//   End If\n// Next"
   }
 };
 

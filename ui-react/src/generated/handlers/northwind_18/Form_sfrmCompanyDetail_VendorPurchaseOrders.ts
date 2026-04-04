@@ -14,7 +14,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "OpenForm_frmPurchaseOrderDetails",
     procedure: "OpenForm_frmPurchaseOrderDetails",
-    js: "// OpenPurchaseOrderDetailsForm Me.PurchaseOrderID"
+    js: "await AC.callFn(\"OpenPurchaseOrderDetailsForm\", AC.getValue(\"PurchaseOrderID\"));"
   }
 };
 

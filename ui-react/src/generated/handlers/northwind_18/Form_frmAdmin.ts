@@ -70,7 +70,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "UpdateSubLabels",
     procedure: "UpdateSubLabels",
-    js: "AC.setValue(\"lblSystemSettingsSub\", \"Count: \");\nAC.setValue(\"lblInternetOrdersSub\", \"Last 30 days: \");\nAC.setValue(\"lblResetDatesSub\", \"Last Reset: \");\nAC.setValue(\"lblStringsSub\", \"Count: \");\nAC.setValue(\"lblPrivilegesSub\", \"Count: \");"
+    js: "AC.setValue(\"lblSystemSettingsSub\", \"Count: \" + await AC.dCount(\"*\", \"SystemSettings\"));\n// Me.lblInternetOrdersSub.Caption = \"Last 30 days: \" & DCount(\"*\", \"Orders\", StringFormatSQL(\"EmployeeID = {0} and OrderDate > {1}\", INTERNET_SALES_EMPLOYEEID, DateAdd(\"d\", -30, Date)))\nAC.setValue(\"lblResetDatesSub\", \"Last Reset: \" + await AC.callFn(\"GetSystemSetting\", 4));\nAC.setValue(\"lblStringsSub\", \"Count: \" + await AC.dCount(\"*\", \"Strings\"));\nAC.setValue(\"lblPrivilegesSub\", \"Count: \" + await AC.dCount(\"*\", \"Privileges\"));"
   }
 };
 

@@ -21,7 +21,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "OpenPurchaseOrderDetailsForm",
     procedure: "OpenPurchaseOrderDetailsForm",
-    js: "let frm;\n// If g_colPurchaseOrderDetailsForms Is Nothing Then Set g_colPurchaseOrderDetailsForms = New Collection\n// If Not IsMissing(varPurchaseOrderID) Then TempVars!OpenArgs = \"PurchaseOrderID=\" & varPurchaseOrderID     'Make OpenArgs self-describing by using name=value pairs like a querystring. StringToDictionary function can be used to pick it apart.\n// Set frm = New Form_frmPurchaseOrderDetails\n// frm.Visible = True\n// g_colPurchaseOrderDetailsForms.Add frm, CStr(frm.Hwnd)\n// Set frm = Nothing"
+    js: "let frm;\n// If g_colPurchaseOrderDetailsForms Is Nothing Then Set g_colPurchaseOrderDetailsForms = New Collection\n// If Not IsMissing(varPurchaseOrderID) Then TempVars!OpenArgs = \"PurchaseOrderID=\" & varPurchaseOrderID\n// Set frm = New Form_frmPurchaseOrderDetails\nAC.setVisible(frm, true);\n// g_colPurchaseOrderDetailsForms.Add frm, CStr(frm.Hwnd)\nfrm = null;"
   }
 };
 

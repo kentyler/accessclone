@@ -14,42 +14,42 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "form",
     event: "after-update",
     procedure: "Form_AfterUpdate",
-    js: "// ValidateForm_RemoveHighlights Me\n// AllocateInventory Me.ProductID\nawait AC.callFn(\"RequeryQuantities\");"
+    js: "await AC.callFn(\"ValidateForm_RemoveHighlights\", \"Me\");\nawait AC.callFn(\"AllocateInventory\", AC.getValue(\"ProductID\"));\nawait AC.callFn(\"RequeryQuantities\");"
   },
   "form.before-update": {
     key: "form.before-update",
     control: "form",
     event: "before-update",
     procedure: "Form_BeforeUpdate",
-    js: "// Cancel = ValidateForm(Me)"
+    js: "Cancel = await AC.callFn(\"ValidateForm\", \"Me\");"
   },
   "form.on-current": {
     key: "form.on-current",
     control: "form",
     event: "on-current",
     procedure: "Form_Current",
-    js: "// ValidateForm_RemoveHighlights Me\nAC.setValue(\"AllowAdditions\", true);\nAC.setValue(\"AllowDeletions\", false);\nAC.setValue(\"AllowEdits\", AC.getValue(\"NewRecord\"));"
+    js: "await AC.callFn(\"ValidateForm_RemoveHighlights\", \"Me\");\nAC.setAllowAdditions(true);\nAC.setAllowDeletions(false);\nAC.setAllowEdits(AC.getValue(\"NewRecord\"));"
   },
   "quantity-on-hand.after-update": {
     key: "quantity-on-hand.after-update",
     control: "quantity-on-hand",
     event: "after-update",
     procedure: "QuantityOnHand_AfterUpdate",
-    js: "// Me.StockTakeDate = Now()\n// Me.ExpectedQuantity = ProductAvailable(Me.ProductID)\n// Me.Dirty = False    'In QuantityOnHand.BeforeUpdate, the user has confrimed the value for this one and only editable field is correct - force the record to save"
+    js: "AC.setValue(\"StockTakeDate\", new Date());\nAC.setValue(\"ExpectedQuantity\", await AC.callFn(\"ProductAvailable\", AC.getValue(\"ProductID\")));\nawait AC.saveRecord();"
   },
   "quantity-on-hand.before-update": {
     key: "quantity-on-hand.before-update",
     control: "quantity-on-hand",
     event: "before-update",
     procedure: "QuantityOnHand_BeforeUpdate",
-    js: "let intOnHand;\nlet strMsg;\n// intOnHand = ProductAvailable(Me.ProductID)\n// [VBA If block - condition not translatable]\n// If intOnHand = Me.QuantityOnHand Then\n// Else\n//   strMsg = StringFormat(\"You entered {0} and the expected quantity is {1}. Is {0} correct?\", Me.QuantityOnHand, intOnHand)\n//   If MsgBox(strMsg, vbYesNo Or vbQuestion, \"Quantity On Hand Does Not Match Expected\") = vbNo Then\n//   Me.Undo\n//   Cancel = True\n//   End If\n// End If"
+    js: "let intOnHand;\nlet strMsg;\nintOnHand = await AC.callFn(\"ProductAvailable\", AC.getValue(\"ProductID\"));\nif (intOnHand === AC.getValue(\"QuantityOnHand\")) {\n} else {\n  strMsg = await AC.callFn(\"StringFormat\", \"You entered {0} and the expected quantity is {1}. Is {0} correct?\", AC.getValue(\"QuantityOnHand\"), intOnHand);\n  if (!confirm(strMsg)) {\n    AC.undo();\n    return false;\n  }\n}"
   },
   "fn.RequeryQuantities": {
     key: "fn.RequeryQuantities",
     control: "fn",
     event: "RequeryQuantities",
     procedure: "RequeryQuantities",
-    js: "// [VBA If block - condition not translatable]\n// If IsFormOpen(\"frmProductDetail\") Then\n//   Form_frmProductDetail.ControlStates\n//   RequeryProductList\n// End If"
+    js: "if (await AC.callFn(\"IsFormOpen\", \"frmProductDetail\")) {\n  await AC.callFn(\"ControlStates\");\n  await AC.callFn(\"RequeryProductList\");\n}"
   }
 };
 

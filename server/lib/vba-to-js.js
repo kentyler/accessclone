@@ -204,11 +204,42 @@ function translateExpression(expr, assignedVars, enumMap, fnRegistry) {
   const tvMatch = s.match(/^TempVars[!.](\w+)$/i) || s.match(/^TempVars\s*\(\s*"([^"]+)"\s*\)$/i);
   if (tvMatch) return `AC.getTempVar(${JSON.stringify(tvMatch[1])})`;
 
+  // Cross-form value reads: [Forms]![frmName].[ctrlName], Forms!frmName.ctrlName, Forms("frmName").ctrlName
+  const crossFormBracketed = s.match(/^\[Forms\]!\[?(\w+)\]?[.!]\[?(\w+)\]?$/i);
+  if (crossFormBracketed) return `AC.getFormValue(${JSON.stringify(crossFormBracketed[1])}, ${JSON.stringify(crossFormBracketed[2])})`;
+  const crossFormBang = s.match(/^Forms!(\w+)\.(\w+)$/i);
+  if (crossFormBang && !/^(Requery|Recordset|SetFocus)$/i.test(crossFormBang[2])) {
+    return `AC.getFormValue(${JSON.stringify(crossFormBang[1])}, ${JSON.stringify(crossFormBang[2])})`;
+  }
+  const crossFormParen = s.match(/^Forms\s*\(\s*"(\w+)"\s*\)\.(\w+)$/i);
+  if (crossFormParen && !/^(Requery|Recordset|SetFocus)$/i.test(crossFormParen[2])) {
+    return `AC.getFormValue(${JSON.stringify(crossFormParen[1])}, ${JSON.stringify(crossFormParen[2])})`;
+  }
+
+  // Me.[FieldName] — bracketed field reference
+  const meBracket = s.match(/^Me\.\[(\w+)\]$/i);
+  if (meBracket) {
+    return `AC.getValue(${JSON.stringify(meBracket[1])})`;
+  }
+
+  // Me.ctrl.Value — explicit .Value suffix
+  const meCtrlValue = s.match(/^Me\.(\w+)\.Value$/i);
+  if (meCtrlValue) {
+    return `AC.getValue(${JSON.stringify(meCtrlValue[1])})`;
+  }
+
+  // Me.Form.FilterOn / Me.Form.Filter — form-level properties
+  if (/^Me\.Form\.FilterOn$/i.test(s)) return 'AC.getFilterOn()';
+  if (/^Me\.Form\.Filter$/i.test(s)) return 'AC.getFilter()';
+
+  // Me as standalone — translates to form name for cross-module calls
+  if (/^Me$/i.test(s)) return '"Me"';
+
   // Me.ControlName
   const meCtrl = s.match(/^Me\.(\w+)$/i);
   if (meCtrl) {
     const name = meCtrl[1];
-    if (/^(Name|Caption|RecordSource|Filter|OrderBy|Section|Hwnd|HasModule|CurrentView|DefaultView)$/i.test(name)) {
+    if (/^(Name|Caption|RecordSource|Filter|OrderBy|Section|Hwnd|HasModule|CurrentView|DefaultValue|DefaultView)$/i.test(name)) {
       return null;
     }
     return `AC.getValue(${JSON.stringify(name)})`;
@@ -219,9 +250,36 @@ function translateExpression(expr, assignedVars, enumMap, fnRegistry) {
     return s;
   }
 
+  // variable.Value — control value access via variable (e.g. ctl.Value in For Each)
+  const varValueMatch = s.match(/^(\w+)\.Value$/i);
+  if (varValueMatch && assignedVars && assignedVars.has(varValueMatch[1].toLowerCase())) {
+    return `AC.getValue(${varValueMatch[1]})`;
+  }
+
+  // variable.Property (getter) — e.g. ctl.BackColor, ctl.Visible
+  const varPropReadMatch = s.match(/^(\w+)\.(BackColor|ForeColor|BackShade|BackStyle|Locked|Visible|Enabled)$/i);
+  if (varPropReadMatch && assignedVars && assignedVars.has(varPropReadMatch[1].toLowerCase())) {
+    const prop = varPropReadMatch[2];
+    const methodName = 'get' + prop.charAt(0).toUpperCase() + prop.slice(1);
+    return `AC.${methodName}(${varPropReadMatch[1]})`;
+  }
+
+  // variable.Item(key) — dictionary access: dict.Item(key) → dict[key]
+  const dictItemMatch = s.match(/^(\w+)\.Item\s*\((.+)\)$/i);
+  if (dictItemMatch && assignedVars && assignedVars.has(dictItemMatch[1].toLowerCase())) {
+    const key = translateExpression(dictItemMatch[2].trim(), assignedVars, enumMap, fnRegistry);
+    if (key) return `${dictItemMatch[1]}[${key}]`;
+  }
+
   // Enum value (qualified EnumName.Member or bare member name)
   if (enumMap && enumMap.has(s)) {
     return String(enumMap.get(s));
+  }
+
+  // VBA built-in constant (vbWhite, vbCrLf, Nothing, etc.)
+  const vbaConst = VBA_CONSTANTS.get(s.toLowerCase());
+  if (vbaConst !== undefined) {
+    return String(vbaConst);
   }
 
   // String concatenation with & — split and recurse
@@ -235,6 +293,29 @@ function translateExpression(expr, assignedVars, enumMap, fnRegistry) {
       jsParts.push(translated);
     }
     return jsParts.join(' + ');
+  }
+
+  // Arithmetic operators: +, -, *, /, \ — split and recurse
+  // Process lower-precedence first (+/-), then higher (*/ \)
+  for (const [vbaOp, jsOp] of [['+', ' + '], ['-', ' - '], ['*', ' * '], ['/', ' / '], ['\\', ' / ']]) {
+    const parts = splitOnOperator(s, vbaOp);
+    if (parts && parts.length >= 2) {
+      const jsParts = [];
+      let allOk = true;
+      for (const part of parts) {
+        const translated = translateExpression(part.trim(), assignedVars, enumMap, fnRegistry);
+        if (translated === null) { allOk = false; break; }
+        jsParts.push(translated);
+      }
+      if (allOk) return jsParts.join(jsOp);
+    }
+  }
+
+  // Unary minus: -expr
+  const unaryMinusMatch = s.match(/^-(.+)$/);
+  if (unaryMinusMatch) {
+    const inner = translateExpression(unaryMinusMatch[1].trim(), assignedVars, enumMap, fnRegistry);
+    if (inner) return `-${inner}`;
   }
 
   // Domain aggregate: DCount/DLookup/DMin/DMax/DSum
@@ -267,6 +348,14 @@ function translateExpression(expr, assignedVars, enumMap, fnRegistry) {
     // fn.* registry function call
     if (allArgsOk && fnRegistry && fnRegistry.has(funcCall.name.toLowerCase())) {
       return `await AC.callFn(${JSON.stringify(funcCall.name)}, ${jsArgs.join(', ')})`;
+    }
+
+    // Array indexing: variable(index) → variable[index]
+    // VBA uses parens for both function calls and array access — disambiguate by checking assignedVars
+    if (allArgsOk && assignedVars && assignedVars.has(funcCall.name.toLowerCase())
+        && !VBA_BUILTINS.has(funcCall.name.toLowerCase())
+        && !(fnRegistry && fnRegistry.has(funcCall.name.toLowerCase()))) {
+      return `${funcCall.name}[${jsArgs.join(', ')}]`;
     }
   }
 
@@ -313,6 +402,23 @@ function splitOnOperator(expr, op) {
 
   return parts.length >= 2 ? parts : null;
 }
+
+/**
+ * Map of VBA built-in constants to their numeric values.
+ * Color constants, system constants, etc.
+ */
+const VBA_CONSTANTS = new Map([
+  // Color constants
+  ['vbblack', 0], ['vbred', 255], ['vbgreen', 65280], ['vbyellow', 65535],
+  ['vbblue', 16711680], ['vbmagenta', 16711935], ['vbcyan', 16776960], ['vbwhite', 16777215],
+  // Null/Nothing
+  ['nothing', 'null'], ['empty', 'null'], ['null', 'null'],
+  // vbCrLf, vbTab, etc.
+  ['vbcrlf', '"\\n"'], ['vblf', '"\\n"'], ['vbcr', '"\\n"'], ['vbtab', '"\\t"'],
+  ['vbnullstring', '""'],
+  // Parameterless functions used as expressions
+  ['date', 'new Date()'], ['now', 'new Date()'],
+]);
 
 /**
  * Map of VBA built-in functions to JS translation functions.
@@ -365,6 +471,23 @@ const VBA_BUILTINS = new Map([
   ['cdbl', (args) => args.length >= 1 ? `parseFloat(${args[0]})` : null],
   ['csng', (args) => args.length >= 1 ? `parseFloat(${args[0]})` : null],
   ['cbool', (args) => args.length >= 1 ? `Boolean(${args[0]})` : null],
+  ['cdate', (args) => args.length >= 1 ? `new Date(${args[0]})` : null],
+  ['datevalue', (args) => args.length >= 1 ? `new Date(${args[0]})` : null],
+  ['dateadd', (args) => {
+    if (args.length < 3) return null;
+    // DateAdd(interval, number, date) → AC.dateAdd(interval, number, date)
+    return `AC.dateAdd(${args.join(', ')})`;
+  }],
+  ['datediff', (args) => {
+    if (args.length < 3) return null;
+    return `AC.dateDiff(${args.join(', ')})`;
+  }],
+  ['date', (args) => `new Date()` ],
+  ['now', (args) => `new Date()` ],
+  ['format', (args) => {
+    if (args.length < 2) return null;
+    return `AC.formatValue(${args.join(', ')})`;
+  }],
   ['asc', (args) => args.length >= 1 ? `${args[0]}.charCodeAt(0)` : null],
   ['chr', (args) => args.length >= 1 ? `String.fromCharCode(${args[0]})` : null],
   ['chr$', (args) => args.length >= 1 ? `String.fromCharCode(${args[0]})` : null],
@@ -460,6 +583,19 @@ function collectModuleVars(vbaSource) {
  * Extract Sub/Function procedures from VBA source.
  * Returns [{name, body}] where body is the lines between Sub...End Sub.
  */
+/**
+ * Lightweight extraction of all procedure names from VBA source.
+ * Used for pre-populating fnRegistry before cross-module translation.
+ */
+function extractProcedureNames(vbaSource) {
+  const names = [];
+  for (const line of vbaSource.split(/\r?\n/)) {
+    const m = line.trim().match(/^(?:Private\s+|Public\s+)?(?:Static\s+)?(?:Sub|Function)\s+(\w+)\s*\(/i);
+    if (m) names.push(m[1]);
+  }
+  return names;
+}
+
 function extractProcedures(vbaSource) {
   const procedures = [];
   const lines = vbaSource.split(/\r?\n/);
@@ -506,6 +642,16 @@ function extractProcedures(vbaSource) {
  * - Labels (Exit_Handler:, Err_Handler:)
  * Returns cleaned lines (only the meaningful statements).
  */
+function stripInlineComment(line) {
+  // Strip VBA inline comments (') while respecting double-quoted strings
+  let inString = false;
+  for (let j = 0; j < line.length; j++) {
+    if (line[j] === '"') { inString = !inString; continue; }
+    if (!inString && line[j] === "'") return line.slice(0, j).trimEnd();
+  }
+  return line;
+}
+
 function stripBoilerplate(body) {
   const rawLines = body.split(/\r?\n/);
 
@@ -537,10 +683,13 @@ function stripBoilerplate(body) {
     // Strip line numbers
     line = line.replace(/^\d+\s+/, '');
 
+    // Strip inline VBA comments (e.g. "ctl.BackStyle = 1  '1=Normal, 0=Transparent")
+    line = stripInlineComment(line).trimEnd();
+
     // Skip empty lines
     if (!line) continue;
 
-    // Skip VBA comments
+    // Skip VBA comments (full-line)
     if (line.startsWith("'")) continue;
 
     // Skip On Error GoTo
@@ -772,6 +921,13 @@ function translateAssignmentRHS(rhs, assignedVars, enumMap, fnRegistry) {
     if (result) return result.js;
   }
 
+  // Not expr — logical negation
+  const notRhsMatch = s.match(/^Not\s+(.+)$/i);
+  if (notRhsMatch) {
+    const inner = translateAssignmentRHS(notRhsMatch[1].trim(), assignedVars, enumMap, fnRegistry);
+    if (inner !== null) return `!(${inner})`;
+  }
+
   // Fallback: try translateExpression for function calls, concatenation, variables, etc.
   const exprResult = translateExpression(s, assignedVars, enumMap, fnRegistry);
   if (exprResult !== null) return exprResult;
@@ -790,6 +946,45 @@ function translateAssignmentRHS(rhs, assignedVars, enumMap, fnRegistry) {
  * @param {Set<string>} [fnRegistry] - Known fn.* procedure names (lowercase)
  */
 function translateStatement(stmt, formName, enumMap, assignedVars, fnRegistry) {
+  // FormatConditions operations → no-op in web (Access conditional formatting API)
+  if (/\.FormatConditions\b/i.test(stmt)) {
+    return '/* FormatConditions — no-op in web */';
+  }
+
+  // dict.CompareMode = value → no-op (Scripting.Dictionary compare mode)
+  if (/^\w+\.CompareMode\s*=/i.test(stmt)) {
+    return '/* CompareMode — no-op in web */';
+  }
+
+  // Erase variable → no-op (VBA array deallocation)
+  if (/^Erase\s+\w+$/i.test(stmt)) {
+    return '/* Erase — no-op in JS */';
+  }
+
+  // dict.Add key, value → dict[key] = value (Scripting.Dictionary)
+  const dictAddMatch = stmt.match(/^(\w+)\.Add\s+(.+)$/i);
+  if (dictAddMatch && assignedVars && assignedVars.has(dictAddMatch[1].toLowerCase())) {
+    // Split on first comma (respecting parens/strings)
+    const argsStr = dictAddMatch[2];
+    let commaIdx = -1;
+    let depth = 0;
+    let inStr = false;
+    for (let j = 0; j < argsStr.length; j++) {
+      if (argsStr[j] === '"') { inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (argsStr[j] === '(') depth++;
+      else if (argsStr[j] === ')') depth--;
+      else if (argsStr[j] === ',' && depth === 0) { commaIdx = j; break; }
+    }
+    if (commaIdx > 0) {
+      const key = translateExpression(argsStr.slice(0, commaIdx).trim(), assignedVars, enumMap, fnRegistry);
+      const val = translateExpression(argsStr.slice(commaIdx + 1).trim(), assignedVars, enumMap, fnRegistry);
+      if (key && val) {
+        return `${dictAddMatch[1]}[${key}] = ${val}`;
+      }
+    }
+  }
+
   // DoCmd.Close acForm, "formName", acSaveNo  or  DoCmd.Close
   const closeFormMatch = stmt.match(/^DoCmd\.Close\s+acForm\s*,\s*"([^"]+)"/i);
   if (closeFormMatch) {
@@ -867,9 +1062,34 @@ function translateStatement(stmt, formName, enumMap, assignedVars, fnRegistry) {
     return 'AC.saveRecord()';
   }
 
-  // DoCmd.RunCommand acCmdSaveRecord
-  if (/^DoCmd\.RunCommand\s+acCmdSaveRecord/i.test(stmt)) {
-    return 'AC.saveRecord()';
+  // DoCmd.SearchForRecord — navigate to specific record by criteria
+  const searchMatch = stmt.match(/^DoCmd\.SearchForRecord\s+\w+\s*,\s*(?:Me\.Name|"[^"]*")\s*,\s*\w+\s*,\s*(.+)$/i);
+  if (searchMatch) {
+    const criteria = translateAssignmentRHS(searchMatch[1].trim(), assignedVars, enumMap, fnRegistry);
+    if (criteria) return `AC.searchForRecord(${criteria})`;
+  }
+
+  // Application.FollowHyperlink — open URL in browser
+  const hyperMatch = stmt.match(/^Application\.FollowHyperlink\s+(.+)$/i);
+  if (hyperMatch) {
+    const url = translateAssignmentRHS(hyperMatch[1].trim(), assignedVars, enumMap, fnRegistry);
+    if (url) return `window.open(${url})`;
+  }
+
+  // DoCmd.RunCommand / RunCommand patterns
+  if (/^(?:DoCmd\.)?RunCommand\s+acCmdSaveRecord/i.test(stmt)) {
+    return 'await AC.saveRecord()';
+  }
+  if (/^(?:DoCmd\.)?RunCommand\s+acCmdRecordsGoToNew/i.test(stmt)) {
+    return 'AC.gotoRecord("new")';
+  }
+  if (/^(?:DoCmd\.)?RunCommand\s+acCmdDeleteRecord/i.test(stmt)) {
+    return 'AC.deleteRecord()';
+  }
+  // Other RunCommand → no-op with descriptive comment
+  if (/^(?:DoCmd\.)?RunCommand\s+/i.test(stmt)) {
+    const cmd = stmt.match(/acCmd\w+/i);
+    return `/* RunCommand ${cmd ? cmd[0] : ''} — not supported in web */`;
   }
 
   // MsgBox — multiple patterns
@@ -919,10 +1139,20 @@ function translateStatement(stmt, formName, enumMap, assignedVars, fnRegistry) {
     return 'AC.undo()';
   }
 
+  // Me.SetFocus — form-level focus (no-op in web, focus goes to first control)
+  if (/^Me\.SetFocus\s*$/i.test(stmt)) {
+    return '/* Me.SetFocus — no-op in web */';
+  }
+
   // Me.ctrl.SetFocus
   const setFocusMatch = stmt.match(/^Me\.(\w+)\.SetFocus\s*$/i);
   if (setFocusMatch) {
     return `AC.setFocus(${JSON.stringify(setFocusMatch[1])})`;
+  }
+
+  // Me.ctrl.SelStart/SelLength = N → no-op (text selection positioning)
+  if (/^Me\.\w+\.Sel(Start|Length)\s*=/i.test(stmt)) {
+    return '/* SelStart/SelLength — no-op in web */';
   }
 
   // Me.ctrl.Undo — revert control value
@@ -935,6 +1165,22 @@ function translateStatement(stmt, formName, enumMap, assignedVars, fnRegistry) {
   const reqCtrlMatch = stmt.match(/^Me\.(\w+)\.Requery\s*$/i);
   if (reqCtrlMatch) {
     return `AC.requeryControl(${JSON.stringify(reqCtrlMatch[1])})`;
+  }
+
+  // Cross-form requery: Forms!frmName.Requery, Forms!frmName.Recordset.Requery, Forms("frmName").Requery
+  const crossReqBang = stmt.match(/^Forms!(\w+)(?:\.Recordset)?\.Requery\s*$/i);
+  if (crossReqBang) return `AC.requeryForm(${JSON.stringify(crossReqBang[1])})`;
+  const crossReqParen = stmt.match(/^Forms\s*\(\s*"(\w+)"\s*\)(?:\.Recordset)?\.Requery\s*$/i);
+  if (crossReqParen) return `AC.requeryForm(${JSON.stringify(crossReqParen[1])})`;
+  // Forms(variable).Requery — dynamic form reference
+  const crossReqVar = stmt.match(/^Forms\s*\(\s*(\w+)\s*\)\.Requery\s*$/i);
+  if (crossReqVar && assignedVars && assignedVars.has(crossReqVar[1].toLowerCase())) {
+    return `AC.requeryForm(${crossReqVar[1]})`;
+  }
+  // Forms(variable).SetFocus — dynamic form focus
+  const crossFocusVar = stmt.match(/^Forms\s*\(\s*(\w+)\s*\)\.SetFocus\s*$/i);
+  if (crossFocusVar && assignedVars && assignedVars.has(crossFocusVar[1].toLowerCase())) {
+    return `AC.focusForm(${crossFocusVar[1]})`;
   }
 
   // Me.controlName.Visible = True/False
@@ -951,8 +1197,8 @@ function translateStatement(stmt, formName, enumMap, assignedVars, fnRegistry) {
     return `AC.setEnabled(${JSON.stringify(enMatch[1])}, ${val})`;
   }
 
-  // controlName.SourceObject = "subformName" (subform source swap)
-  const srcObjMatch = stmt.match(/^(?:Me\.)?(\w+)\.SourceObject\s*=\s*"([^"]+)"/i);
+  // controlName.SourceObject = "subformName" (subform source swap, including empty string)
+  const srcObjMatch = stmt.match(/^(?:Me\.)?(\w+)\.SourceObject\s*=\s*"([^"]*)"/i);
   if (srcObjMatch) {
     return `AC.setSubformSource(${JSON.stringify(srcObjMatch[1])}, ${JSON.stringify(srcObjMatch[2])})`;
   }
@@ -961,19 +1207,16 @@ function translateStatement(stmt, formName, enumMap, assignedVars, fnRegistry) {
   const formCaptionMatch = stmt.match(/^Me\.Caption\s*=\s*(.+)$/i);
   if (formCaptionMatch) {
     const raw = formCaptionMatch[1].trim();
-    if (/^"[^"]*"$/.test(raw)) {
-      return `AC.setFormCaption(${raw})`;
-    }
-    if (/^\w+$/.test(raw) && assignedVars && assignedVars.has(raw.toLowerCase())) {
-      return `AC.setFormCaption(${raw})`;
-    }
+    const jsVal = translateAssignmentRHS(raw, assignedVars, enumMap, fnRegistry);
+    if (jsVal) return `AC.setFormCaption(${jsVal})`;
     return null;
   }
 
-  // controlName.Caption = "text"
-  const captionMatch = stmt.match(/^(?:Me\.)?(\w+)\.Caption\s*=\s*"([^"]+)"/i);
+  // controlName.Caption = expr (label/control caption)
+  const captionMatch = stmt.match(/^(?:Me\.)?(\w+)\.Caption\s*=\s*(.+)$/i);
   if (captionMatch) {
-    return `AC.setValue(${JSON.stringify(captionMatch[1])}, ${JSON.stringify(captionMatch[2])})`;
+    const rhs = translateAssignmentRHS(captionMatch[2].trim(), assignedVars, enumMap, fnRegistry);
+    if (rhs !== null) return `AC.setValue(${JSON.stringify(captionMatch[1])}, ${rhs})`;
   }
 
   // TempVars("Name").Value = value  (set TempVar via .Value property)
@@ -1007,6 +1250,11 @@ function translateStatement(stmt, formName, enumMap, assignedVars, fnRegistry) {
     return 'return false';
   }
 
+  // Response = acDataErrContinue → suppress default error (no-op in web)
+  if (/^Response\s*=\s*acDataErrContinue$/i.test(stmt)) {
+    return '/* Response = acDataErrContinue — suppress default error */';
+  }
+
   // Me.Dirty = False → save the current record
   if (/^Me\.Dirty\s*=\s*False$/i.test(stmt)) {
     return 'await AC.saveRecord()';
@@ -1025,16 +1273,12 @@ function translateStatement(stmt, formName, enumMap, assignedVars, fnRegistry) {
     return null;
   }
 
-  // Me.Filter = "..."
+  // Me.Filter = expr (string literal, variable, or concatenation expression)
   const filterMatch = stmt.match(/^Me\.Filter\s*=\s*(.+)$/i);
   if (filterMatch) {
     const raw = filterMatch[1].trim();
-    if (/^"[^"]*"$/.test(raw)) {
-      return `AC.setFilter(${raw})`;
-    }
-    if (/^\w+$/.test(raw) && assignedVars && assignedVars.has(raw.toLowerCase())) {
-      return `AC.setFilter(${raw})`;
-    }
+    const translated = translateAssignmentRHS(raw, assignedVars, enumMap, fnRegistry);
+    if (translated) return `AC.setFilter(${translated})`;
     return null;
   }
 
@@ -1044,6 +1288,83 @@ function translateStatement(stmt, formName, enumMap, assignedVars, fnRegistry) {
   }
   if (/^Me\.FilterOn\s*=\s*False$/i.test(stmt)) {
     return 'AC.setFilterOn(false)';
+  }
+
+  // Me.ctrl.Locked = True/False
+  const lockedMatch = stmt.match(/^Me\.(\w+)\.Locked\s*=\s*(.+)$/i);
+  if (lockedMatch) {
+    const rhs = translateAssignmentRHS(lockedMatch[2].trim(), assignedVars, enumMap, fnRegistry);
+    if (rhs !== null) return `AC.setLocked(${JSON.stringify(lockedMatch[1])}, ${rhs})`;
+  }
+
+  // Me.ctrl.BackColor = value
+  const backColorMatch = stmt.match(/^Me\.(\w+)\.BackColor\s*=\s*(.+)$/i);
+  if (backColorMatch) {
+    const rhs = translateAssignmentRHS(backColorMatch[2].trim(), assignedVars, enumMap, fnRegistry);
+    if (rhs !== null) return `AC.setBackColor(${JSON.stringify(backColorMatch[1])}, ${rhs})`;
+  }
+
+  // Me.ctrl.ForeColor = value
+  const foreColorMatch = stmt.match(/^Me\.(\w+)\.ForeColor\s*=\s*(.+)$/i);
+  if (foreColorMatch) {
+    const rhs = translateAssignmentRHS(foreColorMatch[2].trim(), assignedVars, enumMap, fnRegistry);
+    if (rhs !== null) return `AC.setForeColor(${JSON.stringify(foreColorMatch[1])}, ${rhs})`;
+  }
+
+  // Me.ctrl.BackShade = value
+  const backShadeMatch = stmt.match(/^Me\.(\w+)\.BackShade\s*=\s*(.+)$/i);
+  if (backShadeMatch) {
+    const rhs = translateAssignmentRHS(backShadeMatch[2].trim(), assignedVars, enumMap, fnRegistry);
+    if (rhs !== null) return `AC.setBackShade(${JSON.stringify(backShadeMatch[1])}, ${rhs})`;
+  }
+
+  // Me.ctrl.DefaultValue = value
+  const defValMatch = stmt.match(/^Me\.(\w+)\.DefaultValue\s*=\s*(.+)$/i);
+  if (defValMatch) {
+    const rhs = translateAssignmentRHS(defValMatch[2].trim(), assignedVars, enumMap, fnRegistry);
+    if (rhs !== null) return `AC.setDefaultValue(${JSON.stringify(defValMatch[1])}, ${rhs})`;
+  }
+
+  // Me.AllowEdits = bool
+  const allowEditsMatch = stmt.match(/^Me\.AllowEdits\s*=\s*(.+)$/i);
+  if (allowEditsMatch) {
+    const rhs = translateAssignmentRHS(allowEditsMatch[1].trim(), assignedVars, enumMap, fnRegistry);
+    if (rhs !== null) return `AC.setAllowEdits(${rhs})`;
+  }
+
+  // Me.AllowAdditions = bool
+  const allowAddsMatch = stmt.match(/^Me\.AllowAdditions\s*=\s*(.+)$/i);
+  if (allowAddsMatch) {
+    const rhs = translateAssignmentRHS(allowAddsMatch[1].trim(), assignedVars, enumMap, fnRegistry);
+    if (rhs !== null) return `AC.setAllowAdditions(${rhs})`;
+  }
+
+  // Me.AllowDeletions = bool
+  const allowDelsMatch = stmt.match(/^Me\.AllowDeletions\s*=\s*(.+)$/i);
+  if (allowDelsMatch) {
+    const rhs = translateAssignmentRHS(allowDelsMatch[1].trim(), assignedVars, enumMap, fnRegistry);
+    if (rhs !== null) return `AC.setAllowDeletions(${rhs})`;
+  }
+
+  // Me.Painting = bool → no-op in web (skip silently)
+  if (/^Me\.Painting\s*=\s*/i.test(stmt)) {
+    return '/* Me.Painting — no-op in web */';
+  }
+
+  // Me.NavigationCaption = text
+  const navCapMatch = stmt.match(/^Me\.NavigationCaption\s*=\s*(.+)$/i);
+  if (navCapMatch) {
+    const rhs = translateAssignmentRHS(navCapMatch[1].trim(), assignedVars, enumMap, fnRegistry);
+    if (rhs !== null) return `AC.setNavigationCaption(${rhs})`;
+  }
+
+  // Me.sfrmX.Form.AllowAdditions/AllowEdits/AllowDeletions = bool
+  const subformAllowMatch = stmt.match(/^Me\.(\w+)\.Form\.(AllowAdditions|AllowEdits|AllowDeletions)\s*=\s*(.+)$/i);
+  if (subformAllowMatch) {
+    const sfrmName = subformAllowMatch[1];
+    const prop = subformAllowMatch[2].charAt(0).toLowerCase() + subformAllowMatch[2].slice(1); // camelCase
+    const rhs = translateAssignmentRHS(subformAllowMatch[3].trim(), assignedVars, enumMap, fnRegistry);
+    if (rhs !== null) return `AC.setSubformAllow(${JSON.stringify(sfrmName)}, ${JSON.stringify(prop)}, ${rhs})`;
   }
 
   // Me.controlName = value  (set control value)
@@ -1075,9 +1396,63 @@ function translateStatement(stmt, formName, enumMap, assignedVars, fnRegistry) {
     }
   }
 
+  // variable.Property = value (where variable is in assignedVars — e.g. ctl.BackColor = HIGHLIGHT_COLOR)
+  const varPropMatch = stmt.match(/^(\w+)\.(BackColor|ForeColor|BackShade|BackStyle|Locked|Visible|Enabled|DefaultValue)\s*=\s*(.+)$/i);
+  if (varPropMatch && assignedVars && assignedVars.has(varPropMatch[1].toLowerCase())) {
+    const varName = varPropMatch[1];
+    const prop = varPropMatch[2];
+    const rhs = translateAssignmentRHS(varPropMatch[3].trim(), assignedVars, enumMap, fnRegistry);
+    if (rhs !== null) {
+      const methodName = 'set' + prop.charAt(0).toUpperCase() + prop.slice(1);
+      return `AC.${methodName}(${varName}, ${rhs})`;
+    }
+  }
+
+  // Application.* statements → no-op (desktop-only)
+  if (/^Application\.\w+/i.test(stmt)) {
+    return '/* Application — no-op in web */';
+  }
+
+  // CurrentDb.Properties("AppTitle") = expr → AC.setAppTitle(expr)
+  const appTitleMatch = stmt.match(/^CurrentDb\.Properties\s*\(\s*"AppTitle"\s*\)\s*=\s*(.+)$/i);
+  if (appTitleMatch) {
+    const rhs = translateAssignmentRHS(appTitleMatch[1].trim(), assignedVars, enumMap, fnRegistry);
+    if (rhs !== null) return `AC.setAppTitle(${rhs})`;
+  }
+
+  // RefreshTitleBar → no-op
+  if (/^RefreshTitleBar$/i.test(stmt)) {
+    return '/* RefreshTitleBar — no-op in web */';
+  }
+
+  // Module-qualified call: moduleName.ProcName [args] → strip prefix, re-enter translateStatement
+  const modQualMatch = stmt.match(/^(\w+)\.(\w+)(.*)$/);
+  if (modQualMatch && fnRegistry && fnRegistry.has(modQualMatch[2].toLowerCase())
+      && !/^Me$/i.test(modQualMatch[1]) && !/^DoCmd$/i.test(modQualMatch[1])) {
+    const stripped = modQualMatch[2] + modQualMatch[3];
+    return translateStatement(stripped, formName, enumMap, assignedVars, fnRegistry);
+  }
+
   // Bare function/sub call as statement (no parens) — e.g. Ribbon_ShowReportsGroup
   if (/^\w+$/.test(stmt) && fnRegistry && fnRegistry.has(stmt.toLowerCase())) {
     return `await AC.callFn(${JSON.stringify(stmt)})`;
+  }
+
+  // Bare function/sub call with space-separated args (no parens) — e.g. HighlightControl ctl
+  const bareCallMatch = stmt.match(/^(\w+)\s+(.+)$/);
+  if (bareCallMatch && fnRegistry && fnRegistry.has(bareCallMatch[1].toLowerCase())) {
+    // Parse comma-separated args (VBA: Sub arg1, arg2, arg3)
+    const argParts = bareCallMatch[2].split(/,\s*/);
+    const jsArgs = [];
+    let allOk = true;
+    for (const arg of argParts) {
+      const translated = translateExpression(arg.trim(), assignedVars, enumMap, fnRegistry);
+      if (translated === null) { allOk = false; break; }
+      jsArgs.push(translated);
+    }
+    if (allOk) {
+      return `await AC.callFn(${JSON.stringify(bareCallMatch[1])}, ${jsArgs.join(', ')})`;
+    }
   }
 
   // Function call with parens as statement — e.g. SomeFunc(arg1, arg2)
@@ -1093,6 +1468,13 @@ function translateStatement(stmt, formName, enumMap, assignedVars, fnRegistry) {
     if (allOk) {
       return `await AC.callFn(${JSON.stringify(stmtFuncCall.name)}, ${jsArgs.join(', ')})`;
     }
+  }
+
+  // Variable assignment: varName = expr (for single-line If bodies)
+  const stmtAssignMatch = stmt.match(/^(\w+)\s*=\s*(.+)$/);
+  if (stmtAssignMatch && assignedVars && assignedVars.has(stmtAssignMatch[1].toLowerCase())) {
+    const rhs = translateAssignmentRHS(stmtAssignMatch[2].trim(), assignedVars, enumMap, fnRegistry);
+    if (rhs !== null) return `${stmtAssignMatch[1]} = ${rhs}`;
   }
 
   // Unrecognized — return null
@@ -1184,6 +1566,15 @@ function translateCondition(vbaCond, assignedVars, enumMap, fnRegistry) {
     return `${isNullVarMatch[1]} == null`;
   }
 
+  // General IsNull(expr) — paren-aware extraction for DLookup, etc.
+  if (/^IsNull\s*\(/i.test(cond)) {
+    const call = parseFunctionCall(cond);
+    if (call && /^IsNull$/i.test(call.name) && call.args.length === 1 && call.endIdx >= cond.length) {
+      const innerExpr = translateExpression(call.args[0].trim(), assignedVars, enumMap, fnRegistry);
+      if (innerExpr) return `${innerExpr} == null`;
+    }
+  }
+
   // Me.ctrl.Visible = True/False
   const visCheck = cond.match(/^Me\.(\w+)\.Visible\s*=\s*(True|False|-1|0)\b/i);
   if (visCheck) {
@@ -1198,10 +1589,21 @@ function translateCondition(vbaCond, assignedVars, enumMap, fnRegistry) {
     return val ? `AC.getEnabled(${JSON.stringify(enCheck[1])})` : `!(AC.getEnabled(${JSON.stringify(enCheck[1])}))`;
   }
 
-  // MsgBox("text"...) = vbYes → confirm("text")
-  const msgBoxYesMatch = cond.match(/^MsgBox\s*\(\s*"([^"]+)".*\)\s*=\s*vbYes$/i);
-  if (msgBoxYesMatch) {
-    return `confirm(${JSON.stringify(msgBoxYesMatch[1])})`;
+  // MsgBox(args) = vbYes/vbNo → confirm(firstArg) / !confirm(firstArg)
+  if (/^MsgBox\s*\(/i.test(cond)) {
+    const msgBoxCall = parseFunctionCall(cond.replace(/^MsgBox/i, 'MsgBox'));
+    if (msgBoxCall) {
+      const rest = cond.substring(msgBoxCall.endIdx).trim();
+      const vbMatch = rest.match(/^=\s*(vbYes|vbNo)$/i);
+      if (vbMatch && msgBoxCall.args.length >= 1) {
+        const firstArg = msgBoxCall.args[0].trim();
+        const jsArg = translateExpression(firstArg, assignedVars, enumMap, fnRegistry);
+        if (jsArg) {
+          const isNo = /vbNo/i.test(vbMatch[1]);
+          return isNo ? `!confirm(${jsArg})` : `confirm(${jsArg})`;
+        }
+      }
+    }
   }
 
   // Domain aggregate in comparison: DCount("*", "tbl", criteria) = 0
@@ -1275,8 +1677,15 @@ function translateCondition(vbaCond, assignedVars, enumMap, fnRegistry) {
 
     // General LHS via translateExpression (handles fn calls, variables, etc.)
     const lhsExpr = translateExpression(lhsTrimmed, assignedVars, enumMap, fnRegistry);
-    if (lhsExpr && isLiteral(rhsTrimmed)) {
-      return `${lhsExpr} ${jsOp} ${toLiteral(rhsTrimmed)}`;
+    if (lhsExpr) {
+      if (isLiteral(rhsTrimmed)) {
+        return `${lhsExpr} ${jsOp} ${toLiteral(rhsTrimmed)}`;
+      }
+      // Try RHS via translateExpression too (e.g. variable.BackColor = HIGHLIGHT_COLOR)
+      const rhsExpr = translateExpression(rhsTrimmed, assignedVars, enumMap, fnRegistry);
+      if (rhsExpr) {
+        return `${lhsExpr} ${jsOp} ${rhsExpr}`;
+      }
     }
 
     return null; // Conservative: can't translate unknown comparisons
@@ -1482,17 +1891,8 @@ function parseSelectCaseBlock(lines, startIdx, formName, variables, assignedVars
   let jsExpr = null;
   let hasCaseIs = false;
 
-  // Translate the switch expression
-  if (assignedVars && assignedVars.has(exprRaw.toLowerCase())) {
-    jsExpr = exprRaw;
-  } else if (/^Me\.OpenArgs$/i.test(exprRaw)) {
-    jsExpr = 'AC.getOpenArgs()';
-  } else {
-    const meMatch = exprRaw.match(/^Me\.(\w+)$/i);
-    if (meMatch && !/^(Name|Caption|RecordSource|Filter|OrderBy)$/i.test(meMatch[1])) {
-      jsExpr = `AC.getValue(${JSON.stringify(meMatch[1])})`;
-    }
-  }
+  // Translate the switch expression — use translateExpression for general coverage
+  jsExpr = translateExpression(exprRaw, assignedVars, enumMap, fnRegistry);
 
   // Find End Select
   const endIdx = findEndKeyword(lines, startIdx + 1, 'SELECT CASE');
@@ -1652,6 +2052,281 @@ function parseForLoop(lines, startIdx, formName, variables, assignedVars, enumMa
 }
 
 /**
+ * Parse a Do...Loop block into a JS while or do...while.
+ * Handles: Do While cond, Do Until cond, Do...Loop While cond, Do...Loop Until cond, bare Do...Loop.
+ * Returns { jsLines: string[], endIdx: number }.
+ */
+function parseDoLoop(lines, startIdx, formName, variables, assignedVars, enumMap, fnRegistry, funcName) {
+  const doLine = lines[startIdx].trim();
+  const endIdx = findEndKeyword(lines, startIdx + 1, 'DO');
+
+  // Get the Loop line to check for post-condition
+  const loopLine = endIdx < lines.length ? lines[endIdx].trim() : '';
+
+  // Pre-condition: Do While cond ... Loop
+  const doWhileMatch = doLine.match(/^Do\s+While\s+(.+)$/i);
+  if (doWhileMatch) {
+    const jsCond = translateCondition(doWhileMatch[1], assignedVars, enumMap, fnRegistry);
+    if (!jsCond) {
+      // Untranslatable condition — emit as warning with preserved VBA
+      const jsLines = [`// [VBA Do While loop - condition not translatable: ${doWhileMatch[1]}]`];
+      for (let j = startIdx + 1; j < endIdx && j < lines.length; j++) {
+        jsLines.push(`//   ${lines[j]}`);
+      }
+      jsLines.push('// Loop');
+      return { jsLines, endIdx };
+    }
+    const bodyLines = lines.slice(startIdx + 1, endIdx);
+    const { jsLines: bodyJs } = translateBlock(bodyLines, 0, formName, variables, assignedVars, enumMap, fnRegistry, funcName);
+    const jsLines = [`while (${jsCond}) {`];
+    for (const bl of bodyJs) jsLines.push('  ' + bl);
+    jsLines.push('}');
+    return { jsLines, endIdx };
+  }
+
+  // Pre-condition: Do Until cond ... Loop
+  const doUntilMatch = doLine.match(/^Do\s+Until\s+(.+)$/i);
+  if (doUntilMatch) {
+    const jsCond = translateCondition(doUntilMatch[1], assignedVars, enumMap, fnRegistry);
+    if (!jsCond) {
+      const jsLines = [`// [VBA Do Until loop - condition not translatable: ${doUntilMatch[1]}]`];
+      for (let j = startIdx + 1; j < endIdx && j < lines.length; j++) {
+        jsLines.push(`//   ${lines[j]}`);
+      }
+      jsLines.push('// Loop');
+      return { jsLines, endIdx };
+    }
+    const bodyLines = lines.slice(startIdx + 1, endIdx);
+    const { jsLines: bodyJs } = translateBlock(bodyLines, 0, formName, variables, assignedVars, enumMap, fnRegistry, funcName);
+    const jsLines = [`while (!(${jsCond})) {`];
+    for (const bl of bodyJs) jsLines.push('  ' + bl);
+    jsLines.push('}');
+    return { jsLines, endIdx };
+  }
+
+  // Bare Do ... Loop (with possible post-condition)
+  const bodyLines = lines.slice(startIdx + 1, endIdx);
+  const { jsLines: bodyJs } = translateBlock(bodyLines, 0, formName, variables, assignedVars, enumMap, fnRegistry, funcName);
+
+  // Post-condition: Loop While cond
+  const loopWhileMatch = loopLine.match(/^Loop\s+While\s+(.+)$/i);
+  if (loopWhileMatch) {
+    const jsCond = translateCondition(loopWhileMatch[1], assignedVars, enumMap, fnRegistry);
+    if (!jsCond) {
+      const jsLines = [`// [VBA Do...Loop While - condition not translatable: ${loopWhileMatch[1]}]`];
+      for (let j = startIdx + 1; j < endIdx && j < lines.length; j++) {
+        jsLines.push(`//   ${lines[j]}`);
+      }
+      jsLines.push(`// Loop While ${loopWhileMatch[1]}`);
+      return { jsLines, endIdx };
+    }
+    const jsLines = ['do {'];
+    for (const bl of bodyJs) jsLines.push('  ' + bl);
+    jsLines.push(`} while (${jsCond});`);
+    return { jsLines, endIdx };
+  }
+
+  // Post-condition: Loop Until cond
+  const loopUntilMatch = loopLine.match(/^Loop\s+Until\s+(.+)$/i);
+  if (loopUntilMatch) {
+    const jsCond = translateCondition(loopUntilMatch[1], assignedVars, enumMap, fnRegistry);
+    if (!jsCond) {
+      const jsLines = [`// [VBA Do...Loop Until - condition not translatable: ${loopUntilMatch[1]}]`];
+      for (let j = startIdx + 1; j < endIdx && j < lines.length; j++) {
+        jsLines.push(`//   ${lines[j]}`);
+      }
+      jsLines.push(`// Loop Until ${loopUntilMatch[1]}`);
+      return { jsLines, endIdx };
+    }
+    const jsLines = ['do {'];
+    for (const bl of bodyJs) jsLines.push('  ' + bl);
+    jsLines.push(`} while (!(${jsCond}));`);
+    return { jsLines, endIdx };
+  }
+
+  // Bare Do ... Loop (infinite loop — Exit Do → break exits)
+  const jsLines = ['while (true) {'];
+  for (const bl of bodyJs) jsLines.push('  ' + bl);
+  jsLines.push('}');
+  return { jsLines, endIdx };
+}
+
+/**
+ * Parse a While...Wend block into a JS while loop.
+ * Returns { jsLines: string[], endIdx: number }.
+ */
+function parseWhileWend(lines, startIdx, formName, variables, assignedVars, enumMap, fnRegistry, funcName) {
+  const whileLine = lines[startIdx].trim();
+  const whileMatch = whileLine.match(/^While\s+(.+)$/i);
+  const endIdx = findEndKeyword(lines, startIdx + 1, 'WHILE');
+
+  if (!whileMatch) {
+    return { jsLines: ['// [VBA While...Wend skipped]'], endIdx };
+  }
+
+  const jsCond = translateCondition(whileMatch[1], assignedVars, enumMap, fnRegistry);
+  if (!jsCond) {
+    const jsLines = [`// [VBA While loop - condition not translatable: ${whileMatch[1]}]`];
+    for (let j = startIdx + 1; j < endIdx && j < lines.length; j++) {
+      jsLines.push(`//   ${lines[j]}`);
+    }
+    jsLines.push('// Wend');
+    return { jsLines, endIdx };
+  }
+
+  const bodyLines = lines.slice(startIdx + 1, endIdx);
+  const { jsLines: bodyJs } = translateBlock(bodyLines, 0, formName, variables, assignedVars, enumMap, fnRegistry, funcName);
+  const jsLines = [`while (${jsCond}) {`];
+  for (const bl of bodyJs) jsLines.push('  ' + bl);
+  jsLines.push('}');
+  return { jsLines, endIdx };
+}
+
+/**
+ * Parse a With...End With block.
+ * Prefixes .property references with the target, delegates resolved lines to translateBlock.
+ * Returns { jsLines: string[], endIdx: number }.
+ */
+function parseWithBlock(lines, startIdx, formName, variables, assignedVars, enumMap, fnRegistry, funcName) {
+  const withLine = lines[startIdx].trim();
+  const withMatch = withLine.match(/^With\s+(.+)$/i);
+  const endIdx = findEndKeyword(lines, startIdx + 1, 'WITH');
+
+  if (!withMatch) {
+    return { jsLines: ['// [VBA With block skipped]'], endIdx };
+  }
+
+  const target = withMatch[1].trim();
+
+  // Determine if target is translatable
+  // Me.RecordsetClone, Me.Recordset — not translatable (DAO objects)
+  const isTranslatable = /^Me$/i.test(target) ||
+    (/^Me\.\w+$/i.test(target) && !/^Me\.(RecordsetClone|Recordset|Module|Properties)$/i.test(target)) ||
+    /^Me\.\w+\.Form$/i.test(target);
+
+  if (!isTranslatable) {
+    // Untranslatable target — emit warning with preserved VBA
+    const jsLines = [`// [VBA With block - target not translatable: ${target}]`];
+    for (let j = startIdx + 1; j < endIdx && j < lines.length; j++) {
+      jsLines.push(`//   ${lines[j]}`);
+    }
+    jsLines.push('// End With');
+    return { jsLines, endIdx };
+  }
+
+  // Collect body lines and resolve dot references with target.
+  // Track nested With depth so we only resolve at our level.
+  // VBA's With block applies to ALL .member references in the line, not just line-start.
+  const bodyLines = [];
+  let withDepth = 0;
+  for (let j = startIdx + 1; j < endIdx && j < lines.length; j++) {
+    const line = lines[j].trim();
+    if (/^With\s+/i.test(line)) withDepth++;
+    if (/^End\s+With$/i.test(line)) withDepth--;
+    if (withDepth === 0) {
+      // Replace all .member references: at line start, or after (, ,, =, &, space, operators
+      const resolved = line.replace(/(^|[\s(,=&+\-*/])\.([A-Za-z])/g, `$1${target}.$2`);
+      bodyLines.push(resolved);
+    } else {
+      bodyLines.push(line);
+    }
+  }
+
+  // Delegate to translateBlock
+  const { jsLines: bodyJs } = translateBlock(bodyLines, 0, formName, variables, assignedVars, enumMap, fnRegistry, funcName);
+  return { jsLines: bodyJs, endIdx };
+}
+
+/**
+ * Parse a For Each...Next block.
+ * Returns { jsLines: string[], endIdx: number }.
+ */
+function parseForEachLoop(lines, startIdx, formName, variables, assignedVars, enumMap, fnRegistry, funcName) {
+  const forLine = lines[startIdx].trim();
+  const forMatch = forLine.match(/^For\s+Each\s+(\w+)\s+In\s+(.+)$/i);
+  const endIdx = findEndKeyword(lines, startIdx + 1, 'FOR EACH');
+
+  if (!forMatch) {
+    return { jsLines: ['// [VBA For Each loop skipped]'], endIdx };
+  }
+
+  const varName = forMatch[1];
+  const collection = forMatch[2].trim();
+
+  // Determine JS iterable from collection
+  let jsIterable = null;
+
+  // Array("a", "b", "c") → ["a", "b", "c"]
+  const arrayCall = parseFunctionCall(collection);
+  if (arrayCall && /^Array$/i.test(arrayCall.name) && arrayCall.endIdx >= collection.length) {
+    const jsArgs = [];
+    let allOk = true;
+    for (const arg of arrayCall.args) {
+      const translated = translateExpression(arg, assignedVars, enumMap, fnRegistry);
+      if (translated === null) { allOk = false; break; }
+      jsArgs.push(translated);
+    }
+    if (allOk) jsIterable = `[${jsArgs.join(', ')}]`;
+  }
+
+  // Split(str, delim) → str.split(delim)
+  if (!jsIterable) {
+    const splitCall = parseFunctionCall(collection);
+    if (splitCall && /^Split$/i.test(splitCall.name) && splitCall.endIdx >= collection.length) {
+      const translated = translateExpression(collection, assignedVars, enumMap, fnRegistry);
+      if (translated) jsIterable = translated;
+    }
+  }
+
+  // dict.Keys → Object.keys(dict)
+  if (!jsIterable) {
+    const keysMatch = collection.match(/^(\w+)\.Keys$/i);
+    if (keysMatch && assignedVars && assignedVars.has(keysMatch[1].toLowerCase())) {
+      jsIterable = `Object.keys(${keysMatch[1]})`;
+    }
+  }
+
+  // Me.Controls or frm.Controls → AC.getControlNames()
+  if (!jsIterable && /^(?:Me|frm\w*)\.Controls$/i.test(collection)) {
+    jsIterable = 'AC.getControlNames()';
+  }
+
+  // TempVars → AC.getTempVarNames()
+  if (!jsIterable && /^TempVars$/i.test(collection)) {
+    jsIterable = 'AC.getTempVarNames()';
+  }
+
+  // Assigned variable
+  if (!jsIterable && /^\w+$/.test(collection) && assignedVars && assignedVars.has(collection.toLowerCase())) {
+    jsIterable = collection;
+  }
+
+  if (!jsIterable) {
+    // Untranslatable collection — emit warning with preserved VBA
+    const jsLines = [`// [VBA For Each - collection not translatable: ${collection}]`];
+    for (let j = startIdx + 1; j < endIdx && j < lines.length; j++) {
+      jsLines.push(`//   ${lines[j]}`);
+    }
+    jsLines.push('// Next');
+    return { jsLines, endIdx };
+  }
+
+  // Loop variable available in body
+  const innerVars = new Set(variables || []);
+  innerVars.add(varName.toLowerCase());
+  const innerAssigned = new Set(assignedVars || []);
+  innerAssigned.add(varName.toLowerCase());
+
+  const bodyLines = lines.slice(startIdx + 1, endIdx);
+  const { jsLines: bodyJs } = translateBlock(bodyLines, 0, formName, innerVars, innerAssigned, enumMap, fnRegistry, funcName);
+
+  const jsLines = [`for (const ${varName} of ${jsIterable}) {`];
+  for (const bl of bodyJs) jsLines.push('  ' + bl);
+  jsLines.push('}');
+  return { jsLines, endIdx };
+}
+
+/**
  * Translate a block of VBA lines into JS, recognizing control flow.
  * Handles If/Else, Select Case, numeric For loops, variable tracking.
  * Returns { jsLines: string[], endIdx: number }.
@@ -1672,8 +2347,11 @@ function translateBlock(lines, startIdx, formName, variables, assignedVars, enum
   if (!variables) variables = new Set();
   if (!assignedVars) assignedVars = new Set();
 
+  // Track FormatCondition variables → parent control for property rewriting
+  const formatCondVars = new Map();
+
   while (i < lines.length) {
-    const line = lines[i].trim();
+    let line = lines[i].trim();
 
     // Dim x As Type → let x; (track variable as assigned — VBA initializes to defaults)
     const dimMatch = line.match(/^Dim\s+(\w+)/i);
@@ -1702,10 +2380,50 @@ function translateBlock(lines, startIdx, formName, variables, assignedVars, enum
       continue;
     }
 
+    // Exit For / Exit Do → break
+    if (/^Exit\s+For$/i.test(line) || /^Exit\s+Do$/i.test(line)) {
+      jsLines.push('break;');
+      i++;
+      continue;
+    }
+
     // Skip GoTo (VBA-only constructs)
     if (/^GoTo\s+/i.test(line)) {
       i++;
       continue;
+    }
+
+    // Set fc = ctl.FormatConditions.Add(...) → no-op, map fc → ctl for property rewriting
+    const setFcMatch = line.match(/^Set\s+(\w+)\s*=\s*(\w+)\.FormatConditions\b/i);
+    if (setFcMatch) {
+      formatCondVars.set(setFcMatch[1].toLowerCase(), setFcMatch[2]);
+      assignedVars.delete(setFcMatch[1].toLowerCase()); // Remove Dim-added entry
+      jsLines.push('/* FormatConditions — no-op in web */');
+      i++;
+      continue;
+    }
+
+    // Rewrite FormatCondition variable references to parent control
+    // e.g. fc.BackColor = HIGHLIGHT_COLOR → ctl.BackColor = HIGHLIGHT_COLOR
+    for (const [fcVar, parentCtl] of formatCondVars) {
+      if (line.toLowerCase().startsWith(fcVar + '.')) {
+        line = parentCtl + line.slice(fcVar.length);
+        break;
+      }
+    }
+
+    // Array element assignment: variable(index) = value → variable[index] = value
+    const arrAssignMatch = line.match(/^(\w+)\s*\((.+?)\)\s*=\s*(.+)$/);
+    if (arrAssignMatch && assignedVars.has(arrAssignMatch[1].toLowerCase())
+        && !VBA_BUILTINS.has(arrAssignMatch[1].toLowerCase())
+        && !(fnRegistry && fnRegistry.has(arrAssignMatch[1].toLowerCase()))) {
+      const idx = translateExpression(arrAssignMatch[2].trim(), assignedVars, enumMap, fnRegistry);
+      const rhs = translateAssignmentRHS(arrAssignMatch[3].trim(), assignedVars, enumMap, fnRegistry);
+      if (idx && rhs) {
+        jsLines.push(`${arrAssignMatch[1]}[${idx}] = ${rhs};`);
+        i++;
+        continue;
+      }
     }
 
     // Strip Set prefix for object assignments: Set x = expr → x = expr
@@ -1727,6 +2445,20 @@ function translateBlock(lines, startIdx, formName, variables, assignedVars, enum
         } else {
           jsLines.push(`// ${line}`);
         }
+        i++;
+        continue;
+      }
+
+      // Cancel = True → return false (event cancellation, before general assignment)
+      if (varNameLower === 'cancel' && /^True$/i.test(assignMatch[2].trim())) {
+        jsLines.push('return false;');
+        i++;
+        continue;
+      }
+
+      // Response = acDataErrContinue → suppress default error
+      if (varNameLower === 'response' && /^acDataErrContinue$/i.test(assignMatch[2].trim())) {
+        jsLines.push('/* Response = acDataErrContinue — suppress default error */');
         i++;
         continue;
       }
@@ -1779,11 +2511,11 @@ function translateBlock(lines, startIdx, formName, variables, assignedVars, enum
       continue;
     }
 
-    // For Each — still skipped (collection iteration)
+    // For Each — parse collection iteration
     if (/^For\s+Each\s+/i.test(line)) {
-      const endIdx = findEndKeyword(lines, i + 1, 'FOR EACH');
-      jsLines.push(`// [VBA For Each loop skipped]`);
-      i = endIdx + 1;
+      const result = parseForEachLoop(lines, i, formName, variables, assignedVars, enumMap, fnRegistry, funcName);
+      jsLines.push(...result.jsLines);
+      i = result.endIdx + 1;
       continue;
     }
 
@@ -1804,25 +2536,25 @@ function translateBlock(lines, startIdx, formName, variables, assignedVars, enum
 
     // Do ... Loop
     if (/^Do\b/i.test(line)) {
-      const endIdx = findEndKeyword(lines, i + 1, 'DO');
-      jsLines.push(`// [VBA Do loop skipped]`);
-      i = endIdx + 1;
+      const result = parseDoLoop(lines, i, formName, variables, assignedVars, enumMap, fnRegistry, funcName);
+      jsLines.push(...result.jsLines);
+      i = result.endIdx + 1;
       continue;
     }
 
     // While ... Wend
     if (/^While\s+/i.test(line)) {
-      const endIdx = findEndKeyword(lines, i + 1, 'WHILE');
-      jsLines.push(`// [VBA While loop skipped]`);
-      i = endIdx + 1;
+      const result = parseWhileWend(lines, i, formName, variables, assignedVars, enumMap, fnRegistry, funcName);
+      jsLines.push(...result.jsLines);
+      i = result.endIdx + 1;
       continue;
     }
 
     // With ... End With
     if (/^With\s+/i.test(line)) {
-      const endIdx = findEndKeyword(lines, i + 1, 'WITH');
-      jsLines.push(`// [VBA With block skipped]`);
-      i = endIdx + 1;
+      const result = parseWithBlock(lines, i, formName, variables, assignedVars, enumMap, fnRegistry, funcName);
+      jsLines.push(...result.jsLines);
+      i = result.endIdx + 1;
       continue;
     }
 
@@ -1919,13 +2651,14 @@ function parseVbaToHandlers(vbaSource, moduleName, enumMap, fnRegistry) {
   for (let idx = 0; idx < procMeta.length; idx++) {
     const { proc, key, controlKw, eventKey } = procMeta[idx];
     const cleanLines = stripBoilerplate(proc.body);
-    // Seed assignedVars with module vars + procedure parameters
+    // Seed variables and assignedVars with module vars + procedure parameters
     const initVars = new Set(moduleVars);
     if (proc.params) {
       for (const p of proc.params) initVars.add(p.toLowerCase());
     }
+    const initDeclared = new Set(initVars); // parameters count as declared variables too
     const funcName = proc.kind === 'function' ? proc.name : null;
-    const { jsLines } = translateBlock(cleanLines, 0, objectName, null, initVars, enumMap, fnRegistry, funcName);
+    const { jsLines } = translateBlock(cleanLines, 0, objectName, initDeclared, initVars, enumMap, fnRegistry, funcName);
 
     // Register fn.* procedures in the registry
     if (controlKw === 'fn') {
@@ -1991,9 +2724,10 @@ function parseVbaToHandlers(vbaSource, moduleName, enumMap, fnRegistry) {
 }
 
 module.exports = {
-  parseVbaToHandlers, extractProcedures, stripBoilerplate, translateStatement,
+  parseVbaToHandlers, extractProcedures, extractProcedureNames, stripBoilerplate, translateStatement,
   translateCondition, translateBlock, parseIfBlock, findEndKeyword,
   translateAssignmentRHS, parseSelectCaseBlock, parseForLoop,
+  parseDoLoop, parseWhileWend, parseWithBlock, parseForEachLoop,
   collectEnumValues, collectModuleVars, translateDomainCall, parseDomainCall, translateCriteria,
   translateExpression, parseFunctionCall, splitOnOperator,
 };

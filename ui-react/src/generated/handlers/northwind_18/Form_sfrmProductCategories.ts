@@ -14,7 +14,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "cmd-delete",
     event: "on-click",
     procedure: "cmdDelete_Click",
-    js: "if (AC.isNewRecord()) {\n  AC.undo();\n}\nif (await AC.dCount(\"ProductID\", \"Products\", \"ProductCategoryID = \" + AC.getValue(\"ProductCategoryID\")) > 0) {\n  alert(await AC.callFn(\"GetString\", 33, \"Product Category\", AC.getValue(\"ProductCategoryName\"), \"Product\"));\n}\n// DoCmd.RunCommand acCmdDeleteRecord\nAC.requeryControl(\"lstCategory\");"
+    js: "if (AC.isNewRecord()) {\n  AC.undo();\n}\nif (await AC.dCount(\"ProductID\", \"Products\", \"ProductCategoryID = \" + AC.getValue(\"ProductCategoryID\")) > 0) {\n  alert(await AC.callFn(\"GetString\", 33, \"Product Category\", AC.getValue(\"ProductCategoryName\"), \"Product\"));\n}\nAC.deleteRecord();\nAC.requeryControl(\"lstCategory\");"
   },
   "fn.Form_AfterInsert": {
     key: "fn.Form_AfterInsert",
@@ -28,7 +28,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "form",
     event: "on-current",
     procedure: "Form_Current",
-    js: "let lngCategoryID;\nlngCategoryID = AC.nz(AC.getValue(\"txtProductCategoryID\"), 0);\n// [VBA If block - condition not translatable]\n// If lngCategoryID <> CLng(Nz(Me.lstCategory, lngCategoryID)) Then\n//   Me.lstCategory = Null\n// End If"
+    js: "let lngCategoryID;\nlngCategoryID = AC.nz(AC.getValue(\"txtProductCategoryID\"), 0);\nif (lngCategoryID !== parseInt(AC.nz(AC.getValue(\"lstCategory\"), lngCategoryID))) {\n  AC.setValue(\"lstCategory\", null);\n}"
   },
   "fn.Form_Delete": {
     key: "fn.Form_Delete",
@@ -42,7 +42,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "lst-category",
     event: "after-update",
     procedure: "lstCategory_AfterUpdate",
-    js: "if (AC.nz(AC.getValue(\"lstCategory\"), 0) > 0) {\n  AC.setValue(\"Painting\", false);\n  // DoCmd.SearchForRecord , \"\", acFirst, \"ProductCategoryID = \" & Me.lstCategory\n}\nif (AC.getValue(\"Painting\") === false) { AC.setValue(\"Painting\", true); }"
+    js: "if (AC.nz(AC.getValue(\"lstCategory\"), 0) > 0) {\n  /* Me.Painting — no-op in web */;\n  // DoCmd.SearchForRecord , \"\", acFirst, \"ProductCategoryID = \" & Me.lstCategory\n}\nif (AC.getValue(\"Painting\") === false) { /* Me.Painting — no-op in web */; }"
   },
   "txt-product-category-code.before-update": {
     key: "txt-product-category-code.before-update",

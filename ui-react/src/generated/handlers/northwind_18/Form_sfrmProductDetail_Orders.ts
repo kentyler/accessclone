@@ -7,7 +7,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "txt-order-id",
     event: "on-click",
     procedure: "txtOrderID_Click",
-    js: "// OpenOrderDetailsForm (Me.OrderID)"
+    js: "await AC.callFn(\"OpenOrderDetailsForm\", AC.getValue(\"OrderID\"));"
   }
 };
 

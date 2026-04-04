@@ -14,7 +14,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "MaxValue",
     procedure: "MaxValue",
-    js: "let v;\nlet vMax;\n// [VBA If block - condition not translatable]\n// If UBound(varValue) = -1 Then\n//   vMax = Null        'Zero arguments passed in\n// Else\n//   vMax = varValue(0)\n//   For Each v In varValue\n//   If v > vMax Then vMax = v\n//   Next\n// End If\nreturn vMax;"
+    js: "let v;\nlet vMax;\nif ((varValue.length - 1) === -1) {\n  vMax = null;\n} else {\n  vMax = varValue[0];\n  for (const v of varValue) {\n    if (v > vMax) { vMax = v; }\n  }\n}\nreturn vMax;"
   }
 };
 

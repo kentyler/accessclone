@@ -3,6 +3,7 @@ const {
   parseIfBlock, translateBlock, findEndKeyword,
   parseVbaToHandlers, translateAssignmentRHS,
   parseSelectCaseBlock, parseForLoop,
+  parseDoLoop, parseWhileWend, parseWithBlock, parseForEachLoop,
   translateExpression, parseFunctionCall, splitOnOperator,
   translateCriteria, collectModuleVars, collectEnumValues,
 } = require('../lib/vba-to-js');
@@ -91,7 +92,7 @@ describe('translateStatement', () => {
 
   test('DoCmd.RunCommand acCmdSaveRecord', () => {
     expect(translateStatement('DoCmd.RunCommand acCmdSaveRecord'))
-      .toBe('AC.saveRecord()');
+      .toBe('await AC.saveRecord()');
   });
 
   test('MsgBox', () => {
@@ -238,11 +239,38 @@ describe('translateStatement', () => {
       .toBe('AC.setFilter("Status = 1")');
   });
 
+  test('Me.Filter = concatenation expression', () => {
+    const vars = new Set(['lngreportfilter']);
+    expect(translateStatement('Me.Filter = "EmployeeID = " & lngReportFilter', null, null, vars))
+      .toBe('AC.setFilter("EmployeeID = " + lngReportFilter)');
+  });
+
   test('Me.FilterOn = True/False', () => {
     expect(translateStatement('Me.FilterOn = True'))
       .toBe('AC.setFilterOn(true)');
     expect(translateStatement('Me.FilterOn = False'))
       .toBe('AC.setFilterOn(false)');
+  });
+
+  test('Forms!frmName.Requery → AC.requeryForm', () => {
+    expect(translateStatement('Forms!frmCompanyList.Requery'))
+      .toBe('AC.requeryForm("frmCompanyList")');
+  });
+
+  test('Forms!frmName.Recordset.Requery → AC.requeryForm', () => {
+    expect(translateStatement('Forms!frmEmployeeList.Recordset.Requery'))
+      .toBe('AC.requeryForm("frmEmployeeList")');
+  });
+
+  test('Forms("frmName").Requery → AC.requeryForm', () => {
+    expect(translateStatement('Forms("frmCompanyList").Requery'))
+      .toBe('AC.requeryForm("frmCompanyList")');
+  });
+
+  test('Forms(variable).Requery → AC.requeryForm with var', () => {
+    const vars = new Set(['strform']);
+    expect(translateStatement('Forms(strForm).Requery', null, null, vars))
+      .toBe('AC.requeryForm(strForm)');
   });
 
   test('Cancel = True → return false', () => {
@@ -358,6 +386,18 @@ describe('translateAssignmentRHS', () => {
   test('empty/null returns null', () => {
     expect(translateAssignmentRHS('')).toBeNull();
     expect(translateAssignmentRHS(null)).toBeNull();
+  });
+
+  test('Not FunctionCall(var) negation', () => {
+    const assigned = new Set(['frm']);
+    const fn = new Set(['isvalidform']);
+    expect(translateAssignmentRHS('Not IsValidForm(frm)', assigned, null, fn))
+      .toBe('!(await AC.callFn("IsValidForm", frm))');
+  });
+
+  test('Not True/False', () => {
+    expect(translateAssignmentRHS('Not True')).toBe('!(true)');
+    expect(translateAssignmentRHS('Not False')).toBe('!(false)');
   });
 });
 
@@ -496,6 +536,18 @@ describe('translateCondition', () => {
   test('Not with assignedVars', () => {
     const vars = new Set(['straction']);
     expect(translateCondition('Not IsNull(strAction)', vars)).toBe('!(strAction == null)');
+  });
+
+  test('IsNull(ctl.Value) — variable.Value in condition', () => {
+    const vars = new Set(['ctl']);
+    expect(translateCondition('IsNull(ctl.Value)', vars)).toBe('AC.getValue(ctl) == null');
+  });
+
+  test('variable.BackColor = enum in condition', () => {
+    const vars = new Set(['ctl']);
+    const enums = new Map([['HIGHLIGHT_COLOR', 65535]]);
+    expect(translateCondition('ctl.BackColor = HIGHLIGHT_COLOR', vars, enums))
+      .toBe('AC.getBackColor(ctl) === 65535');
   });
 
   test('Me.Dirty And Me.NewRecord compound', () => {
@@ -958,44 +1010,45 @@ describe('translateBlock', () => {
     expect(result.jsLines[3]).toBe('AC.requery();');
   });
 
-  test('For Each loop skipped with comment', () => {
+  test('For Each over Me.Controls translates to AC.getControlNames()', () => {
     const lines = [
       'For Each ctl In Me.Controls',
       'ctl.Visible = True',
       'Next ctl',
     ];
     const result = translateBlock(lines, 0, 'frmTest');
-    expect(result.jsLines[0]).toBe('// [VBA For Each loop skipped]');
+    expect(result.jsLines[0]).toBe('for (const ctl of AC.getControlNames()) {');
   });
 
-  test('Do loop skipped with comment', () => {
+  test('Do While with untranslatable condition emits warning', () => {
     const lines = [
       'Do While Not rs.EOF',
       'rs.MoveNext',
       'Loop',
     ];
     const result = translateBlock(lines, 0, 'frmTest');
-    expect(result.jsLines[0]).toBe('// [VBA Do loop skipped]');
+    expect(result.jsLines[0]).toBe('// [VBA Do While loop - condition not translatable: Not rs.EOF]');
   });
 
-  test('While/Wend skipped with comment', () => {
+  test('While/Wend with untranslatable condition emits warning', () => {
     const lines = [
       'While x > 0',
       'x = x - 1',
       'Wend',
     ];
     const result = translateBlock(lines, 0, 'frmTest');
-    expect(result.jsLines[0]).toBe('// [VBA While loop skipped]');
+    // x is not in assignedVars, so condition is not translatable
+    expect(result.jsLines[0]).toBe('// [VBA While loop - condition not translatable: x > 0]');
   });
 
-  test('With block skipped with comment', () => {
+  test('With Me.ctrl prefixes dot references and translates', () => {
     const lines = [
       'With Me.txtName',
       '.Visible = True',
       'End With',
     ];
     const result = translateBlock(lines, 0, 'frmTest');
-    expect(result.jsLines[0]).toBe('// [VBA With block skipped]');
+    expect(result.jsLines[0]).toBe('AC.setVisible("txtName", true);');
   });
 
   test('block If integrated into translateBlock', () => {
@@ -1192,9 +1245,22 @@ describe('parseSelectCaseBlock', () => {
     expect(js).toContain('switch (AC.getValue("cboType"))');
   });
 
-  test('untranslatable expression emits comment', () => {
+  test('DLookup as switch expression translates via domain aggregate', () => {
     const lines = [
       'Select Case DLookup("Type", "tbl")',
+      'Case "A"',
+      'DoCmd.Close',
+      'End Select',
+    ];
+    const result = parseSelectCaseBlock(lines, 0, 'frmTest');
+    const js = result.jsLines.join('\n');
+    expect(js).toContain('switch (await AC.dLookup("Type", "tbl"))');
+    expect(js).toContain('case "A"');
+  });
+
+  test('untranslatable expression emits comment', () => {
+    const lines = [
+      'Select Case SomeUnknownObj.Property',
       'Case "A"',
       'DoCmd.Close',
       'End Select',
@@ -1845,6 +1911,45 @@ describe('translateExpression', () => {
   test('TempVars reference', () => {
     expect(translateExpression('TempVars!MyVar')).toBe('AC.getTempVar("MyVar")');
   });
+
+  test('[Forms]![frmName].[ctrlName] → AC.getFormValue', () => {
+    expect(translateExpression('[Forms]![frmReports].[txtStartDate]'))
+      .toBe('AC.getFormValue("frmReports", "txtStartDate")');
+  });
+
+  test('[Forms]![frmName]![ctrlName] with ! separator', () => {
+    expect(translateExpression('[Forms]![frmReports]![txtEndDate]'))
+      .toBe('AC.getFormValue("frmReports", "txtEndDate")');
+  });
+
+  test('Forms!frmName.ctrlName → AC.getFormValue', () => {
+    expect(translateExpression('Forms!frmCompanyDetail.Caption'))
+      .toBe('AC.getFormValue("frmCompanyDetail", "Caption")');
+  });
+
+  test('Forms("frmName").ctrlName → AC.getFormValue', () => {
+    expect(translateExpression('Forms("frmReports").txtStartDate'))
+      .toBe('AC.getFormValue("frmReports", "txtStartDate")');
+  });
+
+  test('cross-form ref in concatenation', () => {
+    expect(translateExpression('"Between " & [Forms]![frmReports].[txtStartDate] & " And " & [Forms]![frmReports].[txtEndDate]'))
+      .toBe('"Between " + AC.getFormValue("frmReports", "txtStartDate") + " And " + AC.getFormValue("frmReports", "txtEndDate")');
+  });
+
+  test('variable.Value → AC.getValue(variable)', () => {
+    const assigned = new Set(['ctl']);
+    expect(translateExpression('ctl.Value', assigned)).toBe('AC.getValue(ctl)');
+  });
+
+  test('variable.BackColor → AC.getBackColor(variable)', () => {
+    const assigned = new Set(['ctl']);
+    expect(translateExpression('ctl.BackColor', assigned)).toBe('AC.getBackColor(ctl)');
+  });
+
+  test('variable.Property getter not in assignedVars returns null', () => {
+    expect(translateExpression('unknownCtl.BackColor')).toBeNull();
+  });
 });
 
 // ============================================================
@@ -2179,5 +2284,971 @@ End Function
 `;
     const handlers = parseVbaToHandlers(vba, 'modUtils');
     expect(handlers[0].js).toContain('return dict;');
+  });
+});
+
+// ============================================================
+// Phase 1: Exit For / Exit Do → break
+// ============================================================
+
+describe('Exit For / Exit Do', () => {
+  test('Exit For in For loop emits break', () => {
+    const lines = [
+      'For i = 1 To 10',
+      'DoCmd.Close',
+      'Exit For',
+      'Next i',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    expect(result.jsLines).toContain('  break;');
+  });
+
+  test('Exit Do in Do loop emits break', () => {
+    const lines = [
+      'Do',
+      'DoCmd.Close',
+      'Exit Do',
+      'Loop',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    expect(result.jsLines[0]).toBe('while (true) {');
+    expect(result.jsLines).toContain('  break;');
+  });
+
+  test('Exit For inside nested If within For loop', () => {
+    const lines = [
+      'For i = 0 To 5',
+      'If True Then',
+      'Exit For',
+      'End If',
+      'Next i',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    const js = result.jsLines.join('\n');
+    expect(js).toContain('break;');
+    expect(js).toContain('for (let i = 0;');
+  });
+});
+
+// ============================================================
+// Phase 2: Do/While/Until loops
+// ============================================================
+
+describe('Do/While loops', () => {
+  test('Do While cond ... Loop → while (cond) {}', () => {
+    const assigned = new Set(['counter']);
+    const lines = ['Do While counter > 0', 'DoCmd.Close', 'Loop'];
+    const result = translateBlock(lines, 0, 'frmTest', null, assigned);
+    expect(result.jsLines[0]).toBe('while (counter > 0) {');
+    expect(result.jsLines[1]).toBe('  AC.closeForm("frmTest");');
+    expect(result.jsLines[2]).toBe('}');
+  });
+
+  test('Do Until cond ... Loop → while (!(cond)) {}', () => {
+    const assigned = new Set(['found']);
+    const lines = ['Do Until found = True', 'DoCmd.Save', 'Loop'];
+    const result = translateBlock(lines, 0, 'frmTest', null, assigned);
+    expect(result.jsLines[0]).toBe('while (!(found === true)) {');
+  });
+
+  test('Do ... Loop While cond → do {} while (cond)', () => {
+    const assigned = new Set(['x']);
+    const lines = ['Do', 'DoCmd.Close', 'Loop While x > 0'];
+    const result = translateBlock(lines, 0, 'frmTest', null, assigned);
+    expect(result.jsLines[0]).toBe('do {');
+    expect(result.jsLines[2]).toBe('} while (x > 0);');
+  });
+
+  test('Do ... Loop Until cond → do {} while (!(cond))', () => {
+    const assigned = new Set(['done']);
+    const lines = ['Do', 'DoCmd.Save', 'Loop Until done = True'];
+    const result = translateBlock(lines, 0, 'frmTest', null, assigned);
+    expect(result.jsLines[0]).toBe('do {');
+    expect(result.jsLines[2]).toMatch(/while \(!\(done === true\)\)/);
+  });
+
+  test('Bare Do ... Loop → while (true) {}', () => {
+    const lines = ['Do', 'DoCmd.Close', 'Exit Do', 'Loop'];
+    const result = translateBlock(lines, 0, 'frmTest');
+    expect(result.jsLines[0]).toBe('while (true) {');
+    expect(result.jsLines).toContain('  break;');
+  });
+
+  test('While ... Wend with translatable condition', () => {
+    const assigned = new Set(['count']);
+    const lines = ['While count > 0', 'DoCmd.Save', 'Wend'];
+    const result = translateBlock(lines, 0, 'frmTest', null, assigned);
+    expect(result.jsLines[0]).toBe('while (count > 0) {');
+    expect(result.jsLines[2]).toBe('}');
+  });
+
+  test('Do While with untranslatable condition preserves VBA', () => {
+    const lines = ['Do While rs.Fields("ID") > 0', 'rs.MoveNext', 'Loop'];
+    const result = translateBlock(lines, 0, 'frmTest');
+    expect(result.jsLines[0]).toContain('condition not translatable');
+    expect(result.jsLines.some(l => l.includes('rs.MoveNext'))).toBe(true);
+  });
+
+  test('Nested Do loops', () => {
+    const assigned = new Set(['i', 'j']);
+    const lines = [
+      'Do While i > 0',
+      'Do While j > 0',
+      'DoCmd.Save',
+      'Loop',
+      'Loop',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest', null, assigned);
+    expect(result.jsLines[0]).toBe('while (i > 0) {');
+    expect(result.jsLines[1]).toBe('  while (j > 0) {');
+  });
+
+  test('Do While with If/Else in body', () => {
+    const assigned = new Set(['counter']);
+    const lines = [
+      'Do While counter > 0',
+      'If True Then',
+      'DoCmd.Close',
+      'End If',
+      'Loop',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest', null, assigned);
+    const js = result.jsLines.join('\n');
+    expect(js).toContain('while (counter > 0)');
+    expect(js).toContain('if (true)');
+  });
+
+  test('Exit Do inside Do While emits break', () => {
+    const assigned = new Set(['counter']);
+    const lines = [
+      'Do While counter > 0',
+      'Exit Do',
+      'Loop',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest', null, assigned);
+    expect(result.jsLines).toContain('  break;');
+  });
+
+  test('Do While Me.NewRecord', () => {
+    const lines = ['Do While Me.NewRecord', 'DoCmd.Save', 'Loop'];
+    const result = translateBlock(lines, 0, 'frmTest');
+    expect(result.jsLines[0]).toBe('while (AC.isNewRecord()) {');
+  });
+
+  test('While/Wend with Me.Dirty condition', () => {
+    const lines = ['While Me.Dirty', 'DoCmd.Save', 'Wend'];
+    const result = translateBlock(lines, 0, 'frmTest');
+    expect(result.jsLines[0]).toBe('while (AC.isDirty()) {');
+  });
+});
+
+// ============================================================
+// Phase 3: Domain aggregates in conditions
+// ============================================================
+
+describe('IsNull with domain aggregates', () => {
+  test('IsNull(DLookup(...)) in condition', () => {
+    const cond = translateCondition('IsNull(DLookup("Name", "tblPeople", "ID = 1"))');
+    expect(cond).toBe('await AC.dLookup("Name", "tblPeople", "ID = 1") == null');
+  });
+
+  test('Not IsNull(DLookup(...)) with criteria', () => {
+    const assigned = new Set(['myid']);
+    const cond = translateCondition('Not IsNull(DLookup("Name", "tblPeople", "ID = " & myID))', assigned);
+    expect(cond).toContain('!(');
+    expect(cond).toContain('await AC.dLookup');
+    expect(cond).toContain('== null');
+  });
+
+  test('Nz(DLookup(...), "") <> "" in comparison already works', () => {
+    // This tests the existing translateExpression path — Nz(DLookup) as expression
+    const cond = translateCondition('Nz(DLookup("Name", "tblPeople"), "") <> ""');
+    expect(cond).toContain('AC.nz');
+    expect(cond).toContain('!==');
+  });
+
+  test('DCount in condition comparison still works', () => {
+    const cond = translateCondition('DCount("*", "tblOrders", "Status = 1") > 0');
+    expect(cond).toBe('await AC.dCount("*", "tblOrders", "Status = 1") > 0');
+  });
+
+  test('Compound condition with domain aggregate and IsNull', () => {
+    const cond = translateCondition('DCount("*", "tblItems") > 0 And IsNull(DLookup("Name", "tblPeople"))');
+    expect(cond).toContain('&&');
+    expect(cond).toContain('dCount');
+    expect(cond).toContain('dLookup');
+  });
+
+  test('Regression: IsNull(variable) still works', () => {
+    const assigned = new Set(['myvar']);
+    const cond = translateCondition('IsNull(myVar)', assigned);
+    expect(cond).toBe('myVar == null');
+  });
+});
+
+// ============================================================
+// Phase 4: New translateStatement patterns
+// ============================================================
+
+describe('New statement patterns', () => {
+  test('Me.ctrl.Locked = True', () => {
+    expect(translateStatement('Me.txtName.Locked = True')).toBe('AC.setLocked("txtName", true)');
+  });
+
+  test('Me.ctrl.Locked = False', () => {
+    expect(translateStatement('Me.txtName.Locked = False')).toBe('AC.setLocked("txtName", false)');
+  });
+
+  test('Me.ctrl.BackColor = numeric value', () => {
+    expect(translateStatement('Me.txtName.BackColor = 16777215')).toBe('AC.setBackColor("txtName", 16777215)');
+  });
+
+  test('Me.ctrl.ForeColor = variable', () => {
+    const assigned = new Set(['mycolor']);
+    expect(translateStatement('Me.txtName.ForeColor = myColor', null, null, assigned)).toBe('AC.setForeColor("txtName", myColor)');
+  });
+
+  test('Me.ctrl.BackShade = value', () => {
+    expect(translateStatement('Me.txtName.BackShade = 85')).toBe('AC.setBackShade("txtName", 85)');
+  });
+
+  test('Me.ctrl.DefaultValue = string', () => {
+    expect(translateStatement('Me.txtPrice.DefaultValue = "0"')).toBe('AC.setDefaultValue("txtPrice", "0")');
+  });
+
+  test('Me.AllowEdits = True', () => {
+    expect(translateStatement('Me.AllowEdits = True')).toBe('AC.setAllowEdits(true)');
+  });
+
+  test('Me.AllowAdditions = False', () => {
+    expect(translateStatement('Me.AllowAdditions = False')).toBe('AC.setAllowAdditions(false)');
+  });
+
+  test('Me.AllowDeletions = True', () => {
+    expect(translateStatement('Me.AllowDeletions = True')).toBe('AC.setAllowDeletions(true)');
+  });
+
+  test('Me.Painting = True is no-op', () => {
+    expect(translateStatement('Me.Painting = True')).toBe('/* Me.Painting — no-op in web */');
+  });
+
+  test('Me.NavigationCaption = string', () => {
+    expect(translateStatement('Me.NavigationCaption = "Orders"')).toBe('AC.setNavigationCaption("Orders")');
+  });
+
+  test('Me.sfrmX.Form.AllowEdits = True', () => {
+    expect(translateStatement('Me.sfrmOrders.Form.AllowEdits = True')).toBe('AC.setSubformAllow("sfrmOrders", "allowEdits", true)');
+  });
+
+  test('Me.sfrmX.Form.AllowAdditions = False', () => {
+    expect(translateStatement('Me.sfrmItems.Form.AllowAdditions = False')).toBe('AC.setSubformAllow("sfrmItems", "allowAdditions", false)');
+  });
+
+  test('Me.AllowEdits with variable RHS', () => {
+    const assigned = new Set(['editable']);
+    expect(translateStatement('Me.AllowEdits = editable', null, null, assigned)).toBe('AC.setAllowEdits(editable)');
+  });
+
+  // variable.Property = value (where variable is in assignedVars)
+  test('variable.BackColor = constant', () => {
+    const assigned = new Set(['ctl']);
+    const enums = new Map([['HIGHLIGHT_COLOR', 65535]]);
+    expect(translateStatement('ctl.BackColor = HIGHLIGHT_COLOR', null, enums, assigned)).toBe('AC.setBackColor(ctl, 65535)');
+  });
+
+  test('variable.BackStyle = numeric', () => {
+    const assigned = new Set(['ctl']);
+    expect(translateStatement('ctl.BackStyle = 1', null, null, assigned)).toBe('AC.setBackStyle(ctl, 1)');
+  });
+
+  test('variable.Visible = True', () => {
+    const assigned = new Set(['ctrl']);
+    expect(translateStatement('ctrl.Visible = True', null, null, assigned)).toBe('AC.setVisible(ctrl, true)');
+  });
+
+  test('variable.Property not in assignedVars returns null', () => {
+    expect(translateStatement('unknownCtl.BackColor = 255')).toBeNull();
+  });
+
+  // Bare call with space-separated args (no parens)
+  test('bare call with space-separated arg', () => {
+    const assigned = new Set(['ctl']);
+    const fn = new Set(['highlightcontrol']);
+    expect(translateStatement('HighlightControl ctl', null, null, assigned, fn))
+      .toBe('await AC.callFn("HighlightControl", ctl)');
+  });
+
+  test('bare call with multiple space-separated args', () => {
+    const assigned = new Set(['frm']);
+    const fn = new Set(['dosomething']);
+    expect(translateStatement('DoSomething frm, True', null, null, assigned, fn))
+      .toBe('await AC.callFn("DoSomething", frm, true)');
+  });
+
+  test('bare call with space arg — not in fnRegistry', () => {
+    const assigned = new Set(['ctl']);
+    expect(translateStatement('UnknownSub ctl', null, null, assigned)).toBeNull();
+  });
+});
+
+// ============================================================
+// Phase 5: With blocks
+// ============================================================
+
+describe('With blocks', () => {
+  test('With Me + various property sets', () => {
+    const lines = [
+      'With Me',
+      '.AllowEdits = True',
+      '.AllowAdditions = False',
+      'End With',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    expect(result.jsLines[0]).toBe('AC.setAllowEdits(true);');
+    expect(result.jsLines[1]).toBe('AC.setAllowAdditions(false);');
+  });
+
+  test('With Me.ctrl — dot method', () => {
+    const lines = [
+      'With Me.txtName',
+      '.SetFocus',
+      '.Visible = False',
+      'End With',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    expect(result.jsLines[0]).toBe('AC.setFocus("txtName");');
+    expect(result.jsLines[1]).toBe('AC.setVisible("txtName", false);');
+  });
+
+  test('With Me.ctrl mixed dot and non-dot lines', () => {
+    const lines = [
+      'With Me.txtName',
+      '.Visible = True',
+      'DoCmd.Save',
+      '.Enabled = False',
+      'End With',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    expect(result.jsLines[0]).toBe('AC.setVisible("txtName", true);');
+    expect(result.jsLines[1]).toBe('AC.saveRecord();');
+    expect(result.jsLines[2]).toBe('AC.setEnabled("txtName", false);');
+  });
+
+  test('With untranslatable target preserves VBA', () => {
+    const lines = [
+      'With Me.RecordsetClone',
+      '.FindFirst "ID = 1"',
+      'End With',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    expect(result.jsLines[0]).toBe('// [VBA With block - target not translatable: Me.RecordsetClone]');
+    expect(result.jsLines.some(l => l.includes('.FindFirst'))).toBe(true);
+    expect(result.jsLines[result.jsLines.length - 1]).toBe('// End With');
+  });
+
+  test('With rs variable (untranslatable)', () => {
+    const lines = [
+      'With rsData',
+      '.Fields("Name") = "test"',
+      'End With',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    expect(result.jsLines[0]).toContain('target not translatable: rsData');
+  });
+
+  test('Nested With blocks', () => {
+    const lines = [
+      'With Me',
+      '.AllowEdits = True',
+      'With Me.txtName',
+      '.Visible = False',
+      'End With',
+      'End With',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    expect(result.jsLines[0]).toBe('AC.setAllowEdits(true);');
+    expect(result.jsLines[1]).toBe('AC.setVisible("txtName", false);');
+  });
+
+  test('With Me.sfrmX.Form sets subform allow props', () => {
+    const lines = [
+      'With Me.sfrmOrders.Form',
+      '.AllowAdditions = True',
+      '.AllowEdits = False',
+      '.AllowDeletions = False',
+      'End With',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    expect(result.jsLines[0]).toBe('AC.setSubformAllow("sfrmOrders", "allowAdditions", true);');
+    expect(result.jsLines[1]).toBe('AC.setSubformAllow("sfrmOrders", "allowEdits", false);');
+    expect(result.jsLines[2]).toBe('AC.setSubformAllow("sfrmOrders", "allowDeletions", false);');
+  });
+
+  test('With Me + Locked property', () => {
+    const lines = [
+      'With Me',
+      '.txtName.Locked = True',
+      '.txtPrice.Locked = False',
+      'End With',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    expect(result.jsLines[0]).toBe('AC.setLocked("txtName", true);');
+    expect(result.jsLines[1]).toBe('AC.setLocked("txtPrice", false);');
+  });
+
+  test('With Me + BackColor property', () => {
+    const lines = [
+      'With Me',
+      '.txtName.BackColor = 16777215',
+      'End With',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    expect(result.jsLines[0]).toBe('AC.setBackColor("txtName", 16777215);');
+  });
+
+  test('With Me resolves mid-line dot references (Nz, function args)', () => {
+    const lines = [
+      'With Me',
+      'lngReportFilter = Nz(.cboFilterByEmployee, 0)',
+      'End With',
+    ];
+    const vars = new Set(['lngreportfilter']);
+    const result = translateBlock(lines, 0, 'frmTest', vars, vars);
+    expect(result.jsLines[0]).toBe('lngReportFilter = AC.nz(AC.getValue("cboFilterByEmployee"), 0);');
+  });
+
+  test('With Me resolves dot refs after & and = operators', () => {
+    const lines = [
+      'With Me',
+      '.Filter = "EmployeeID = " & .cboFilter',
+      'End With',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    // .Filter → Me.Filter, .cboFilter → Me.cboFilter
+    // Me.Filter = "..." & Me.cboFilter should translate via setFilter
+    expect(result.jsLines[0]).toContain('AC.setFilter(');
+  });
+
+  test('With Me — full rptSalesByEmployee pattern', () => {
+    const lines = [
+      'With Me',
+      '.FilterOn = False',
+      '.cboFilterByEmployee.Requery',
+      'lngReportFilter = Nz(.cboFilterByEmployee, 0)',
+      'If lngReportFilter > 0 Then',
+      '.Filter = "EmployeeID = " & lngReportFilter',
+      '.FilterOn = True',
+      'End If',
+      'End With',
+    ];
+    const vars = new Set(['lngreportfilter']);
+    const result = translateBlock(lines, 0, 'frmTest', vars, vars);
+    expect(result.jsLines[0]).toBe('AC.setFilterOn(false);');
+    expect(result.jsLines[1]).toBe('AC.requeryControl("cboFilterByEmployee");');
+    expect(result.jsLines[2]).toBe('lngReportFilter = AC.nz(AC.getValue("cboFilterByEmployee"), 0);');
+    expect(result.jsLines[3]).toBe('if (lngReportFilter > 0) {');
+    expect(result.jsLines[4]).toContain('AC.setFilter(');
+    expect(result.jsLines[5].trim()).toBe('AC.setFilterOn(true);');
+  });
+});
+
+// ============================================================
+// Phase 6: For Each loops
+// ============================================================
+
+describe('For Each loops', () => {
+  test('For Each with Array()', () => {
+    const lines = [
+      'For Each item In Array("a", "b", "c")',
+      'DoCmd.Close',
+      'Next item',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    expect(result.jsLines[0]).toBe('for (const item of ["a", "b", "c"]) {');
+  });
+
+  test('For Each with Split()', () => {
+    const assigned = new Set(['mystr']);
+    const lines = [
+      'For Each part In Split(myStr, ",")',
+      'DoCmd.Close',
+      'Next part',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest', null, assigned);
+    expect(result.jsLines[0]).toBe('for (const part of myStr.split(",")) {');
+  });
+
+  test('For Each with assigned variable', () => {
+    const assigned = new Set(['mylist']);
+    const lines = [
+      'For Each item In myList',
+      'DoCmd.Save',
+      'Next item',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest', null, assigned);
+    expect(result.jsLines[0]).toBe('for (const item of myList) {');
+  });
+
+  test('For Each with dict.Keys', () => {
+    const assigned = new Set(['dict']);
+    const lines = [
+      'For Each key In dict.Keys',
+      'DoCmd.Close',
+      'Next key',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest', null, assigned);
+    expect(result.jsLines[0]).toBe('for (const key of Object.keys(dict)) {');
+  });
+
+  test('For Each with Me.Controls → AC.getControlNames()', () => {
+    const lines = [
+      'For Each ctl In Me.Controls',
+      'DoCmd.Close',
+      'Next ctl',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    expect(result.jsLines[0]).toBe('for (const ctl of AC.getControlNames()) {');
+  });
+
+  test('For Each with TempVars → AC.getTempVarNames()', () => {
+    const lines = [
+      'For Each tv In TempVars',
+      'DoCmd.Close',
+      'Next tv',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    expect(result.jsLines[0]).toBe('for (const tv of AC.getTempVarNames()) {');
+  });
+
+  test('For Each with untranslatable DAO collection', () => {
+    const lines = [
+      'For Each tdf In db.TableDefs',
+      'Debug.Print tdf.Name',
+      'Next tdf',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    expect(result.jsLines[0]).toBe('// [VBA For Each - collection not translatable: db.TableDefs]');
+    expect(result.jsLines.some(l => l.includes('Debug.Print'))).toBe(true);
+  });
+
+  test('Exit For inside For Each emits break', () => {
+    const lines = [
+      'For Each item In Array("a", "b")',
+      'Exit For',
+      'Next item',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    expect(result.jsLines).toContain('  break;');
+  });
+
+  test('Loop variable available in body expressions', () => {
+    const lines = [
+      'For Each item In Array("a", "b")',
+      'MsgBox item',
+      'Next item',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    expect(result.jsLines[1]).toBe('  alert(item);');
+  });
+
+  test('For Each nested in If', () => {
+    const lines = [
+      'If True Then',
+      'For Each x In Array(1, 2)',
+      'DoCmd.Close',
+      'Next x',
+      'End If',
+    ];
+    const result = translateBlock(lines, 0, 'frmTest');
+    const js = result.jsLines.join('\n');
+    expect(js).toContain('if (true)');
+    expect(js).toContain('for (const x of [1, 2])');
+  });
+});
+
+// ============================================================
+// Integration: parseVbaToHandlers with new constructs
+// ============================================================
+
+describe('parseVbaToHandlers integration with new constructs', () => {
+  test('Do While loop in event handler', () => {
+    const vba = `
+Private Sub cmdProcess_Click()
+    Dim count As Long
+    count = 10
+    Do While count > 0
+        DoCmd.Save
+        count = count - 1
+    Loop
+End Sub
+`;
+    const handlers = parseVbaToHandlers(vba, 'Form_frmMain');
+    const js = handlers[0].js;
+    expect(js).toContain('while (count > 0)');
+    expect(js).toContain('AC.saveRecord()');
+  });
+
+  test('With Me in event handler', () => {
+    const vba = `
+Private Sub Form_Current()
+    With Me
+        .AllowEdits = True
+        .AllowDeletions = False
+    End With
+End Sub
+`;
+    const handlers = parseVbaToHandlers(vba, 'Form_frmOrders');
+    const js = handlers[0].js;
+    expect(js).toContain('AC.setAllowEdits(true)');
+    expect(js).toContain('AC.setAllowDeletions(false)');
+  });
+
+  test('For Each Array in utility function', () => {
+    const vba = `
+Public Sub ToggleFields()
+    Dim fld As Variant
+    For Each fld In Array("Name", "Price", "Qty")
+        Me.Controls(fld).Visible = True
+    Next fld
+End Sub
+`;
+    const handlers = parseVbaToHandlers(vba, 'Form_frmMain');
+    const js = handlers[0].js;
+    expect(js).toContain('for (const fld of ["Name", "Price", "Qty"])');
+  });
+
+  // --- Array indexing ---
+
+  test('array indexing in expression: variable(index) → variable[index]', () => {
+    const assignedVars = new Set(['vparams', 'n']);
+    const result = translateExpression('vParams(n)', assignedVars, null, null);
+    expect(result).toBe('vParams[n]');
+  });
+
+  test('array indexing: variable(0) → variable[0]', () => {
+    const assignedVars = new Set(['params']);
+    const result = translateExpression('params(0)', assignedVars, null, null);
+    expect(result).toBe('params[0]');
+  });
+
+  test('array indexing NOT triggered for builtins', () => {
+    const assignedVars = new Set(['isarray', 'x']);
+    const result = translateExpression('IsArray(x)', assignedVars, null, null);
+    // IsArray is a builtin — should NOT become IsArray[x]
+    expect(result).not.toContain('[');
+  });
+
+  test('array indexing NOT triggered for fnRegistry functions', () => {
+    const assignedVars = new Set(['myfunc', 'x']);
+    const fnRegistry = new Set(['myfunc']);
+    const result = translateExpression('MyFunc(x)', assignedVars, null, fnRegistry);
+    expect(result).toContain('AC.callFn');
+  });
+
+  test('array element assignment: vParams(i) = value', () => {
+    const lines = ['vParams(i) = "NULL"'];
+    const variables = new Set(['vparams', 'i']);
+    const assignedVars = new Set(['vparams', 'i']);
+    const { jsLines } = translateBlock(lines, 0, 'frmTest', variables, assignedVars, null, null, null);
+    expect(jsLines[0]).toBe('vParams[i] = "NULL";');
+  });
+
+  test('array element assignment with expression RHS', () => {
+    const lines = ['vParams(i) = LTrim(Str(vParams(i)))'];
+    const variables = new Set(['vparams', 'i']);
+    const assignedVars = new Set(['vparams', 'i']);
+    const { jsLines } = translateBlock(lines, 0, 'frmTest', variables, assignedVars, null, null, null);
+    expect(jsLines[0]).toContain('vParams[i] =');
+    expect(jsLines[0]).toContain('.trimStart()');
+  });
+
+  // --- Dictionary patterns ---
+
+  test('dict.CompareMode = value → no-op', () => {
+    const assignedVars = new Set(['dict']);
+    const result = translateStatement('dict.CompareMode = vbTextCompare', 'frmTest', null, assignedVars, null);
+    expect(result).toContain('no-op');
+  });
+
+  // --- Arithmetic expressions ---
+
+  test('arithmetic: variable + literal', () => {
+    const assignedVars = new Set(['intpos']);
+    expect(translateExpression('intPos + 1', assignedVars, null, null)).toBe('intPos + 1');
+  });
+
+  test('arithmetic: variable - literal', () => {
+    const assignedVars = new Set(['intpos']);
+    expect(translateExpression('intPos - 1', assignedVars, null, null)).toBe('intPos - 1');
+  });
+
+  test('arithmetic: variable * variable', () => {
+    const assignedVars = new Set(['a', 'b']);
+    expect(translateExpression('a * b', assignedVars, null, null)).toBe('a * b');
+  });
+
+  test('arithmetic: multi-term', () => {
+    const assignedVars = new Set(['a', 'b', 'c']);
+    expect(translateExpression('a + b - c', assignedVars, null, null)).toBe('a + b - c');
+  });
+
+  test('arithmetic: negative literal', () => {
+    expect(translateExpression('-1', null, null, null)).toBe('-1');
+  });
+
+  test('arithmetic inside function call args', () => {
+    const assignedVars = new Set(['vartoken', 'intpos']);
+    const result = translateExpression('Left$(varToken, intPos - 1)', assignedVars, null, null);
+    expect(result).toContain('intPos - 1');
+  });
+
+  test('dict.Add key, value → dict[key] = value', () => {
+    const assignedVars = new Set(['dict', 'mykey', 'myval']);
+    const result = translateStatement('dict.Add myKey, myVal', 'frmTest', null, assignedVars, null);
+    expect(result).toBe('dict[myKey] = myVal');
+  });
+
+  test('dict.Add with string args', () => {
+    const assignedVars = new Set(['dict']);
+    const result = translateStatement('dict.Add "name", "value"', 'frmTest', null, assignedVars, null);
+    expect(result).toBe('dict["name"] = "value"');
+  });
+
+  test('Erase variable → no-op', () => {
+    const result = translateStatement('Erase strTokens', 'frmTest', null, null, null);
+    expect(result).toContain('no-op');
+  });
+
+  // --- modStrings integration ---
+
+  test('StringFormat function translates array indexing', () => {
+    const vba = `
+Public Function StringFormat(ByVal s As String, ParamArray params() As Variant) As String
+    Dim n As Integer
+    Dim vParams As Variant
+    If UBound(params) = -1 Then GoTo Exit_Handler
+    If IsArray(params) And IsArray(params(0)) Then
+        vParams = params(0)
+    Else
+        vParams = params
+    End If
+    For n = 0 To UBound(vParams)
+        s = Replace(s, "{" & n & "}", vParams(n))
+    Next n
+Exit_Handler:
+    StringFormat = s
+    Exit Function
+End Function
+`;
+    const handlers = parseVbaToHandlers(vba, 'modStrings');
+    const h = handlers.find(h => h.key === 'fn.StringFormat');
+    expect(h).toBeDefined();
+    // Should NOT have comment lines for the core logic
+    expect(h.js).toContain('vParams[n]');
+    expect(h.js).toContain('return s;');
+  });
+
+  test('StringToDictionary translates dict patterns', () => {
+    const vba = `
+Public Function StringToDictionary(ByVal v As Variant) As Scripting.Dictionary
+    Const KEYVALUE_DELIMITER As String = "&"
+    Const VALUE_DELIMITER As String = "="
+    Dim dict As New Scripting.Dictionary
+    Dim intPos As Integer
+    Dim strTokens() As String
+    Dim varToken As Variant
+    If IsNull(v) Then
+        'Nothing to do
+    Else
+        dict.CompareMode = vbTextCompare
+        strTokens = Split(v, KEYVALUE_DELIMITER)
+        For Each varToken In strTokens
+            intPos = InStr(varToken, VALUE_DELIMITER)
+            If intPos = 0 Then
+                'no equals sign
+            Else
+                dict.Add Left$(varToken, intPos - 1), Mid$(varToken, intPos + 1)
+            End If
+        Next varToken
+        Erase strTokens
+    End If
+    Set StringToDictionary = dict
+    Exit Function
+End Function
+`;
+    const handlers = parseVbaToHandlers(vba, 'modStrings');
+    const h = handlers.find(h => h.key === 'fn.StringToDictionary');
+    expect(h).toBeDefined();
+    // Should have dict operations translated
+    expect(h.js).toContain('no-op'); // CompareMode and Erase
+    expect(h.js).toContain('dict['); // dict.Add now translates with arithmetic
+    expect(h.js).toContain('for (const varToken of');
+  });
+
+  // --- Date/Format builtins ---
+
+  test('CDate in expression', () => {
+    const result = translateExpression('CDate(v)', new Set(['v']), null, null);
+    expect(result).toBe('new Date(v)');
+  });
+
+  test('DateValue in expression', () => {
+    const result = translateExpression('DateValue("2024-01-01")', null, null, null);
+    expect(result).toBe('new Date("2024-01-01")');
+  });
+
+  test('Date() and Now() in expression', () => {
+    expect(translateExpression('Date', null, null, null)).toBe('new Date()');
+    expect(translateExpression('Now', null, null, null)).toBe('new Date()');
+  });
+
+  test('Format(expr, fmt) in expression', () => {
+    const result = translateExpression('Format(dt, "yyyy-mm-dd")', new Set(['dt']), null, null);
+    expect(result).toBe('AC.formatValue(dt, "yyyy-mm-dd")');
+  });
+
+  // --- Module-qualified calls ---
+
+  test('module-qualified call strips prefix', () => {
+    const fnRegistry = new Set(['setapptitle']);
+    const result = translateStatement('modStartup.SetAppTitle False', 'frmTest', null, null, fnRegistry);
+    expect(result).toBe('await AC.callFn("SetAppTitle", false)');
+  });
+
+  // --- Application / CurrentDb patterns ---
+
+  test('Application.SetOption → no-op', () => {
+    const result = translateStatement('Application.SetOption "Error Trapping", 2', 'frmTest', null, null, null);
+    expect(result).toContain('no-op');
+  });
+
+  test('Application.Quit → no-op', () => {
+    const result = translateStatement('Application.Quit acQuitSaveNone', 'frmTest', null, null, null);
+    expect(result).toContain('no-op');
+  });
+
+  test('RefreshTitleBar → no-op', () => {
+    const result = translateStatement('RefreshTitleBar', 'frmTest', null, null, null);
+    expect(result).toContain('no-op');
+  });
+
+  test('CurrentDb.Properties("AppTitle") = expr', () => {
+    const assignedVars = new Set(['g_strappname']);
+    const result = translateStatement('CurrentDb.Properties("AppTitle") = g_strAppName', 'frmTest', null, assignedVars, null);
+    expect(result).toBe('AC.setAppTitle(g_strAppName)');
+  });
+
+  // --- frmCompanyDetail patterns ---
+
+  test('RunCommand acCmdRecordsGoToNew', () => {
+    expect(translateStatement('RunCommand acCmdRecordsGoToNew')).toBe('AC.gotoRecord("new")');
+  });
+
+  test('RunCommand acCmdDeleteRecord', () => {
+    expect(translateStatement('RunCommand acCmdDeleteRecord')).toBe('AC.deleteRecord()');
+  });
+
+  test('Response = acDataErrContinue', () => {
+    const result = translateStatement('Response = acDataErrContinue');
+    expect(result).toContain('acDataErrContinue');
+  });
+
+  test('Me.[FieldName] bracketed reference', () => {
+    expect(translateExpression('Me.[Address]', null, null, null)).toBe('AC.getValue("Address")');
+  });
+
+  test('Me.ctrl.Value in expression', () => {
+    expect(translateExpression('Me.txtCompanyID.Value', null, null, null)).toBe('AC.getValue("txtCompanyID")');
+  });
+
+  test('Me as function argument', () => {
+    expect(translateExpression('Me', null, null, null)).toBe('"Me"');
+  });
+
+  test('dict.Item(key) → dict[key]', () => {
+    const assignedVars = new Set(['dict', 'key']);
+    expect(translateExpression('dict.Item(key)', assignedVars, null, null)).toBe('dict[key]');
+  });
+
+  test('Me.Form.FilterOn in condition', () => {
+    const result = translateCondition('Me.Form.FilterOn = True', null, null, null);
+    expect(result).toBe('AC.getFilterOn() === true');
+  });
+
+  test('Me.SetFocus → no-op', () => {
+    expect(translateStatement('Me.SetFocus')).toContain('no-op');
+  });
+
+  test('Me.ctrl.SelStart = 0 → no-op', () => {
+    expect(translateStatement('Me.txtBusinessPhone.SelStart = 0')).toContain('no-op');
+  });
+
+  test('DoCmd.SearchForRecord', () => {
+    const assignedVars = new Set(['m_lngcalledfromid']);
+    const result = translateStatement('DoCmd.SearchForRecord acDataForm, Me.Name, acFirst, "CompanyID = " & m_lngCalledFromID', 'frmTest', null, assignedVars, null);
+    expect(result).toContain('AC.searchForRecord');
+  });
+
+  test('SourceObject = empty string', () => {
+    expect(translateStatement('Me.sfrmOrders.SourceObject = ""'))
+      .toBe('AC.setSubformSource("sfrmOrders", "")');
+  });
+
+  test('Me.Caption = Me.ctrl.Value expression', () => {
+    const assignedVars = new Set();
+    const result = translateStatement('Me.Caption = Me.txtCompanyType.Value', 'frmTest', null, assignedVars);
+    expect(result).toBe('AC.setFormCaption(AC.getValue("txtCompanyType"))');
+  });
+
+  test('controlName.Caption = expression', () => {
+    const result = translateStatement('Me.lblsfrmOrders.Caption = "Orders"');
+    expect(result).toBe('AC.setValue("lblsfrmOrders", "Orders")');
+  });
+
+  test('variable assignment in translateStatement', () => {
+    const assignedVars = new Set(['m_lngcalledfromid']);
+    const result = translateStatement('m_lngCalledFromID = Me.CompanyID', 'frmTest', null, assignedVars);
+    expect(result).toBe('m_lngCalledFromID = AC.getValue("CompanyID")');
+  });
+});
+
+// ============================================================
+// MsgBox condition patterns
+// ============================================================
+describe('MsgBox conditions', () => {
+  test('MsgBox(expr) = vbNo with function arg', () => {
+    const fnRegistry = new Set(['getstring']);
+    const assignedVars = new Set(['strmsg']);
+    const result = translateCondition('MsgBox(GetString(strMsg), vbQuestion Or vbYesNo, "Save?") = vbNo', assignedVars, null, fnRegistry);
+    expect(result).toContain('!confirm(');
+    expect(result).toContain('AC.callFn("GetString"');
+  });
+
+  test('MsgBox("text") = vbYes with string literal', () => {
+    const result = translateCondition('MsgBox("Continue?", vbYesNo) = vbYes');
+    expect(result).toBe('confirm("Continue?")');
+  });
+
+  test('MsgBox(variable) = vbNo', () => {
+    const assignedVars = new Set(['strmsg']);
+    const result = translateCondition('MsgBox(strMsg, vbYesNo) = vbNo', assignedVars);
+    expect(result).toBe('!confirm(strMsg)');
+  });
+});
+
+// ============================================================
+// Select Case with Me.ctrl.Value
+// ============================================================
+describe('Select Case expression via translateExpression', () => {
+  test('Select Case Me.ctrl.Value', () => {
+    const lines = [
+      'Select Case Me.cboCompanyTypeID.Value',
+      'Case 1',
+      'DoCmd.Close',
+      'End Select',
+    ];
+    const result = parseSelectCaseBlock(lines, 0, 'frmTest');
+    const js = result.jsLines.join('\n');
+    expect(js).toContain('switch (AC.getValue("cboCompanyTypeID"))');
   });
 });

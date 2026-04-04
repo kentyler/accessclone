@@ -276,6 +276,117 @@ function runSQL(sql: string) {
 }
 
 // ============================================================
+// Control property setters (Phase 4 patterns)
+// ============================================================
+
+function setLocked(controlName: string, locked: boolean) {
+  console.warn(`AC.setLocked("${controlName}", ${locked}): stub — not yet implemented`);
+}
+
+function setBackColor(controlName: string, color: number) {
+  console.warn(`AC.setBackColor("${controlName}", ${color}): stub — not yet implemented`);
+}
+
+function setForeColor(controlName: string, color: number) {
+  console.warn(`AC.setForeColor("${controlName}", ${color}): stub — not yet implemented`);
+}
+
+function setBackShade(controlName: string, shade: number) {
+  console.warn(`AC.setBackShade("${controlName}", ${shade}): stub — not yet implemented`);
+}
+
+function setBackStyle(controlName: string, style: number) {
+  console.warn(`AC.setBackStyle("${controlName}", ${style}): stub — not yet implemented`);
+}
+
+function setDefaultValue(controlName: string, value: unknown) {
+  console.warn(`AC.setDefaultValue("${controlName}", ${value}): stub — not yet implemented`);
+}
+
+// Property getters (stubs for condition evaluation)
+function getBackColor(controlName: string): number {
+  console.warn(`AC.getBackColor("${controlName}"): stub — not yet implemented`);
+  return 0;
+}
+function getForeColor(controlName: string): number {
+  console.warn(`AC.getForeColor("${controlName}"): stub — not yet implemented`);
+  return 0;
+}
+function getBackShade(controlName: string): number {
+  console.warn(`AC.getBackShade("${controlName}"): stub — not yet implemented`);
+  return 0;
+}
+function getBackStyle(controlName: string): number {
+  console.warn(`AC.getBackStyle("${controlName}"): stub — not yet implemented`);
+  return 0;
+}
+function getLocked(controlName: string): boolean {
+  console.warn(`AC.getLocked("${controlName}"): stub — not yet implemented`);
+  return false;
+}
+
+function setAllowEdits(allow: boolean) {
+  console.warn(`AC.setAllowEdits(${allow}): stub — not yet implemented`);
+}
+
+function setAllowAdditions(allow: boolean) {
+  console.warn(`AC.setAllowAdditions(${allow}): stub — not yet implemented`);
+}
+
+function setAllowDeletions(allow: boolean) {
+  console.warn(`AC.setAllowDeletions(${allow}): stub — not yet implemented`);
+}
+
+function setNavigationCaption(text: string) {
+  console.warn(`AC.setNavigationCaption("${text}"): stub — not yet implemented`);
+}
+
+function setSubformAllow(sfrmName: string, prop: string, value: boolean) {
+  console.warn(`AC.setSubformAllow("${sfrmName}", "${prop}", ${value}): stub — not yet implemented`);
+}
+
+// ============================================================
+// Enumeration helpers (For Each support)
+// ============================================================
+
+function getControlNames(): string[] {
+  const store = useFormStore.getState();
+  if (!store.current) return [];
+  const names: string[] = [];
+  for (const section of ['header', 'detail', 'footer'] as const) {
+    const sec = (store.current as Record<string, unknown>)[section] as { controls?: { name: string }[] } | undefined;
+    if (sec?.controls) {
+      for (const ctrl of sec.controls) {
+        if (ctrl.name) names.push(ctrl.name);
+      }
+    }
+  }
+  return names;
+}
+
+function getTempVarNames(): string[] {
+  return Array.from(tempVars.keys());
+}
+
+// ============================================================
+// Cross-form references
+// ============================================================
+
+function getFormValue(formName: string, controlName: string): unknown {
+  // Read a control value from another open form via its store
+  console.warn(`AC.getFormValue("${formName}", "${controlName}") — stub, cross-form value reads not yet wired`);
+  return null;
+}
+
+function requeryForm(formName: string): void {
+  console.warn(`AC.requeryForm("${formName}") — stub, cross-form requery not yet wired`);
+}
+
+function focusForm(formName: string): void {
+  console.warn(`AC.focusForm("${formName}") — stub, cross-form focus not yet wired`);
+}
+
+// ============================================================
 // Domain aggregate functions (DCount, DLookup, DMin, DMax, DSum)
 // ============================================================
 
@@ -372,6 +483,43 @@ export function executeHandler(jsCode: string, label: string) {
   }
 }
 
+function setAppTitle(title: string) {
+  document.title = title || 'AccessClone';
+}
+
+function dateAdd(interval: string, number: number, date: unknown) {
+  console.warn('AC.dateAdd stub:', interval, number, date);
+  return new Date();
+}
+
+function dateDiff(interval: string, date1: unknown, date2: unknown) {
+  console.warn('AC.dateDiff stub:', interval, date1, date2);
+  return 0;
+}
+
+function formatValue(value: unknown, fmt: string) {
+  console.warn('AC.formatValue stub:', value, fmt);
+  return String(value ?? '');
+}
+
+function deleteRecord() {
+  console.warn('AC.deleteRecord stub');
+}
+
+function searchForRecord(criteria: string) {
+  console.warn('AC.searchForRecord stub:', criteria);
+}
+
+function getFilter() {
+  console.warn('AC.getFilter stub');
+  return '';
+}
+
+function getFilterOn() {
+  console.warn('AC.getFilterOn stub');
+  return false;
+}
+
 /**
  * Install window.AC runtime. Call once at app init.
  */
@@ -413,5 +561,34 @@ export function installRuntime() {
     removeAllTempVars,
     callFn,
     registerFnHandler,
+    setLocked,
+    setBackColor,
+    setForeColor,
+    setBackShade,
+    setBackStyle,
+    setDefaultValue,
+    getBackColor,
+    getForeColor,
+    getBackShade,
+    getBackStyle,
+    getLocked,
+    setAllowEdits,
+    setAllowAdditions,
+    setAllowDeletions,
+    setNavigationCaption,
+    setSubformAllow,
+    getControlNames,
+    getTempVarNames,
+    getFormValue,
+    requeryForm,
+    focusForm,
+    setAppTitle,
+    dateAdd,
+    dateDiff,
+    formatValue,
+    deleteRecord,
+    searchForRecord,
+    getFilter,
+    getFilterOn,
   };
 }

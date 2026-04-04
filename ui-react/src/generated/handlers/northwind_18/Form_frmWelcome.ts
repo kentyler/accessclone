@@ -14,7 +14,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "form",
     event: "on-close",
     procedure: "Form_Close",
-    js: "// SaveSystemSetting ssShowWelcome, IIf(Me.chkShowWelcome, -1, 0)        'Ensure this works in international scenarios."
+    js: "// SaveSystemSetting ssShowWelcome, IIf(Me.chkShowWelcome, -1, 0)"
   },
   "form.on-open": {
     key: "form.on-open",

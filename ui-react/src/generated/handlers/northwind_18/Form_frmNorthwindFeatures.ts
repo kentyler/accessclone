@@ -7,7 +7,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "txt-help-keywords",
     event: "on-click",
     procedure: "txtHelpKeywords_Click",
-    js: "let strHyperlink;\n// If Nz(Me.txtHelpKeywords, \"\") = \"\" Then GoTo Exit_Handler\nswitch (AC.getValue(\"OpenMethod\")) {\n  case enumNorthwindFeaturesOpenMethod.nfInPageHelp:\n    // Application.Assistance.SearchHelp Me.txtHelpKeywords\n    break;\n  case enumNorthwindFeaturesOpenMethod.nfFollowHyperlink:\n    strHyperlink = String(AC.getValue(\"txtLearnMore\")).replaceAll(\"#\", \"\");\n    // Application.FollowHyperlink strHyperlink\n    break;\n}"
+    js: "let strHyperlink;\n// If Nz(Me.txtHelpKeywords, \"\") = \"\" Then GoTo Exit_Handler\nswitch (AC.getValue(\"OpenMethod\")) {\n  case enumNorthwindFeaturesOpenMethod.nfInPageHelp:\n    /* Application — no-op in web */;\n    break;\n  case enumNorthwindFeaturesOpenMethod.nfFollowHyperlink:\n    strHyperlink = String(AC.getValue(\"txtLearnMore\")).replaceAll(\"#\", \"\");\n    window.open(strHyperlink);\n    break;\n}"
   }
 };
 

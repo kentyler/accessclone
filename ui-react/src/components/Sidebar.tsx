@@ -11,7 +11,6 @@ const OBJECT_TYPES: { key: ObjectType; label: string }[] = [
   { key: 'reports', label: 'Reports' },
   { key: 'modules', label: 'Modules' },
   { key: 'macros', label: 'Macros' },
-  { key: 'sql-functions', label: 'Functions' },
   { key: 'graph', label: 'Graph' },
 ];
 
@@ -87,7 +86,6 @@ function getObjectList(
     case 'reports': return objects.reports.map(r => ({ id: r.id, name: r.name }));
     case 'modules': return objects.modules.map(m => ({ id: m.id, name: m.name }));
     case 'macros': return objects.macros.map(m => ({ id: m.id, name: m.name }));
-    case 'sql-functions': return objects.sqlFunctions.map(f => ({ id: f.id, name: f.name }));
     case 'graph': return [];
   }
 }

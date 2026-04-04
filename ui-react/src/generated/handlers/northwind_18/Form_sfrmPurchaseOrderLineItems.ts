@@ -7,28 +7,28 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "form",
     event: "before-update",
     procedure: "Form_BeforeUpdate",
-    js: "// Cancel = ValidateForm(Me)       'Validates required fields.\nif (!(Cancel)) {\n  // Cancel = ValidateLineItem()\n}"
+    js: "Cancel = await AC.callFn(\"ValidateForm\", \"Me\");\nif (!(Cancel)) {\n  Cancel = await AC.callFn(\"ValidateLineItem\", );\n}"
   },
   "form.on-current": {
     key: "form.on-current",
     control: "form",
     event: "on-current",
     procedure: "Form_Current",
-    js: "// ValidateForm_RemoveHighlights Me"
+    js: "await AC.callFn(\"ValidateForm_RemoveHighlights\", \"Me\");"
   },
   "fn.Form_Error": {
     key: "fn.Form_Error",
     control: "fn",
     event: "Form_Error",
     procedure: "Form_Error",
-    js: "// If DataErr = 3314 Then      '3314 = You must enter a value in the '|' field.\nif (AC.getValue(\"PurchaseOrderID\") == null) {\n  alert(\"You must first fill out the main Purchase Order form before entering line items. Please cancel this record by hitting Esc, and fill out the main form.\");\n  // Response = acDataErrContinue\n}\n// End If"
+    js: "if (DataErr === 3314) {\n  if (AC.getValue(\"PurchaseOrderID\") == null) {\n    alert(\"You must first fill out the main Purchase Order form before entering line items. Please cancel this record by hitting Esc, and fill out the main form.\");\n    /* Response = acDataErrContinue — suppress default error */\n  }\n}"
   },
   "product-id.after-update": {
     key: "product-id.after-update",
     control: "product-id",
     event: "after-update",
     procedure: "ProductID_AfterUpdate",
-    js: "// Me.Quantity = ProductReorderQuantity(Me.ProductID)\n// Me.UnitCost = Me.ProductID.Column(2)          'Column at index 2 has the hidden Standard Cost."
+    js: "AC.setValue(\"Quantity\", await AC.callFn(\"ProductReorderQuantity\", AC.getValue(\"ProductID\")));\n// Me.UnitCost = Me.ProductID.Column(2)"
   },
   "purchase-order-detail-id.on-click": {
     key: "purchase-order-detail-id.on-click",
@@ -42,7 +42,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "ValidateLineItem",
     procedure: "ValidateLineItem",
-    js: "let rs;\nlet blnReturn;\nlet intAvailable;\nlet sql;\nblnReturn = false;\nsql = \"select * from Products where ProductID = \" + AC.getValue(\"ProductID\");\n// Set rs = g_dbApp().OpenRecordset(sql, dbOpenSnapshot)\n// [VBA If block - condition not translatable]\n// If Me.Quantity < Nz(rs!MinimumReorderQuantity, 0) Then\n//   blnReturn = True\n//   MsgBox GetString(sMinimumReorderQuantity, rs!MinimumReorderQuantity), vbExclamation\n// End If\n// intAvailable = ProductToSell(Me.ProductID)\n// [VBA If block - condition not translatable]\n// If intAvailable + Me.Quantity < rs!TargetLevel Then\n//   MsgBox GetString(sLessThanTargetLevel, rs!TargetLevel, rs!TargetLevel - intAvailable - Me.Quantity), vbExclamation\n// End If\n// rs.Close\n// Set rs = Nothing\nreturn blnReturn;"
+    js: "let rs;\nlet blnReturn;\nlet intAvailable;\nlet sql;\nblnReturn = false;\nsql = \"select * from Products where ProductID = \" + AC.getValue(\"ProductID\");\n// Set rs = g_dbApp().OpenRecordset(sql, dbOpenSnapshot)\n// [VBA If block - condition not translatable]\n// If Me.Quantity < Nz(rs!MinimumReorderQuantity, 0) Then\n//   blnReturn = True\n//   MsgBox GetString(sMinimumReorderQuantity, rs!MinimumReorderQuantity), vbExclamation\n// End If\nintAvailable = await AC.callFn(\"ProductToSell\", AC.getValue(\"ProductID\"));\n// [VBA If block - condition not translatable]\n// If intAvailable + Me.Quantity < rs!TargetLevel Then\n//   MsgBox GetString(sLessThanTargetLevel, rs!TargetLevel, rs!TargetLevel - intAvailable - Me.Quantity), vbExclamation\n// End If\n// rs.Close\nrs = null;\nreturn blnReturn;"
   }
 };
 

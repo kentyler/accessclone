@@ -7,14 +7,14 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "cmd-add-product",
     event: "on-click",
     procedure: "cmdAddProduct_Click",
-    js: "let strForm;\nstrForm = \"frmProductDetail\";\n// If IsFormOpen(strForm) Then  'This option is a custom function\n// Forms(strForm).SetFocus\nAC.gotoRecord(\"new\");\n// Else\n// DoCmd.OpenForm strForm, , , , acFormAdd\n// End If"
+    js: "let strForm;\nstrForm = \"frmProductDetail\";\nif (await AC.callFn(\"IsFormOpen\", strForm)) {\n  AC.focusForm(strForm);\n  AC.gotoRecord(\"new\");\n} else {\n  // DoCmd.OpenForm strForm, , , , acFormAdd\n}"
   },
   "cmd-export.on-click": {
     key: "cmd-export.on-click",
     control: "cmd-export",
     event: "on-click",
     procedure: "cmdExport_Click",
-    js: "let strFilePath;\n// strFilePath = CurrentProject.Path & \"\\Northwind Products.xlsx\"\n// DoCmd.OutputTo acOutputQuery, \"qryProductList_Export\", acFormatXLSX, strFilePath\n// Application.FollowHyperlink strFilePath"
+    js: "let strFilePath;\n// strFilePath = CurrentProject.Path & \"\\Northwind Products.xlsx\"\n// DoCmd.OutputTo acOutputQuery, \"qryProductList_Export\", acFormatXLSX, strFilePath\nwindow.open(strFilePath);"
   },
   "product-id.on-click": {
     key: "product-id.on-click",

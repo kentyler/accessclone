@@ -14,21 +14,21 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "cmd-ok",
     event: "on-click",
     procedure: "cmdOK_Click",
-    js: "// [VBA If block - condition not translatable]\n// If Me.lstVendor.Value > 0 Then\n//   Me.Visible = False\n// Else\n//   Beep\n//   Me.txtMessage.ForeColor = vbRed\n//   Me.txtMessage = \"Select a Vendor, then OK (or Cancel)\"\n//   Me.lstVendor.SetFocus\n// End If"
+    js: "if (AC.getValue(\"lstVendor\") > 0) {\n  AC.setValue(\"Visible\", false);\n} else {\n  // Beep\n  AC.setForeColor(\"txtMessage\", 255);\n  AC.setValue(\"txtMessage\", \"Select a Vendor, then OK (or Cancel)\");\n  AC.setFocus(\"lstVendor\");\n}"
   },
   "form.on-load": {
     key: "form.on-load",
     control: "form",
     event: "on-load",
     procedure: "Form_Load",
-    js: "let arArgs;\nif (AC.nz(AC.getOpenArgs(), \"\") > \"\") {\n  arArgs = AC.getOpenArgs().split(\"|\");\n  // Me.Auto_Header0.Caption = arArgs(0)\n  // Me.txtMessage = arArgs(1)\n  // Me.txtProductID = arArgs(2)\n  AC.requeryControl(\"lstVendor\");\n}\nAC.setValue(\"Visible\", true);\nAC.setValue(\"Modal\", true);"
+    js: "let arArgs;\nif (AC.nz(AC.getOpenArgs(), \"\") > \"\") {\n  arArgs = AC.getOpenArgs().split(\"|\");\n  AC.setValue(\"Auto_Header0\", arArgs[0]);\n  AC.setValue(\"txtMessage\", arArgs[1]);\n  AC.setValue(\"txtProductID\", arArgs[2]);\n  AC.requeryControl(\"lstVendor\");\n}\nAC.setValue(\"Visible\", true);\nAC.setValue(\"Modal\", true);"
   },
   "lst-vendor.on-dblclick": {
     key: "lst-vendor.on-dblclick",
     control: "lst-vendor",
     event: "on-dblclick",
     procedure: "lstVendor_DblClick",
-    js: "// cmdOK_Click"
+    js: "await AC.callFn(\"cmdOK_Click\");"
   }
 };
 

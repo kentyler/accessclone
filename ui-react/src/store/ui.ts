@@ -4,7 +4,7 @@ import * as api from '@/api/client';
 import { registerFnHandlers } from '@/generated/handlerRegistry';
 import type {
   Database, TableInfo, ColumnInfo, QueryInfo, FormListItem, ReportListItem,
-  ModuleListItem, MacroListItem, SqlFunctionInfo, TabDescriptor,
+  ModuleListItem, MacroListItem, TabDescriptor,
   ChatMessage, AppMode, ObjectType, AppConfig, LogsFilter,
   ImportLogEntry, ImportIssue, ContextMenuState,
   ModuleDetail, MacroDetail,
@@ -38,7 +38,6 @@ export interface UiState {
     reports: ReportListItem[];
     modules: ModuleListItem[];
     macros: MacroListItem[];
-    sqlFunctions: SqlFunctionInfo[];
   };
 
   // Tab management
@@ -117,7 +116,6 @@ export interface UiActions {
   loadReports(): Promise<void>;
   loadModules(): Promise<void>;
   loadMacros(): Promise<void>;
-  loadSqlFunctions(): Promise<void>;
 
   // Tab management
   openObject(type: ObjectType, id: number | string, name: string): void;
@@ -192,7 +190,6 @@ const typeToKey: Record<ObjectType, keyof UiState['objects']> = {
   reports: 'reports',
   modules: 'modules',
   macros: 'macros',
-  'sql-functions': 'sqlFunctions',
   graph: 'tables', // graph doesn't use object lists; placeholder to satisfy type
 };
 
@@ -214,7 +211,7 @@ export const useUiStore = create<UiStore>()(
     sidebarObjectType: 'tables',
     objects: {
       tables: [], queries: [], forms: [], reports: [],
-      modules: [], macros: [], sqlFunctions: [],
+      modules: [], macros: [],
     },
     openTabs: [],
     activeTab: null,
@@ -335,7 +332,6 @@ export const useUiStore = create<UiStore>()(
         wrap(() => get().loadReports()),
         wrap(() => get().loadModules()),
         wrap(() => get().loadMacros()),
-        wrap(() => get().loadSqlFunctions()),
       ]);
 
       // Register fn.* handlers for cross-module function dispatch
@@ -426,23 +422,6 @@ export const useUiStore = create<UiStore>()(
         });
       }
     },
-    // Match CLJS: body.functions is array of objects, add synthetic id
-    async loadSqlFunctions() {
-      const res = await api.get<Record<string, unknown>>('/api/functions');
-      if (res.ok) {
-        const raw = (res.data.functions ?? []) as Array<Record<string, unknown>>;
-        set(s => {
-          s.objects.sqlFunctions = raw.map((f, i) => ({
-            id: i + 1, name: f.name as string,
-            arguments: (f.arguments ?? '') as string,
-            return_type: (f.returnType ?? f.return_type ?? '') as string,
-            source: f.source as string | undefined,
-            description: f.description as string | undefined,
-          }));
-        });
-      }
-    },
-
     // --------------------------------------------------------
     // Tab management
     // --------------------------------------------------------
@@ -565,7 +544,6 @@ export const useUiStore = create<UiStore>()(
         get().saveChatTranscript();
         if (res.data.updated_query) {
           get().loadQueries();
-          get().loadSqlFunctions();
         }
       }
     },

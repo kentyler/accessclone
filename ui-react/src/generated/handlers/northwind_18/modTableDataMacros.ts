@@ -7,7 +7,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "AddDataMacros",
     procedure: "AddDataMacros",
-    js: "let td;\nlet strFileName;\n// [VBA For Each loop skipped]"
+    js: "let td;\nlet strFileName;\n// [VBA For Each - collection not translatable: g_dbApp().TableDefs]\n//   If td.Attributes And dbSystemObject Then\n//   Else\n//   If HasField(td, \"AddedBy\") And HasField(td, \"AddedOn\") And HasField(td, \"ModifiedBy\") And HasField(td, \"ModifiedOn\") Then\n//   If HasDataMacro(td) Then\n//   Else\n//   If strFileName = \"\" Then\n//   strFileName = Environ(\"TEMP\") & \"\\datamacro.xml\"\n//   StringToFile strFileName, DLookup(\"DataMacro\", \"Welcome\")\n//   End If\n//   Application.LoadFromText acTableDataMacro, td.Name, strFileName\n//   End If\n//   End If\n//   End If\n// Next"
   },
   "fn.GetAuditFieldsUserName": {
     key: "fn.GetAuditFieldsUserName",

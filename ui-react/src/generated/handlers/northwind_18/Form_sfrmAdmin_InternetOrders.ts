@@ -7,14 +7,14 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "cmd-create",
     event: "on-click",
     procedure: "cmdCreate_Click",
-    js: "if (AC.getValue(\"txtCount\") == null) {\n  alert(await AC.callFn(\"GetString\", 2, MinCount, MaxCount));\n} else {\n  // CreateRandomOrders Me.txtCount\n  // Me.Parent.UpdateSubLabels\n  await AC.callFn(\"Ribbon_RefreshMRU\");\n  alert(\"Orders created. Refresh the Order List form to see them.\");\n}"
+    js: "if (AC.getValue(\"txtCount\") == null) {\n  alert(await AC.callFn(\"GetString\", 2, MinCount, MaxCount));\n} else {\n  await AC.callFn(\"CreateRandomOrders\", AC.getValue(\"txtCount\"));\n  // Me.Parent.UpdateSubLabels\n  await AC.callFn(\"Ribbon_RefreshMRU\");\n  alert(\"Orders created. Refresh the Order List form to see them.\");\n}"
   },
   "txt-count.before-update": {
     key: "txt-count.before-update",
     control: "txt-count",
     event: "before-update",
     procedure: "txtCount_BeforeUpdate",
-    js: "// [VBA If block - condition not translatable]\n// If IsNull(Me.txtCount) Or Me.txtCount < MinCount Or Me.txtCount > MaxCount Then\n//   MsgBox GetString(sNumberBetween, MinCount, MaxCount), vbExclamation\n//   Cancel = True       'Prevents the user from exiting the textbox with this bad value.\n// End If"
+    js: "if (AC.getValue(\"txtCount\") == null || AC.getValue(\"txtCount\") < MinCount || AC.getValue(\"txtCount\") > MaxCount) {\n  alert(await AC.callFn(\"GetString\", 2, MinCount, MaxCount));\n  return false;\n}"
   }
 };
 

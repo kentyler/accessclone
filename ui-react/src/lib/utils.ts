@@ -312,10 +312,14 @@ export function displayText(ctrl: Control): string {
 // Filename helpers
 // ============================================================
 
-/** Convert a filename to a display name: "recipe_calculator" → "Recipe Calculator" */
+/** Convert a filename to a display name: "recipe_calculator" → "Recipe Calculator", "frmOrderDetails" → "frm Order Details" */
 export function filenameToDisplayName(filename: string): string {
   return filename
     .replace(/_/g, ' ')
+    // Insert space before uppercase letters that follow lowercase (camelCase boundaries)
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    // Insert space before uppercase letters followed by lowercase when preceded by uppercase (e.g. "HTMLParser" → "HTML Parser")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
     .replace(/\b\w/g, c => c.toUpperCase());
 }
 

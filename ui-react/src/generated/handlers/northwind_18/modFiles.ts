@@ -7,7 +7,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "FileExists",
     procedure: "FileExists",
-    js: "let lngAttributes;\n// lngAttributes = (vbReadOnly Or vbHidden Or vbSystem)\nif (blnFindFolders) {\n  // lngAttributes = (lngAttributes Or vbDirectory)    'Include folders as well.\n} else {\n  // [VBA Do loop skipped]\n}\n// FileExists = (Len(Dir(strFile, lngAttributes)) > 0)"
+    js: "let lngAttributes;\n// lngAttributes = (vbReadOnly Or vbHidden Or vbSystem)\nif (blnFindFolders) {\n  // lngAttributes = (lngAttributes Or vbDirectory)\n} else {\n  while (strFile.slice(-1) === \"\\\") {\n    strFile = strFile.substring(0, strFile.length - 1);\n  }\n}\n// FileExists = (Len(Dir(strFile, lngAttributes)) > 0)"
   },
   "fn.StringToFile": {
     key: "fn.StringToFile",

@@ -7,7 +7,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "form",
     event: "on-open",
     procedure: "Form_Open",
-    js: "let dict;\n// Set dict = StringToDictionary(Me.OpenArgs)\n// If Not Me.NewRecord Then RunCommand acCmdRecordsGoToNew\n// Me.Title = dict(\"[frmEmployeeList]![cboTitle]\")\n// Set dict = Nothing"
+    js: "let dict;\ndict = await AC.callFn(\"StringToDictionary\", AC.getOpenArgs());\nif (!(AC.isNewRecord())) { AC.gotoRecord(\"new\"); }\nAC.setValue(\"Title\", dict[\"[frmEmployeeList]![cboTitle]\"]);\ndict = null;"
   }
 };
 

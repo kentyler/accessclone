@@ -7,14 +7,14 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "reportParameterStartDate",
     procedure: "reportParameterStartDate",
-    js: "let datStart;\nif (await AC.callFn(\"IsFormOpen\", \"frmReports\")) {\n  // datStart = Forms(\"frmReports\").txtStartDate\n} else {\n  // datStart = DateAdd(\"m\", -3, DateValue(DMax(\"OrderDate\", \"Orders\")))       'Set the date range relative to the max order date.\n}\nreturn datStart;"
+    js: "let datStart;\nif (await AC.callFn(\"IsFormOpen\", \"frmReports\")) {\n  datStart = AC.getFormValue(\"frmReports\", \"txtStartDate\");\n} else {\n  datStart = AC.dateAdd(\"m\", -3, new Date(await AC.dMax(\"OrderDate\", \"Orders\")));\n}\nreturn datStart;"
   },
   "fn.reportParameterEndDate": {
     key: "fn.reportParameterEndDate",
     control: "fn",
     event: "reportParameterEndDate",
     procedure: "reportParameterEndDate",
-    js: "let datEnd;\nif (await AC.callFn(\"IsFormOpen\", \"frmReports\")) {\n  // datEnd = Forms(\"frmReports\").txtEndDate\n} else {\n  // datEnd = DateValue(DMax(\"OrderDate\", \"Orders\"))       'Set the date range relative to the max order date.\n}\nreturn datEnd;"
+    js: "let datEnd;\nif (await AC.callFn(\"IsFormOpen\", \"frmReports\")) {\n  datEnd = AC.getFormValue(\"frmReports\", \"txtEndDate\");\n} else {\n  datEnd = new Date(await AC.dMax(\"OrderDate\", \"Orders\"));\n}\nreturn datEnd;"
   }
 };
 

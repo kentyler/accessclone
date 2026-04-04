@@ -7,56 +7,56 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "cmd-add-new",
     event: "on-click",
     procedure: "cmdAddNew_Click",
-    js: "// Open_frmCompanyDetail \"Add\""
+    js: "await AC.callFn(\"Open_frmCompanyDetail\", \"Add\");"
   },
   "cmd-label-wizard.on-click": {
     key: "cmd-label-wizard.on-click",
     control: "cmd-label-wizard",
     event: "on-click",
     procedure: "cmdLabelWizard_Click",
-    js: "// DoCmd.RunCommand acCmdNewObjectLabelsReport"
+    js: "/* RunCommand acCmdNewObjectLabelsReport — not supported in web */;"
   },
   "cmd-show-filter.on-click": {
     key: "cmd-show-filter.on-click",
     control: "cmd-show-filter",
     event: "on-click",
     procedure: "cmdShowFilter_Click",
-    js: "let strOpenArgs;\n// [VBA If block - condition not translatable]\n// If Me.Form.FilterOn = False Then\n//   MsgBox \"This form has not been filtered.\", vbOKOnly Or vbInformation\n// Else\n//   strOpenArgs = StringFormat(\"Header={0}&Message={1}\", \"Form Filter\", Replace(Me.Form.Filter, \"[qryCompanyList].\", \"\"))\n//   DoCmd.OpenForm \"frmGenericDialog\", acNormal, , , acFormReadOnly, acDialog, strOpenArgs\n//   If IsFormOpen(\"frmGenericDialog\") Then\n//   DoCmd.Close acForm, \"frmGenericDialog\", acSaveNo\n//   End If\n// End If"
+    js: "let strOpenArgs;\nif (AC.getFilterOn() === false) {\n  alert(\"This form has not been filtered.\");\n} else {\n  strOpenArgs = await AC.callFn(\"StringFormat\", \"Header={0}&Message={1}\", \"Form Filter\", AC.getFilter().replaceAll(\"[qryCompanyList].\", \"\"));\n  AC.openForm(\"frmGenericDialog\");\n  if (await AC.callFn(\"IsFormOpen\", \"frmGenericDialog\")) {\n    AC.closeForm(\"frmGenericDialog\");\n  }\n}"
   },
   "cmd-show-hide-fields.on-click": {
     key: "cmd-show-hide-fields.on-click",
     control: "cmd-show-hide-fields",
     event: "on-click",
     procedure: "cmdShowHideFields_Click",
-    js: "// DoCmd.RunCommand acCmdUnhideColumns"
+    js: "/* RunCommand acCmdUnhideColumns — not supported in web */;"
   },
   "form.on-open": {
     key: "form.on-open",
     control: "form",
     event: "on-open",
     procedure: "Form_Open",
-    js: "let ctl;\nAC.setValue(\"Auto_Header0\", \"Companies\");\nAC.setFilterOn(false);\nAC.setFilter(\"\");\n// [VBA For Each loop skipped]"
+    js: "let ctl;\nAC.setValue(\"Auto_Header0\", \"Companies\");\nAC.setFilterOn(false);\nAC.setFilter(\"\");\nfor (const ctl of AC.getControlNames()) {\n  // ctl.Locked = (TypeName(ctl) = \"TextBox\")\n}"
   },
   "fra-filter.after-update": {
     key: "fra-filter.after-update",
     control: "fra-filter",
     event: "after-update",
     procedure: "fraFilter_AfterUpdate",
-    js: "// [VBA With block skipped]"
+    js: "switch (AC.getValue(\"fraFilter\")) {\n  case enumCompanyType.ctCustomer:\n    AC.setFilter(\"CompanyTypeID = \" + AC.getValue(\"fraFilter\"));\n    AC.setFilterOn(true);\n    AC.setValue(\"Auto_Header0\", \"Customers\");\n    AC.setNavigationCaption(\"Customers\");\n    break;\n  case enumCompanyType.ctShipper:\n    AC.setFilter(\"CompanyTypeID = \" + AC.getValue(\"fraFilter\"));\n    AC.setFilterOn(true);\n    AC.setValue(\"Auto_Header0\", \"Shippers\");\n    AC.setNavigationCaption(\"Shippers\");\n    break;\n  case enumCompanyType.ctVendor:\n    AC.setFilter(\"CompanyTypeID = \" + AC.getValue(\"fraFilter\"));\n    AC.setFilterOn(true);\n    AC.setValue(\"Auto_Header0\", \"Vendors\");\n    AC.setNavigationCaption(\"Vendors\");\n    break;\n  default:\n    AC.setFilterOn(false);\n    AC.setFilter(\"\");\n    AC.setValue(\"Auto_Header0\", \"Companies\");\n    AC.setNavigationCaption(\"Companies\");\n}"
   },
   "fn.Open_frmCompanyDetail": {
     key: "fn.Open_frmCompanyDetail",
     control: "fn",
     event: "Open_frmCompanyDetail",
     procedure: "Open_frmCompanyDetail",
-    js: "let varOpenArgs;\nlet strOpenArgAction;\nlet strOpenArgCompanyTypeID;\nlet strOpenArgCompanyID;\nlet strOpenArgPassedFilter;\nif (await AC.callFn(\"IsFormOpen\", \"frmCompanyDetail\")) {\n  // MsgBox GetString(sFormAlreadyOpen, Forms!frmCompanyDetail.Caption), vbOKOnly Or vbInformation, \"Already Open\"\n}\nif (strAction.length > 0) {\n  strOpenArgAction = \"Action=\" + strAction;\n} else {\n  strOpenArgCompanyID = \"CompanyID=\" + AC.getValue(\"txtCompanyID\");\n}\nif (AC.getValue(\"fraFilter\") > 0) {\n  strOpenArgCompanyTypeID = \"CompanyTypeID=\" + AC.getValue(\"fraFilter\");\n}\nif (AC.getValue(\"FilterOn\")) {\n  // strOpenArgPassedFilter = Me.Filter\n  strOpenArgPassedFilter = \"PassedFilter=\" + strOpenArgPassedFilter.replaceAll(\"[qryCompanyList].\", \"\");\n} else {\n  strOpenArgPassedFilter = \"\";\n}\n// varOpenArgs = \"OpenBy=frmCompanyList\"    'Place holder\nif (strOpenArgAction.length > 0) {\n  varOpenArgs = varOpenArgs + \"&\" + strOpenArgAction;\n}\nif (strOpenArgCompanyID.length > 0) {\n  varOpenArgs = varOpenArgs + \"&\" + strOpenArgCompanyID;\n}\nif (strOpenArgCompanyTypeID.length > 0) {\n  varOpenArgs = varOpenArgs + \"&\" + strOpenArgCompanyTypeID;\n}\nif (strOpenArgPassedFilter.length > 0) {\n  varOpenArgs = varOpenArgs + \"&\" + strOpenArgPassedFilter;\n}\nAC.openForm(\"frmCompanyDetail\");"
+    js: "let varOpenArgs;\nlet strOpenArgAction;\nlet strOpenArgCompanyTypeID;\nlet strOpenArgCompanyID;\nlet strOpenArgPassedFilter;\nif (await AC.callFn(\"IsFormOpen\", \"frmCompanyDetail\")) {\n  alert(await AC.callFn(\"GetString\", 42, AC.getFormValue(\"frmCompanyDetail\", \"Caption\")));\n}\nif (strAction.length > 0) {\n  strOpenArgAction = \"Action=\" + strAction;\n} else {\n  strOpenArgCompanyID = \"CompanyID=\" + AC.getValue(\"txtCompanyID\");\n}\nif (AC.getValue(\"fraFilter\") > 0) {\n  strOpenArgCompanyTypeID = \"CompanyTypeID=\" + AC.getValue(\"fraFilter\");\n}\nif (AC.getValue(\"FilterOn\")) {\n  // strOpenArgPassedFilter = Me.Filter\n  strOpenArgPassedFilter = \"PassedFilter=\" + strOpenArgPassedFilter.replaceAll(\"[qryCompanyList].\", \"\");\n} else {\n  strOpenArgPassedFilter = \"\";\n}\nvarOpenArgs = \"OpenBy=frmCompanyList\";\nif (strOpenArgAction.length > 0) {\n  varOpenArgs = varOpenArgs + \"&\" + strOpenArgAction;\n}\nif (strOpenArgCompanyID.length > 0) {\n  varOpenArgs = varOpenArgs + \"&\" + strOpenArgCompanyID;\n}\nif (strOpenArgCompanyTypeID.length > 0) {\n  varOpenArgs = varOpenArgs + \"&\" + strOpenArgCompanyTypeID;\n}\nif (strOpenArgPassedFilter.length > 0) {\n  varOpenArgs = varOpenArgs + \"&\" + strOpenArgPassedFilter;\n}\nAC.openForm(\"frmCompanyDetail\");"
   },
   "txt-company-id.on-click": {
     key: "txt-company-id.on-click",
     control: "txt-company-id",
     event: "on-click",
     procedure: "txtCompanyID_Click",
-    js: "// Open_frmCompanyDetail \"\""
+    js: "await AC.callFn(\"Open_frmCompanyDetail\", \"\");"
   }
 };
 

@@ -7,28 +7,28 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "CloseAllForms",
     procedure: "CloseAllForms",
-    js: "let frm;\n// [VBA For Each loop skipped]"
+    js: "let frm;\n// [VBA For Each - collection not translatable: CurrentProject.AllForms]\n//   If frm.IsLoaded Then DoCmd.Close acForm, frm.Name, acSaveNo\n// Next"
   },
   "fn.CloseAllReports": {
     key: "fn.CloseAllReports",
     control: "fn",
     event: "CloseAllReports",
     procedure: "CloseAllReports",
-    js: "let rpt;\n// [VBA For Each loop skipped]"
+    js: "let rpt;\n// [VBA For Each - collection not translatable: CurrentProject.AllReports]\n//   If rpt.IsLoaded Then DoCmd.Close acReport, rpt.Name, acSaveNo\n// Next"
   },
   "fn.Finish": {
     key: "fn.Finish",
     control: "fn",
     event: "Finish",
     procedure: "Finish",
-    js: "// CloseAllOrderDetailsForms\n// CloseAllPurchaseOrderDetailsForms\nawait AC.callFn(\"CloseAllReports\");\nawait AC.callFn(\"CloseAllForms\");\n// RibbonFinish\n// Application.Quit acQuitSaveNone"
+    js: "await AC.callFn(\"CloseAllOrderDetailsForms\");\nawait AC.callFn(\"CloseAllPurchaseOrderDetailsForms\");\nawait AC.callFn(\"CloseAllReports\");\nawait AC.callFn(\"CloseAllForms\");\nawait AC.callFn(\"RibbonFinish\");\n/* Application — no-op in web */;"
   },
   "fn.GetSystemSetting": {
     key: "fn.GetSystemSetting",
     control: "fn",
     event: "GetSystemSetting",
     procedure: "GetSystemSetting",
-    js: "let v;\nv = await AC.dLookup(\"SettingValue\", \"SystemSettings\", \"SettingID = \" + SystemSettingID);\nswitch (SystemSettingID) {\n  case enumSystemSettings.ssTaxRate:\n  case enumSystemSettings.ssTaxRate_Vendors:\n    // v = CSng(v / 1000)    'Divide by 1000 to get Single value. See comment in table SystemSettings.\n    break;\n  case enumSystemSettings.ssLastResetDate:\n    // v = CDate(v)\n    break;\n  case enumSystemSettings.ssFirstTimeRun:\n  case enumSystemSettings.ssShowWelcome:\n    v = Boolean(v);\n    break;\n  default:\n    // Debug.Assert False      'Unexpected SystemSettingsID passed in.\n}\nreturn v;"
+    js: "let v;\nv = await AC.dLookup(\"SettingValue\", \"SystemSettings\", \"SettingID = \" + SystemSettingID);\nswitch (SystemSettingID) {\n  case enumSystemSettings.ssTaxRate:\n  case enumSystemSettings.ssTaxRate_Vendors:\n    v = parseFloat(v / 1000);\n    break;\n  case enumSystemSettings.ssLastResetDate:\n    v = new Date(v);\n    break;\n  case enumSystemSettings.ssFirstTimeRun:\n  case enumSystemSettings.ssShowWelcome:\n    v = Boolean(v);\n    break;\n  default:\n    // Debug.Assert False\n}\nreturn v;"
   },
   "fn.GetUserSetting": {
     key: "fn.GetUserSetting",
@@ -42,7 +42,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "SaveSystemSetting",
     procedure: "SaveSystemSetting",
-    js: "let sql;\nswitch (SystemSettingID) {\n  case enumSystemSettings.ssLastResetDate:\n    // varValue = ToAccessDate(varValue)\n    break;\n}\nsql = await AC.callFn(\"StringFormatSQL\", \"Update SystemSettings set SettingValue = {0} where SettingID = {1};\", varValue, SystemSettingID);\nAC.runSQL(sql);"
+    js: "let sql;\nswitch (SystemSettingID) {\n  case enumSystemSettings.ssLastResetDate:\n    varValue = await AC.callFn(\"ToAccessDate\", varValue);\n    break;\n}\nsql = await AC.callFn(\"StringFormatSQL\", \"Update SystemSettings set SettingValue = {0} where SettingID = {1};\", varValue, SystemSettingID);\nAC.runSQL(sql);"
   },
   "fn.SaveUserSetting": {
     key: "fn.SaveUserSetting",
@@ -56,14 +56,14 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "SetAppTitle",
     procedure: "SetAppTitle",
-    js: "if (bolIncludeUserName === false) {\n  // CurrentDb.Properties(\"AppTitle\") = g_strAppName & Space(2) & APP_VERSION\n} else {\n  // CurrentDb.Properties(\"AppTitle\") = g_strAppName & Space(2) & APP_VERSION & Space(5) & Get_EmployeeFNLN(Get_UserID())\n}\n// RefreshTitleBar"
+    js: "if (bolIncludeUserName === false) {\n  // CurrentDb.Properties(\"AppTitle\") = g_strAppName & Space(2) & APP_VERSION\n} else {\n  // CurrentDb.Properties(\"AppTitle\") = g_strAppName & Space(2) & APP_VERSION & Space(5) & Get_EmployeeFNLN(Get_UserID())\n}\n/* RefreshTitleBar — no-op in web */;"
   },
   "fn.Startup": {
     key: "fn.Startup",
     control: "fn",
     event: "Startup",
     procedure: "Startup",
-    js: "let varShowWelcome;\n// Application.SetOption \"Error Trapping\", 2   'AddDataMacros calls HasField, which will fail if Error Trapping is set to \"Break on all errors.\". The setting is in VBA window > Tools > Options > General.\n// modStartup.SetAppTitle False\n// OneTimeProcessing\nvarShowWelcome = await AC.callFn(\"GetSystemSetting\", 5);\nif (varShowWelcome === true) {\n  AC.openForm(\"frmWelcome\");\n}\n// InitializeUser\n// SetAppTitle True\nAC.openForm(\"frmOrderList\");"
+    js: "let varShowWelcome;\n/* Application — no-op in web */;\nawait AC.callFn(\"SetAppTitle\", false);\nawait AC.callFn(\"OneTimeProcessing\");\nvarShowWelcome = await AC.callFn(\"GetSystemSetting\", 5);\nif (varShowWelcome === true) {\n  AC.openForm(\"frmWelcome\");\n}\nawait AC.callFn(\"InitializeUser\");\nawait AC.callFn(\"SetAppTitle\", true);\nAC.openForm(\"frmOrderList\");"
   }
 };
 

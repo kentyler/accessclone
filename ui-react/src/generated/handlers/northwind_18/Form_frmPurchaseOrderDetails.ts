@@ -7,7 +7,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "AllocatePurchaseOrder",
     procedure: "AllocatePurchaseOrder",
-    js: "let rsPO;\nlet intPOQty;\nlet sql;\nsql = \"select * from PurchaseOrderDetails where PurchaseOrderID = \" + lngPurchaseOrderID;\n// Set rsPO = g_dbApp().OpenRecordset(sql, dbOpenSnapshot)\n// [VBA While loop skipped]\n// rsPO.Close\n// Set rsPO = Nothing"
+    js: "let rsPO;\nlet intPOQty;\nlet sql;\nsql = \"select * from PurchaseOrderDetails where PurchaseOrderID = \" + lngPurchaseOrderID;\n// Set rsPO = g_dbApp().OpenRecordset(sql, dbOpenSnapshot)\n// [VBA While loop - condition not translatable: Not rsPO.EOF]\n//   intPOQty = rsPO!Quantity\n//   AllocateInventory rsPO!ProductID\n//   rsPO.MoveNext\n// Wend\n// rsPO.Close\nrsPO = null;"
   },
   "cmd-add-nostock.on-click": {
     key: "cmd-add-nostock.on-click",
@@ -21,56 +21,56 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "cmd-add-po",
     event: "on-click",
     procedure: "cmdAddPO_Click",
-    js: "if (AC.isNewRecord()) {\n  alert(await AC.callFn(\"GetString\", 18));\n} else {\n  // RunCommand acCmdRecordsGoToNew\n}"
+    js: "if (AC.isNewRecord()) {\n  alert(await AC.callFn(\"GetString\", 18));\n} else {\n  AC.gotoRecord(\"new\");\n}"
   },
   "cmd-approve-po.on-click": {
     key: "cmd-approve-po.on-click",
     control: "cmd-approve-po",
     event: "on-click",
     procedure: "cmdApprovePO_Click",
-    js: "if (AC.getValue(\"StatusID\") === 4) {\n  // [VBA If block - condition not translatable]\n  // If HasPrivilege(enumPrivileges.pApprovePO) Then\n  //   Me.ApprovedByID = Get_UserID()\n  //   Me.ApprovedDate = Now\n  //   Me.StatusID = enumPurchaseOrderStatus.posApprove\n  //   Me.Dirty = False    'Save the record.\n  //   AllocatePurchaseOrder Me.PurchaseOrderID\n  //   SetWorkflowLabelColors\n  //   MsgBox GetString(sNewStatusSet), vbInformation\n  // Else\n  //   MsgBox GetString(sNoPrivilege, \"Approve PO\"), vbExclamation\n  // End If\n} else {\n  alert(await AC.callFn(\"GetString\", 21));\n}"
+    js: "if (AC.getValue(\"StatusID\") === 4) {\n  if (await AC.callFn(\"HasPrivilege\", 1)) {\n    AC.setValue(\"ApprovedByID\", await AC.callFn(\"Get_UserID\", ));\n    AC.setValue(\"ApprovedDate\", new Date());\n    AC.setValue(\"StatusID\", 1);\n    await AC.saveRecord();\n    await AC.callFn(\"AllocatePurchaseOrder\", AC.getValue(\"PurchaseOrderID\"));\n    await AC.callFn(\"SetWorkflowLabelColors\");\n    alert(await AC.callFn(\"GetString\", 30));\n  } else {\n    alert(await AC.callFn(\"GetString\", 19, \"Approve PO\"));\n  }\n} else {\n  alert(await AC.callFn(\"GetString\", 21));\n}"
   },
   "cmd-close-po.on-click": {
     key: "cmd-close-po.on-click",
     control: "cmd-close-po",
     event: "on-click",
     procedure: "cmdClosePO_Click",
-    js: "if (AC.getValue(\"StatusID\") === 5) {\n  if (await AC.callFn(\"PoCloseFieldsFilledOut\", )) {\n    // Me.PaymentDate = Now\n    AC.setValue(\"TaxAmount\", AC.getValue(\"txtTaxAmount\"));\n    AC.setValue(\"PaymentAmount\", AC.getValue(\"txtTotal\"));\n    AC.setValue(\"StatusID\", 2);\n    await AC.saveRecord();\n    await AC.callFn(\"SetWorkflowLabelColors\");\n    alert(await AC.callFn(\"GetString\", 30));\n  }\n} else {\n  alert(await AC.callFn(\"GetString\", 25));\n}"
+    js: "if (AC.getValue(\"StatusID\") === 5) {\n  if (await AC.callFn(\"PoCloseFieldsFilledOut\", )) {\n    AC.setValue(\"PaymentDate\", new Date());\n    AC.setValue(\"TaxAmount\", AC.getValue(\"txtTaxAmount\"));\n    AC.setValue(\"PaymentAmount\", AC.getValue(\"txtTotal\"));\n    AC.setValue(\"StatusID\", 2);\n    await AC.saveRecord();\n    await AC.callFn(\"SetWorkflowLabelColors\");\n    alert(await AC.callFn(\"GetString\", 30));\n  }\n} else {\n  alert(await AC.callFn(\"GetString\", 25));\n}"
   },
   "cmd-delete-po.on-click": {
     key: "cmd-delete-po.on-click",
     control: "cmd-delete-po",
     event: "on-click",
     procedure: "cmdDeletePO_Click",
-    js: "if (AC.getValue(\"StatusID\") === 3 || AC.getValue(\"StatusID\") === 4) {\n  // RunCommand acCmdDeleteRecord\n  // If IsFormOpen(\"frmPurchaseOrderList\") Then Forms!frmPurchaseOrderList.Requery\n} else {\n  alert(await AC.callFn(\"GetString\", 27));\n}"
+    js: "if (AC.getValue(\"StatusID\") === 3 || AC.getValue(\"StatusID\") === 4) {\n  AC.deleteRecord();\n  if (await AC.callFn(\"IsFormOpen\", \"frmPurchaseOrderList\")) { AC.requeryForm(\"frmPurchaseOrderList\"); }\n} else {\n  alert(await AC.callFn(\"GetString\", 27));\n}"
   },
   "cmd-receive-po.on-click": {
     key: "cmd-receive-po.on-click",
     control: "cmd-receive-po",
     event: "on-click",
     procedure: "cmdReceivePO_Click",
-    js: "let sql;\nif (AC.getValue(\"StatusID\") === 1) {\n  // [VBA If block - condition not translatable]\n  // If MsgBox(GetString(sPostToInventory), vbQuestion Or vbYesNo) = vbYes Then\n  //   Me.ReceivedDate = Now\n  //   Me.StatusID = enumPurchaseOrderStatus.posReceived\n  //   Me.Dirty = False    'Save the record.\n  //   sql = StringFormatSQL(\"update PurchaseOrderDetails set ReceivedDate = {0} where PurchaseOrderID = {1};\", Now(), Me.PurchaseOrderID)\n  //   g_dbApp().Execute sql, dbFailOnError\n  //   SetWorkflowLabelColors\n  //   MsgBox GetString(sNewStatusSet), vbInformation\n  //   AllocatePurchaseOrder Me.PurchaseOrderID\n  // End If\n} else {\n  alert(await AC.callFn(\"GetString\", 24));\n}"
+    js: "let sql;\nif (AC.getValue(\"StatusID\") === 1) {\n  if (confirm(await AC.callFn(\"GetString\", 23))) {\n    AC.setValue(\"ReceivedDate\", new Date());\n    AC.setValue(\"StatusID\", 5);\n    await AC.saveRecord();\n    sql = await AC.callFn(\"StringFormatSQL\", \"update PurchaseOrderDetails set ReceivedDate = {0} where PurchaseOrderID = {1};\", new Date(), AC.getValue(\"PurchaseOrderID\"));\n    AC.runSQL(sql);\n    await AC.callFn(\"SetWorkflowLabelColors\");\n    alert(await AC.callFn(\"GetString\", 30));\n    await AC.callFn(\"AllocatePurchaseOrder\", AC.getValue(\"PurchaseOrderID\"));\n  }\n} else {\n  alert(await AC.callFn(\"GetString\", 24));\n}"
   },
   "cmd-submit-po.on-click": {
     key: "cmd-submit-po.on-click",
     control: "cmd-submit-po",
     event: "on-click",
     procedure: "cmdSubmitPO_Click",
-    js: "if (AC.getValue(\"StatusID\") === 3) {\n  AC.setValue(\"SubmittedByID\", await AC.callFn(\"Get_UserID\", ));\n  // Me.SubmittedDate = Now\n  AC.setValue(\"StatusID\", 4);\n  // Me.Dirty = False    'Save the record.\n  await AC.callFn(\"SetWorkflowLabelColors\");\n  alert(await AC.callFn(\"GetString\", 30));\n} else {\n  alert(await AC.callFn(\"GetString\", 20));\n}"
+    js: "if (AC.getValue(\"StatusID\") === 3) {\n  AC.setValue(\"SubmittedByID\", await AC.callFn(\"Get_UserID\", ));\n  AC.setValue(\"SubmittedDate\", new Date());\n  AC.setValue(\"StatusID\", 4);\n  await AC.saveRecord();\n  await AC.callFn(\"SetWorkflowLabelColors\");\n  alert(await AC.callFn(\"GetString\", 30));\n} else {\n  alert(await AC.callFn(\"GetString\", 20));\n}"
   },
   "fn.Form_AfterInsert": {
     key: "fn.Form_AfterInsert",
     control: "fn",
     event: "Form_AfterInsert",
     procedure: "Form_AfterInsert",
-    js: "// AddToMRU \"PurchaseOrders\", Me.PurchaseOrderID"
+    js: "await AC.callFn(\"AddToMRU\", \"PurchaseOrders\", AC.getValue(\"PurchaseOrderID\"));"
   },
   "form.after-update": {
     key: "form.after-update",
     control: "form",
     event: "after-update",
     procedure: "Form_AfterUpdate",
-    js: "// ValidateForm_RemoveHighlights Me\n// If IsFormOpen(\"frmPurchaseOrderList\") Then Forms!frmPurchaseOrderList.Requery"
+    js: "await AC.callFn(\"ValidateForm_RemoveHighlights\", \"Me\");\nif (await AC.callFn(\"IsFormOpen\", \"frmPurchaseOrderList\")) { AC.requeryForm(\"frmPurchaseOrderList\"); }"
   },
   "fn.Form_BeforeInsert": {
     key: "fn.Form_BeforeInsert",
@@ -84,56 +84,56 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "form",
     event: "before-update",
     procedure: "Form_BeforeUpdate",
-    js: "// Cancel = ValidateForm(Me)\nif (!(Cancel)) {\n  // ValidateForm_RemoveHighlights Me\n}"
+    js: "Cancel = await AC.callFn(\"ValidateForm\", \"Me\");\nif (!(Cancel)) {\n  await AC.callFn(\"ValidateForm_RemoveHighlights\", \"Me\");\n}"
   },
   "form.on-close": {
     key: "form.on-close",
     control: "form",
     event: "on-close",
     procedure: "Form_Close",
-    js: "// ClosePurchaseOrderDetailsForm Me\nawait AC.callFn(\"RequeryListForms\");"
+    js: "await AC.callFn(\"ClosePurchaseOrderDetailsForm\", \"Me\");\nawait AC.callFn(\"RequeryListForms\");"
   },
   "form.on-current": {
     key: "form.on-current",
     control: "form",
     event: "on-current",
     procedure: "Form_Current",
-    js: "// ValidateForm_RemoveHighlights Me        'Needed if user canceled a new record with yellow highlights on the form.\n// Me.Caption = \"Purchase Order \" & Me.PurchaseOrderID      'Show the PurchaseOrderID in the caption, so several instances can easily be distinguised.\nawait AC.callFn(\"LockControls\");\nawait AC.callFn(\"SetWorkflowLabelColors\");\nif (AC.isNewRecord()) {\n  // [VBA With block skipped]\n} else {\n  // [VBA With block skipped]\n}"
+    js: "await AC.callFn(\"ValidateForm_RemoveHighlights\", \"Me\");\nAC.setFormCaption(\"Purchase Order \" + AC.getValue(\"PurchaseOrderID\"));\nawait AC.callFn(\"LockControls\");\nawait AC.callFn(\"SetWorkflowLabelColors\");\nif (AC.isNewRecord()) {\n  AC.setSubformAllow(\"sfrmPurchaseOrderLineItems\", \"allowAdditions\", true);\n  AC.setSubformAllow(\"sfrmPurchaseOrderLineItems\", \"allowEdits\", true);\n  AC.setSubformAllow(\"sfrmPurchaseOrderLineItems\", \"allowDeletions\", true);\n} else {\n  // Me.sfrmPurchaseOrderLineItems.Form.AllowAdditions = (Me.StatusID = enumPurchaseOrderStatus.posNew)\n  // Me.sfrmPurchaseOrderLineItems.Form.AllowEdits = Me.sfrmPurchaseOrderLineItems.Form.AllowAdditions\n  // Me.sfrmPurchaseOrderLineItems.Form.AllowDeletions = Me.sfrmPurchaseOrderLineItems.Form.AllowAdditions\n}"
   },
   "fn.Form_Delete": {
     key: "fn.Form_Delete",
     control: "fn",
     event: "Form_Delete",
     procedure: "Form_Delete",
-    js: "// RemoveFromMRU \"PurchaseOrders\", Me.PurchaseOrderID"
+    js: "await AC.callFn(\"RemoveFromMRU\", \"PurchaseOrders\", AC.getValue(\"PurchaseOrderID\"));"
   },
   "form.on-load": {
     key: "form.on-load",
     control: "form",
     event: "on-load",
     procedure: "Form_Load",
-    js: "let dict;\nif (AC.getTempVar(\"OpenArgs\") == null) {\n  // If Not Me.NewRecord Then RunCommand acCmdRecordsGoToNew\n} else {\n  dict = await AC.callFn(\"StringToDictionary\", AC.getTempVar(\"OpenArgs\"));\n  // [VBA With block skipped]\n  AC.setTempVar(\"OpenArgs\", \"Null\");\n  // Set dict = Nothing\n  // If Not Me.NewRecord Then AddToMRU \"PurchaseOrders\", Me.PurchaseOrderID\n}"
+    js: "let dict;\nif (AC.getTempVar(\"OpenArgs\") == null) {\n  if (!(AC.isNewRecord())) { AC.gotoRecord(\"new\"); }\n} else {\n  dict = await AC.callFn(\"StringToDictionary\", AC.getTempVar(\"OpenArgs\"));\n  // [VBA With block - target not translatable: Me.RecordsetClone]\n  //   .FindFirst \"PurchaseOrderID = \" & dict(\"PurchaseOrderID\")\n  //   Debug.Assert Not .NoMatch\n  //   Me.Bookmark = .Bookmark\n  // End With\n  AC.setTempVar(\"OpenArgs\", null);\n  dict = null;\n  if (!(AC.isNewRecord())) { await AC.callFn(\"AddToMRU\", \"PurchaseOrders\", AC.getValue(\"PurchaseOrderID\")); }\n}"
   },
   "fn.LockControls": {
     key: "fn.LockControls",
     control: "fn",
     event: "LockControls",
     procedure: "LockControls",
-    js: "let varControls;\nlet v;\n// varControls = Array()       'Initialize, so it is no longer empty.\nswitch (AC.getValue(\"StatusID\")) {\n  case enumPurchaseOrderStatus.posNew:\n    // varControls = Array(\"PurchaseOrderID\", \"VendorID\", \"StatusName\", \"SubmittedBy\", \"SubmittedDate\", \"ApprovedBy\", \"ApprovedDate\", \"ReceivedDate\", \"PaymentMethod\", \"ShippingFee\", \"txtTaxAmount\", \"txtTotal\", \"PaymentDate\")\n    break;\n  case posSubmitted:\n    // varControls = Array(\"PurchaseOrderID\", \"VendorID\", \"StatusName\", \"SubmittedBy\", \"SubmittedDate\", \"ApprovedBy\", \"ApprovedDate\", \"ReceivedDate\", \"PaymentMethod\", \"ShippingFee\", \"txtTaxAmount\", \"txtTotal\", \"PaymentDate\")\n    break;\n  case posApprove:\n    // varControls = Array(\"PurchaseOrderID\", \"VendorID\", \"StatusName\", \"SubmittedBy\", \"SubmittedDate\", \"ApprovedBy\", \"ApprovedDate\", \"PaymentMethod\", \"ShippingFee\", \"txtTaxAmount\", \"txtTotal\", \"PaymentDate\")\n    break;\n  case posReceived:\n    // varControls = Array(\"PurchaseOrderID\", \"VendorID\", \"StatusName\", \"SubmittedBy\", \"SubmittedDate\", \"ApprovedBy\", \"ApprovedDate\", \"ReceivedDate\", \"txtTaxAmount\", \"txtTotal\", \"PaymentDate\")\n    break;\n  case posClosed:\n    // varControls = Array(\"PurchaseOrderID\", \"VendorID\", \"Notes\", \"StatusName\", \"SubmittedBy\", \"SubmittedDate\", \"ApprovedBy\", \"ApprovedDate\", \"ReceivedDate\", \"PaymentMethod\", \"ShippingFee\", \"txtTaxAmount\", \"txtTotal\", \"PaymentDate\")\n    AC.setValue(\"AllowEdits\", false);\n    break;\n  default:\n    // If IsNull(Me.StatusID) Then            'NOTE: You cannot have a Case Null, because comparisons with Null are Null, not True/False.\n    // varControls = Array(\"PurchaseOrderID\", \"StatusName\", \"SubmittedBy\", \"SubmittedDate\", \"ApprovedBy\", \"ApprovedDate\", \"ReceivedDate\", \"PaymentMethod\", \"ShippingFee\", \"txtTaxAmount\", \"txtTotal\", \"PaymentDate\")\n    // Else\n    // Debug.Assert False      'Unexpected order status.\n    // End If\n}\n// [VBA For Each loop skipped]\n// [VBA For Each loop skipped]"
+    js: "let varControls;\nlet v;\n// varControls = Array()\nswitch (AC.getValue(\"StatusID\")) {\n  case enumPurchaseOrderStatus.posNew:\n    // varControls = Array(\"PurchaseOrderID\", \"VendorID\", \"StatusName\", \"SubmittedBy\", \"SubmittedDate\", \"ApprovedBy\", \"ApprovedDate\", \"ReceivedDate\", \"PaymentMethod\", \"ShippingFee\", \"txtTaxAmount\", \"txtTotal\", \"PaymentDate\")\n    break;\n  case posSubmitted:\n    // varControls = Array(\"PurchaseOrderID\", \"VendorID\", \"StatusName\", \"SubmittedBy\", \"SubmittedDate\", \"ApprovedBy\", \"ApprovedDate\", \"ReceivedDate\", \"PaymentMethod\", \"ShippingFee\", \"txtTaxAmount\", \"txtTotal\", \"PaymentDate\")\n    break;\n  case posApprove:\n    // varControls = Array(\"PurchaseOrderID\", \"VendorID\", \"StatusName\", \"SubmittedBy\", \"SubmittedDate\", \"ApprovedBy\", \"ApprovedDate\", \"PaymentMethod\", \"ShippingFee\", \"txtTaxAmount\", \"txtTotal\", \"PaymentDate\")\n    break;\n  case posReceived:\n    // varControls = Array(\"PurchaseOrderID\", \"VendorID\", \"StatusName\", \"SubmittedBy\", \"SubmittedDate\", \"ApprovedBy\", \"ApprovedDate\", \"ReceivedDate\", \"txtTaxAmount\", \"txtTotal\", \"PaymentDate\")\n    break;\n  case posClosed:\n    // varControls = Array(\"PurchaseOrderID\", \"VendorID\", \"Notes\", \"StatusName\", \"SubmittedBy\", \"SubmittedDate\", \"ApprovedBy\", \"ApprovedDate\", \"ReceivedDate\", \"PaymentMethod\", \"ShippingFee\", \"txtTaxAmount\", \"txtTotal\", \"PaymentDate\")\n    AC.setAllowEdits(false);\n    break;\n  default:\n    if (AC.getValue(\"StatusID\") == null) {\n      // varControls = Array(\"PurchaseOrderID\", \"StatusName\", \"SubmittedBy\", \"SubmittedDate\", \"ApprovedBy\", \"ApprovedDate\", \"ReceivedDate\", \"PaymentMethod\", \"ShippingFee\", \"txtTaxAmount\", \"txtTotal\", \"PaymentDate\")\n    } else {\n      // Debug.Assert False\n    }\n}\nfor (const v of AC.getControlNames()) {\n  AC.setLocked(v, false);\n  AC.setEnabled(v, true);\n  AC.setBackShade(v, 100);\n}\nfor (const v of varControls) {\n  // Me.Controls(v).Locked = True\n  // Me.Controls(v).Enabled = False\n  // Me.Controls(v).BackShade = 95\n}"
   },
   "fn.PoCloseFieldsFilledOut": {
     key: "fn.PoCloseFieldsFilledOut",
     control: "fn",
     event: "PoCloseFieldsFilledOut",
     procedure: "PoCloseFieldsFilledOut",
-    js: "let blnIsValid;\n// blnIsValid = True       'Optimistic.\nif (AC.getValue(\"ShippingFee\") == null) {\n  blnIsValid = false;\n  // HighlightControl Me.ShippingFee\n}\nif (AC.getValue(\"PaymentMethod\") == null) {\n  blnIsValid = false;\n  // HighlightControl Me.PaymentMethod\n}\nif (!(blnIsValid)) {\n  alert(await AC.callFn(\"GetString\", 26));\n}\nreturn blnIsValid;"
+    js: "let blnIsValid;\nblnIsValid = true;\nif (AC.getValue(\"ShippingFee\") == null) {\n  blnIsValid = false;\n  await AC.callFn(\"HighlightControl\", AC.getValue(\"ShippingFee\"));\n}\nif (AC.getValue(\"PaymentMethod\") == null) {\n  blnIsValid = false;\n  await AC.callFn(\"HighlightControl\", AC.getValue(\"PaymentMethod\"));\n}\nif (!(blnIsValid)) {\n  alert(await AC.callFn(\"GetString\", 26));\n}\nreturn blnIsValid;"
   },
   "fn.SetWorkflowLabelColors": {
     key: "fn.SetWorkflowLabelColors",
     control: "fn",
     event: "SetWorkflowLabelColors",
     procedure: "SetWorkflowLabelColors",
-    js: "// Me.cmdSubmitPO.ForeShade = 95      '95 means Darker 5%\n// Me.cmdApprovePO.ForeShade = 95\n// Me.cmdReceivePO.ForeShade = 95\n// Me.cmdClosePO.ForeShade = 95\nif (AC.isNewRecord()) {\n} else {\n  await AC.callFn(\"LockControls\");\n  // If Me.StatusID = enumPurchaseOrderStatus.posNew Then GoTo Exit_Handler\n  // Me.cmdSubmitPO.ForeShade = 70      '70 means Darker 30%\n  // If Me.StatusID = enumPurchaseOrderStatus.posSubmitted Then GoTo Exit_Handler\n  // Me.cmdApprovePO.ForeShade = 70\n  // If Me.StatusID = enumPurchaseOrderStatus.posApprove Then GoTo Exit_Handler\n  // Me.cmdReceivePO.ForeShade = 70\n  // If Me.StatusID = enumPurchaseOrderStatus.posReceived Then GoTo Exit_Handler\n  // Me.cmdClosePO.ForeShade = 70\n}"
+    js: "// Me.cmdSubmitPO.ForeShade = 95\n// Me.cmdApprovePO.ForeShade = 95\n// Me.cmdReceivePO.ForeShade = 95\n// Me.cmdClosePO.ForeShade = 95\nif (AC.isNewRecord()) {\n} else {\n  await AC.callFn(\"LockControls\");\n  // If Me.StatusID = enumPurchaseOrderStatus.posNew Then GoTo Exit_Handler\n  // Me.cmdSubmitPO.ForeShade = 70\n  // If Me.StatusID = enumPurchaseOrderStatus.posSubmitted Then GoTo Exit_Handler\n  // Me.cmdApprovePO.ForeShade = 70\n  // If Me.StatusID = enumPurchaseOrderStatus.posApprove Then GoTo Exit_Handler\n  // Me.cmdReceivePO.ForeShade = 70\n  // If Me.StatusID = enumPurchaseOrderStatus.posReceived Then GoTo Exit_Handler\n  // Me.cmdClosePO.ForeShade = 70\n}"
   },
   "vendor-id.after-update": {
     key: "vendor-id.after-update",

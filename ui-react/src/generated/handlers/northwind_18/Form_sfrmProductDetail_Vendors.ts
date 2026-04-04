@@ -7,7 +7,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "form",
     event: "before-update",
     procedure: "Form_BeforeUpdate",
-    js: "AC.setValue(\"txtModifiedBy\", await AC.callFn(\"Get_EmployeeFNLN\", await AC.callFn(\"Get_UserID\", )));\n// Me.txtModifiedOn = Now()"
+    js: "AC.setValue(\"txtModifiedBy\", await AC.callFn(\"Get_EmployeeFNLN\", await AC.callFn(\"Get_UserID\", )));\nAC.setValue(\"txtModifiedOn\", new Date());"
   },
   "txt-vendor-id.on-click": {
     key: "txt-vendor-id.on-click",

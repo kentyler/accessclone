@@ -7,14 +7,14 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "report",
     event: "on-activate",
     procedure: "Report_Activate",
-    js: "// Ribbon_ShowReportsGroup"
+    js: "await AC.callFn(\"Ribbon_ShowReportsGroup\");"
   },
   "report.on-close": {
     key: "report.on-close",
     control: "report",
     event: "on-close",
     procedure: "Report_Close",
-    js: "// Ribbon_ShowReportsGroup"
+    js: "await AC.callFn(\"Ribbon_ShowReportsGroup\");"
   },
   "report.on-no-data": {
     key: "report.on-no-data",
@@ -28,7 +28,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "report",
     event: "on-open",
     procedure: "Report_Open",
-    js: "AC.setValue(\"lblCriteria\", \"Order Dates between \");"
+    js: "AC.setValue(\"lblCriteria\", \"Order Dates between \" + AC.getFormValue(\"frmReports\", \"txtStartDate\") + \" And \" + AC.getFormValue(\"frmReports\", \"txtEndDate\"));"
   }
 };
 

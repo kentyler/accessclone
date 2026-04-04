@@ -249,6 +249,11 @@ module.exports = function(pool) {
       const client = await pool.connect();
       let result, totalCount;
       try {
+        // Set search_path on this dedicated client (middleware set it on a different pool connection)
+        if (req.schemaName) {
+          const quoted = '"' + req.schemaName.replace(/"/g, '""') + '"';
+          await client.query(`SET search_path = ${quoted}, shared, public`);
+        }
         await client.query('BEGIN');
         if (sessionId) {
           await client.query('SELECT set_config($1, $2, true)', ['app.session_id', sessionId]);

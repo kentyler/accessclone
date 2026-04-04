@@ -7,28 +7,28 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "form",
     event: "after-update",
     procedure: "Form_AfterUpdate",
-    js: "// ValidateForm_RemoveHighlights Me"
+    js: "await AC.callFn(\"ValidateForm_RemoveHighlights\", \"Me\");"
   },
   "form.before-update": {
     key: "form.before-update",
     control: "form",
     event: "before-update",
     procedure: "Form_BeforeUpdate",
-    js: "// Cancel = ValidateForm(Me)"
+    js: "Cancel = await AC.callFn(\"ValidateForm\", \"Me\");"
   },
   "txt-primary-phone.on-click": {
     key: "txt-primary-phone.on-click",
     control: "txt-primary-phone",
     event: "on-click",
     procedure: "txtPrimaryPhone_Click",
-    js: "if (AC.getValue(\"txtPrimaryPhone\").length === 0) {\n  // Me.txtPrimaryPhone.SelStart = 0\n}"
+    js: "if (AC.getValue(\"txtPrimaryPhone\").length === 0) {\n  /* SelStart/SelLength — no-op in web */;\n}"
   },
   "txt-secondary-phone.on-click": {
     key: "txt-secondary-phone.on-click",
     control: "txt-secondary-phone",
     event: "on-click",
     procedure: "txtSecondaryPhone_Click",
-    js: "if (AC.getValue(\"txtSecondaryPhone\").length === 0) {\n  // Me.txtSecondaryPhone.SelStart = 0\n}"
+    js: "if (AC.getValue(\"txtSecondaryPhone\").length === 0) {\n  /* SelStart/SelLength — no-op in web */;\n}"
   }
 };
 

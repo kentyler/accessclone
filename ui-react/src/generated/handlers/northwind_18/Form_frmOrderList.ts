@@ -7,35 +7,35 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "cmd-add-order",
     event: "on-click",
     procedure: "cmdAddOrder_Click",
-    js: "// OpenOrderDetailsForm"
+    js: "await AC.callFn(\"OpenOrderDetailsForm\");"
   },
   "cmd-show-filter.on-click": {
     key: "cmd-show-filter.on-click",
     control: "cmd-show-filter",
     event: "on-click",
     procedure: "cmdShowFilter_Click",
-    js: "let strOpenArgs;\n// [VBA If block - condition not translatable]\n// If Me.Form.FilterOn = False Then\n//   MsgBox \"This form has not been filtered.\", vbOKOnly Or vbInformation\n// Else\n//   strOpenArgs = StringFormat(\"Header={0}&Message={1}\", \"Form Filter\", Replace(Me.Form.Filter, \"[qryOrderList].\", \"\"))\n//   DoCmd.OpenForm \"frmGenericDialog\", acNormal, , , acFormReadOnly, acDialog, strOpenArgs\n//   If IsFormOpen(\"frmGenericDialog\") Then\n//   DoCmd.Close acForm, \"frmGenericDialog\", acSaveNo\n//   End If\n// End If"
+    js: "let strOpenArgs;\nif (AC.getFilterOn() === false) {\n  alert(\"This form has not been filtered.\");\n} else {\n  strOpenArgs = await AC.callFn(\"StringFormat\", \"Header={0}&Message={1}\", \"Form Filter\", AC.getFilter().replaceAll(\"[qryOrderList].\", \"\"));\n  AC.openForm(\"frmGenericDialog\");\n  if (await AC.callFn(\"IsFormOpen\", \"frmGenericDialog\")) {\n    AC.closeForm(\"frmGenericDialog\");\n  }\n}"
   },
   "form.on-open": {
     key: "form.on-open",
     control: "form",
     event: "on-open",
     procedure: "Form_Open",
-    js: "AC.setFilterOn(false);\nAC.setFilter(\"\");\n// fraFilter_AfterUpdate"
+    js: "AC.setFilterOn(false);\nAC.setFilter(\"\");\nawait AC.callFn(\"fraFilter_AfterUpdate\");"
   },
   "fra-filter.after-update": {
     key: "fra-filter.after-update",
     control: "fra-filter",
     event: "after-update",
     procedure: "fraFilter_AfterUpdate",
-    js: "switch (AC.getValue(\"fraFilter\")) {\n  case 1                          '1=Open Orders:\n    // Me.Filter = \"OrderStatusID <> 1\"    'Open orders are all except in Status=1=Closed.\n    break;\n  case 2                          '2=Recent Orders:\n    // Me.Filter = StringFormatSQL(\"OrderDate >= {0}\", DateAdd(\"d\", -30, Date))\n    break;\n  case 3                          '3=My Orders:\n    // Me.Filter = \"EmployeeID = \" & Get_UserID()\n    break;\n  case 4                          '4=All Orders:\n    AC.setFilter(\"\");\n    break;\n}\n// Me.FilterOn = True                  'This turns the filter on.\n// [VBA If block - condition not translatable]\n// If Me.fraFilter = 2 And Me.RecordsetClone.RecordCount = 0 Then\n//   MsgBox GetString(sNoRecentOrders), vbInformation\n// End If"
+    js: "switch (AC.getValue(\"fraFilter\")) {\n  case 1:\n    AC.setFilter(\"OrderStatusID <> 1\");\n    break;\n  case 2:\n    AC.setFilter(await AC.callFn(\"StringFormatSQL\", \"OrderDate >= {0}\", AC.dateAdd(\"d\", -30, new Date())));\n    break;\n  case 3:\n    AC.setFilter(\"EmployeeID = \" + await AC.callFn(\"Get_UserID\", ));\n    break;\n  case 4:\n    AC.setFilter(\"\");\n    break;\n}\nAC.setFilterOn(true);\n// [VBA If block - condition not translatable]\n// If Me.fraFilter = 2 And Me.RecordsetClone.RecordCount = 0 Then\n//   MsgBox GetString(sNoRecentOrders), vbInformation\n// End If"
   },
   "order-id.on-click": {
     key: "order-id.on-click",
     control: "order-id",
     event: "on-click",
     procedure: "OrderID_Click",
-    js: "// OpenOrderDetailsForm Me.OrderID"
+    js: "await AC.callFn(\"OpenOrderDetailsForm\", AC.getValue(\"OrderID\"));"
   }
 };
 

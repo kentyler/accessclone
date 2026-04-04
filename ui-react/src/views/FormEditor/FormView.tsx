@@ -393,9 +393,9 @@ export default function FormView() {
 
   const current = store.current;
   const projection = store.projection;
-  const currentRecord = projection?.record ?? {};
-  const allRecords = projection?.records ?? [];
-  const pos = { current: projection?.position ?? 0, total: projection?.total ?? 0 };
+  const currentRecord = store.currentRecord ?? {};
+  const allRecords = store.records;
+  const pos = store.recordPosition;
   const recordSource = current?.['record-source'] || '';
   const continuous = (current?.['default-view'] || 'Single Form') === 'Continuous Forms';
 
@@ -511,7 +511,7 @@ export default function FormView() {
       {(current['navigation-buttons'] ?? 1) !== 0 && (
         <RecordNavBar current={pos.current} total={pos.total}
           allowAdditions={allowAdditions} allowDeletions={allowDeletions}
-          dirty={Boolean(projection?.dirty)} />
+          dirty={store.recordDirty} />
       )}
     </div>
   );

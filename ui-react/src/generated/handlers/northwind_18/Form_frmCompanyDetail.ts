@@ -21,49 +21,49 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "cmd-add",
     event: "on-click",
     procedure: "cmdAdd_Click",
-    js: "if (AC.isNewRecord()) {\n  alert(await AC.callFn(\"GetString\", 18));\n} else {\n  // RunCommand acCmdRecordsGoToNew\n}"
+    js: "if (AC.isNewRecord()) {\n  alert(await AC.callFn(\"GetString\", 18));\n} else {\n  AC.gotoRecord(\"new\");\n}"
   },
   "cmd-cancel.on-click": {
     key: "cmd-cancel.on-click",
     control: "cmd-cancel",
     event: "on-click",
     procedure: "cmdCancel_Click",
-    js: "if (m_lngCalledFromID === 0) {\n  AC.closeForm(\"frmCompanyDetail\");\n} else {\n  if (!(AC.getValue(\"CompanyID\") == null)) {\n    if (AC.isDirty()) {\n      AC.undo();\n    }\n  }\n  // DoCmd.SearchForRecord acDataForm, Me.Name, acFirst, \"CompanyID = \" & m_lngCalledFromID\n}"
+    js: "if (m_lngCalledFromID === 0) {\n  AC.closeForm(\"frmCompanyDetail\");\n} else {\n  if (!(AC.getValue(\"CompanyID\") == null)) {\n    if (AC.isDirty()) {\n      AC.undo();\n    }\n  }\n  AC.searchForRecord(\"CompanyID = \" + m_lngCalledFromID);\n}"
   },
   "cmd-click-to-map.on-click": {
     key: "cmd-click-to-map.on-click",
     control: "cmd-click-to-map",
     event: "on-click",
     procedure: "cmdClickToMap_Click",
-    js: "let strBusinessAddress;\n// strBusinessAddress = Me.[Address] & Space(2) & Me.[City] & \", \" & Me.[StateAbbrev] & Space(2) & Me.[Zip]\n// Application.FollowHyperlink \"http://maps.live.com/default.aspx?where1=\" & strBusinessAddress"
+    js: "let strBusinessAddress;\nstrBusinessAddress = AC.getValue(\"Address\") + \" \".repeat(2) + AC.getValue(\"City\") + \", \" + AC.getValue(\"StateAbbrev\") + \" \".repeat(2) + AC.getValue(\"Zip\");\nwindow.open(\"http://maps.live.com/default.aspx?where1=\" + strBusinessAddress);"
   },
   "cmd-delete-company.on-click": {
     key: "cmd-delete-company.on-click",
     control: "cmd-delete-company",
     event: "on-click",
     procedure: "cmdDeleteCompany_Click",
-    js: "// RunCommand acCmdDeleteRecord"
+    js: "AC.deleteRecord();"
   },
   "cmd-email.on-click": {
     key: "cmd-email.on-click",
     control: "cmd-email",
     event: "on-click",
     procedure: "cmdEmail_Click",
-    js: "// DoCmd.RunCommand acCmdSend"
+    js: "/* RunCommand acCmdSend — not supported in web */;"
   },
   "cmd-save.on-click": {
     key: "cmd-save.on-click",
     control: "cmd-save",
     event: "on-click",
     procedure: "cmdSave_Click",
-    js: "let Cancel;\n// Cancel = ValidateForm(Me)\nif (!(Cancel)) {\n  if (AC.isDirty()) { await AC.saveRecord(); }\n  // ValidateForm_RemoveHighlights Me\n}"
+    js: "let Cancel;\nCancel = await AC.callFn(\"ValidateForm\", \"Me\");\nif (!(Cancel)) {\n  if (AC.isDirty()) { await AC.saveRecord(); }\n  await AC.callFn(\"ValidateForm_RemoveHighlights\", \"Me\");\n}"
   },
   "cmd-show-filter.on-click": {
     key: "cmd-show-filter.on-click",
     control: "cmd-show-filter",
     event: "on-click",
     procedure: "cmdShowFilter_Click",
-    js: "let strOpenArgs;\nlet strFilter;\n// [VBA If block - condition not translatable]\n// If Me.Form.FilterOn = True Then\n//   strFilter = Me.Form.Filter\n//   strFilter = Replace(strFilter, \"[Lookup_cboCompanyTypeID].\", \"\")\n//   strFilter = Replace(strFilter, \"[Lookup_cboState].\", \"\")\n//   strFilter = Replace(strFilter, \"[Lookup_cboStandardTaxStatusID].\", \"\")\n//   strFilter = Replace(strFilter, \"[qryCompanies].\", \"\")\n//   strOpenArgs = StringFormat(\"Header={0}&Message={1}&Actions={2}&FormCaption={3}\", \"Form Filter\", strFilter, \"vbOK\", m_strMsgCaption)\n//   DoCmd.OpenForm \"frmGenericDialog\", acNormal, , , acFormReadOnly, acDialog, strOpenArgs\n//   If IsFormOpen(\"frmGenericDialog\") Then\n//   DoCmd.Close acForm, \"frmGenericDialog\", acSaveNo\n//   End If\n// Else\n//   MsgBox \"This form has not been filtered.\", vbOKOnly Or vbInformation\n// End If"
+    js: "let strOpenArgs;\nlet strFilter;\nif (AC.getFilterOn() === true) {\n  strFilter = AC.getFilter();\n  strFilter = strFilter.replaceAll(\"[Lookup_cboCompanyTypeID].\", \"\");\n  strFilter = strFilter.replaceAll(\"[Lookup_cboState].\", \"\");\n  strFilter = strFilter.replaceAll(\"[Lookup_cboStandardTaxStatusID].\", \"\");\n  strFilter = strFilter.replaceAll(\"[qryCompanies].\", \"\");\n  strOpenArgs = await AC.callFn(\"StringFormat\", \"Header={0}&Message={1}&Actions={2}&FormCaption={3}\", \"Form Filter\", strFilter, \"vbOK\", m_strMsgCaption);\n  AC.openForm(\"frmGenericDialog\");\n  if (await AC.callFn(\"IsFormOpen\", \"frmGenericDialog\")) {\n    AC.closeForm(\"frmGenericDialog\");\n  }\n} else {\n  alert(\"This form has not been filtered.\");\n}"
   },
   "fn.CompanyCantBeDeleted": {
     key: "fn.CompanyCantBeDeleted",
@@ -84,63 +84,63 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "CompanyIsActive",
     procedure: "CompanyIsActive",
-    js: "let lngCount;\n// m_lngCompanyContactCount = DCount(\"*\", \"Contacts\", StringFormatSQL(\"CompanyID={0}\", Me.CompanyID))\n// m_lngCustomerOrderCount = DCount(\"*\", \"Orders\", StringFormatSQL(\"CustomerID={0}\", Me.CompanyID))\n// m_lngShipperOrderCount = DCount(\"*\", \"Orders\", StringFormatSQL(\"ShipperID={0}\", Me.CompanyID))\n// m_lngVendorPurchaseOrderCount = DCount(\"*\", \"PurchaseOrders\", StringFormatSQL(\"VendorID={0}\", Me.CompanyID))\n// m_lngVendorProductCount = DCount(\"*\", \"ProductVendors\", StringFormatSQL(\"VendorID={0}\", Me.CompanyID))\n// lngCount = m_lngCustomerOrderCount + m_lngShipperOrderCount + m_lngVendorPurchaseOrderCount\nif (lngCount > 0) {\n  return true;\n} else {\n  return false;\n}"
+    js: "let lngCount;\nm_lngCompanyContactCount = await AC.dCount(\"*\", \"Contacts\", await AC.callFn(\"StringFormatSQL\", \"CompanyID={0}\", AC.getValue(\"CompanyID\")));\nm_lngCustomerOrderCount = await AC.dCount(\"*\", \"Orders\", await AC.callFn(\"StringFormatSQL\", \"CustomerID={0}\", AC.getValue(\"CompanyID\")));\nm_lngShipperOrderCount = await AC.dCount(\"*\", \"Orders\", await AC.callFn(\"StringFormatSQL\", \"ShipperID={0}\", AC.getValue(\"CompanyID\")));\nm_lngVendorPurchaseOrderCount = await AC.dCount(\"*\", \"PurchaseOrders\", await AC.callFn(\"StringFormatSQL\", \"VendorID={0}\", AC.getValue(\"CompanyID\")));\nm_lngVendorProductCount = await AC.dCount(\"*\", \"ProductVendors\", await AC.callFn(\"StringFormatSQL\", \"VendorID={0}\", AC.getValue(\"CompanyID\")));\nlngCount = m_lngCustomerOrderCount + m_lngShipperOrderCount + m_lngVendorPurchaseOrderCount;\nif (lngCount > 0) {\n  return true;\n} else {\n  return false;\n}"
   },
   "fn.Form_AfterDelConfirm": {
     key: "fn.Form_AfterDelConfirm",
     control: "fn",
     event: "Form_AfterDelConfirm",
     procedure: "Form_AfterDelConfirm",
-    js: "switch (Status) {\n  case acDeleteOK:\n    alert(\"Deleted!\");\n    if (await AC.callFn(\"IsFormOpen\", \"frmCompanyList\") === true) {\n      // Forms(\"frmCompanyList\").Requery\n    }\n    break;\n}"
+    js: "switch (Status) {\n  case acDeleteOK:\n    alert(\"Deleted!\");\n    if (await AC.callFn(\"IsFormOpen\", \"frmCompanyList\") === true) {\n      AC.requeryForm(\"frmCompanyList\");\n    }\n    break;\n}"
   },
   "fn.Form_AfterInsert": {
     key: "fn.Form_AfterInsert",
     control: "fn",
     event: "Form_AfterInsert",
     procedure: "Form_AfterInsert",
-    js: "if (await AC.callFn(\"IsFormOpen\", \"frmCompanyList\") === true) {\n  // Forms(\"frmCompanyList\").Requery\n  // Me.SetFocus\n}"
+    js: "if (await AC.callFn(\"IsFormOpen\", \"frmCompanyList\") === true) {\n  AC.requeryForm(\"frmCompanyList\");\n  /* Me.SetFocus — no-op in web */;\n}"
   },
   "form.after-update": {
     key: "form.after-update",
     control: "form",
     event: "after-update",
     procedure: "Form_AfterUpdate",
-    js: "// ValidateForm_RemoveHighlights Me"
+    js: "await AC.callFn(\"ValidateForm_RemoveHighlights\", \"Me\");"
   },
   "fn.Form_BeforeDelConfirm": {
     key: "fn.Form_BeforeDelConfirm",
     control: "fn",
     event: "Form_BeforeDelConfirm",
     procedure: "Form_BeforeDelConfirm",
-    js: "// Response = acDataErrContinue"
+    js: "/* Response = acDataErrContinue — suppress default error */"
   },
   "form.before-update": {
     key: "form.before-update",
     control: "form",
     event: "before-update",
     procedure: "Form_BeforeUpdate",
-    js: "// [VBA If block - condition not translatable]\n// If MsgBox(GetString(sDoYouWantToSaveYourChanges), vbQuestion Or vbYesNo, \"Save Your Changes?\") = vbNo Then\n//   Me.Undo\n// Else\n//   Cancel = ValidateForm(Me)\n// End If"
+    js: "if (!confirm(await AC.callFn(\"GetString\", 48))) {\n  AC.undo();\n} else {\n  Cancel = await AC.callFn(\"ValidateForm\", \"Me\");\n}"
   },
   "form.on-current": {
     key: "form.on-current",
     control: "form",
     event: "on-current",
     procedure: "Form_Current",
-    js: "// If Not Me.NewRecord Then m_lngCalledFromID = Me.CompanyID\nawait AC.callFn(\"ManageFormOptions\");\n// ValidateForm_RemoveHighlights Me"
+    js: "if (!(AC.isNewRecord())) { m_lngCalledFromID = AC.getValue(\"CompanyID\"); }\nawait AC.callFn(\"ManageFormOptions\");\nawait AC.callFn(\"ValidateForm_RemoveHighlights\", \"Me\");"
   },
   "fn.Form_Delete": {
     key: "fn.Form_Delete",
     control: "fn",
     event: "Form_Delete",
     procedure: "Form_Delete",
-    js: "let strSQL;\nif (await AC.callFn(\"CompanyIsActive\") === true) {\n  await AC.callFn(\"CompanyCantBeDeleted\");\n  return false;\n}\nif (await AC.callFn(\"CompanyConfirmDelete\")) {\n  if (m_lngCompanyContactCount > 0) {\n    // strSQL = StringFormatSQL(\"Delete from Contacts where CompanyID = {0}\", Me.txtCompanyID.Value)\n    AC.runSQL(strSQL);\n  }\n  if (m_lngVendorProductCount > 0) {\n    // strSQL = StringFormatSQL(\"Delete from ProductVendors where VendorID = {0}\", Me.txtCompanyID.Value)\n    AC.runSQL(strSQL);\n  }\n} else {\n  return false;\n}"
+    js: "let strSQL;\nif (await AC.callFn(\"CompanyIsActive\") === true) {\n  await AC.callFn(\"CompanyCantBeDeleted\");\n  return false;\n}\nif (await AC.callFn(\"CompanyConfirmDelete\")) {\n  if (m_lngCompanyContactCount > 0) {\n    strSQL = await AC.callFn(\"StringFormatSQL\", \"Delete from Contacts where CompanyID = {0}\", AC.getValue(\"txtCompanyID\"));\n    AC.runSQL(strSQL);\n  }\n  if (m_lngVendorProductCount > 0) {\n    strSQL = await AC.callFn(\"StringFormatSQL\", \"Delete from ProductVendors where VendorID = {0}\", AC.getValue(\"txtCompanyID\"));\n    AC.runSQL(strSQL);\n  }\n} else {\n  return false;\n}"
   },
   "form.on-load": {
     key: "form.on-load",
     control: "form",
     event: "on-load",
     procedure: "Form_Load",
-    js: "let dict;\nlet key;\nlet lngOpenArgCompanyID;\nlet strOpenArgAction;\nlet strOpenArgCompanyName;\nlet strOpenArgCompanyTypeID;\nlet strOpenArgPassedFilter;\nlet strFormWhere;\n// m_lngCalledFromID = 0    'Indicates List Form\n// m_strMsgCaption = \"Message from Company\"\nif (AC.getOpenArgs() == null) {\n} else {\n  dict = await AC.callFn(\"StringToDictionary\", AC.getOpenArgs());\n  // [VBA For Each loop skipped]\n  // Set dict = Nothing\n}\nif (strOpenArgCompanyTypeID.length > 0) {\n  if (strOpenArgCompanyTypeID.length === 1) {\n    // Me.cboCompanyTypeID.DefaultValue = strOpenArgCompanyTypeID\n    strFormWhere = \"CompanyTypeID = \" + strOpenArgCompanyTypeID;\n  } else {\n    strFormWhere = \"CompanyTypeID \" + strOpenArgCompanyTypeID;\n  }\n}\nif (strOpenArgPassedFilter.length > 0) {\n  AC.setFilter(strOpenArgPassedFilter);\n  AC.setFilterOn(true);\n} else if (strFormWhere.length > 0) {\n  // Me.Filter = strFormWhere    'No Passed Filter use strFormWhere\n  AC.setFilterOn(true);\n} else {\n  AC.setFilterOn(false);\n}\nif (strOpenArgAction.length > 0) {\n  if (strOpenArgAction === \"Add\") {\n    AC.gotoRecord(\"new\");\n    if (strOpenArgCompanyName.length > 0) {\n      AC.setValue(\"txtCompanyName\", strOpenArgCompanyName);\n    }\n  } else {\n    // MsgBox \"An unknown action has been requested. \" & vbCrLf & vbCrLf & \"Please let IT know this has happened and that action is :  \" & strOpenArgAction, vbOKOnly Or vbCritical, \"Contact IT\"\n  }\n} else if (lngOpenArgCompanyID.length > 0) {\n  // DoCmd.SearchForRecord acDataForm, Me.Name, acFirst, \"CompanyID = \" & lngOpenArgCompanyID\n  // m_lngCalledFromID = lngOpenArgCompanyID\n}"
+    js: "let dict;\nlet key;\nlet lngOpenArgCompanyID;\nlet strOpenArgAction;\nlet strOpenArgCompanyName;\nlet strOpenArgCompanyTypeID;\nlet strOpenArgPassedFilter;\nlet strFormWhere;\nm_lngCalledFromID = 0;\nm_strMsgCaption = \"Message from Company\";\nif (AC.getOpenArgs() == null) {\n} else {\n  dict = await AC.callFn(\"StringToDictionary\", AC.getOpenArgs());\n  for (const key of Object.keys(dict)) {\n    switch (key) {\n      case \"Action\":\n        strOpenArgAction = dict[key];\n        break;\n      case \"CompanyName\":\n        strOpenArgCompanyName = dict[key];\n        break;\n      case \"CompanyTypeID\":\n        strOpenArgCompanyTypeID = dict[key];\n        break;\n      case \"CompanyID\":\n        lngOpenArgCompanyID = dict[key];\n        break;\n      case \"PassedFilter\":\n        strOpenArgPassedFilter = dict[key];\n        break;\n      case \"[frmOrderDetails]![CustomerID]\":\n        strOpenArgCompanyName = dict[key];\n        strOpenArgAction = \"Add\";\n        break;\n    }\n  }\n  dict = null;\n}\nif (strOpenArgCompanyTypeID.length > 0) {\n  if (strOpenArgCompanyTypeID.length === 1) {\n    AC.setDefaultValue(\"cboCompanyTypeID\", strOpenArgCompanyTypeID);\n    strFormWhere = \"CompanyTypeID = \" + strOpenArgCompanyTypeID;\n  } else {\n    strFormWhere = \"CompanyTypeID \" + strOpenArgCompanyTypeID;\n  }\n}\nif (strOpenArgPassedFilter.length > 0) {\n  AC.setFilter(strOpenArgPassedFilter);\n  AC.setFilterOn(true);\n} else if (strFormWhere.length > 0) {\n  AC.setFilter(strFormWhere);\n  AC.setFilterOn(true);\n} else {\n  AC.setFilterOn(false);\n}\nif (strOpenArgAction.length > 0) {\n  if (strOpenArgAction === \"Add\") {\n    AC.gotoRecord(\"new\");\n    if (strOpenArgCompanyName.length > 0) {\n      AC.setValue(\"txtCompanyName\", strOpenArgCompanyName);\n    }\n  } else {\n    alert(\"An unknown action has been requested. \" + \"\\n\" + \"\\n\" + \"Please let IT know this has happened and that action is :  \" + strOpenArgAction);\n  }\n} else if (lngOpenArgCompanyID.length > 0) {\n  AC.searchForRecord(\"CompanyID = \" + lngOpenArgCompanyID);\n  m_lngCalledFromID = lngOpenArgCompanyID;\n}"
   },
   "form.on-open": {
     key: "form.on-open",
@@ -154,21 +154,21 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "ManageFormOptions",
     procedure: "ManageFormOptions",
-    js: "// [VBA With block skipped]"
+    js: "AC.setSubformSource(\"sfrmOrders\", \"\");\nAC.setFormCaption(AC.getValue(\"txtCompanyType\"));\nswitch (AC.getValue(\"cboCompanyTypeID\")) {\n  case enumCompanyType.ctCustomer:\n    AC.setSubformSource(\"sfrmOrders\", \"sfrmCompanyDetail_CustomerOrders\");\n    AC.setValue(\"lblsfrmOrders\", \"Orders\");\n    break;\n  case enumCompanyType.ctShipper:\n    AC.setSubformSource(\"sfrmOrders\", \"sfrmCompanyDetail_ShipperOrders\");\n    AC.setValue(\"lblsfrmOrders\", \"Orders Shipped\");\n    break;\n  case enumCompanyType.ctVendor:\n    AC.setSubformSource(\"sfrmOrders\", \"sfrmCompanyDetail_VendorPurchaseOrders\");\n    AC.setValue(\"lblsfrmOrders\", \"Purchase Orders\");\n    break;\n  case enumCompanyType.ctNorthwind:\n    AC.setSubformSource(\"sfrmOrders\", \"\");\n    AC.setValue(\"lblsfrmOrders\", \"\");\n    break;\n  default:\n    // Debug.Assert False\n}"
   },
   "txt-business-phone.on-click": {
     key: "txt-business-phone.on-click",
     control: "txt-business-phone",
     event: "on-click",
     procedure: "txtBusinessPhone_Click",
-    js: "if (AC.getValue(\"txtBusinessPhone\").length === 0) {\n  // Me.txtBusinessPhone.SelStart = 0\n}"
+    js: "if (AC.getValue(\"txtBusinessPhone\").length === 0) {\n  /* SelStart/SelLength — no-op in web */;\n}"
   },
   "txt-website.on-dblclick": {
     key: "txt-website.on-dblclick",
     control: "txt-website",
     event: "on-dblclick",
     procedure: "txtWebsite_DblClick",
-    js: "// Application.FollowHyperlink Me.txtWebsite"
+    js: "window.open(AC.getValue(\"txtWebsite\"));"
   }
 };
 

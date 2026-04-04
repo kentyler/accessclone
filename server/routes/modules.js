@@ -9,8 +9,9 @@ const express = require('express');
 const router = express.Router();
 const { logEvent, logError } = require('../lib/events');
 const { extractReactions, toKw } = require('../lib/reactions-extractor');
-const { parseVbaToHandlers, collectEnumValues } = require('../lib/vba-to-js');
+const { parseVbaToHandlers, collectEnumValues, extractProcedureNames, extractProcedures } = require('../lib/vba-to-js');
 const { writeHandlerFile, deleteHandlerFile, readHandlerFile, writeHandlerFileRaw } = require('../lib/handler-gen/writer');
+const { needsLLMFallback, translateHandlerWithLLM } = require('../lib/vba-to-js-llm');
 
 function createRouter(pool) {
   /**
@@ -536,6 +537,130 @@ function createRouter(pool) {
       res.status(500).json({ error: 'Failed to save module' });
     } finally {
       client.release();
+    }
+  });
+
+  /**
+   * POST /api/modules/:name/llm-translate
+   * Run LLM fallback on a single module's handlers.
+   * Requires ANTHROPIC_API_KEY environment variable.
+   */
+  router.post('/:name/llm-translate', async (req, res) => {
+    const databaseId = req.databaseId;
+    const moduleName = req.params.name;
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+
+    if (!apiKey) {
+      return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured' });
+    }
+
+    try {
+      // Load module
+      const modResult = await pool.query(
+        `SELECT o.id, o.definition,
+                (SELECT i.content FROM shared.intents i WHERE i.object_id = o.id AND i.intent_type = 'gesture' ORDER BY i.created_at DESC LIMIT 1) as intents
+         FROM shared.objects o
+         WHERE o.database_id = $1 AND o.type = 'module' AND o.name = $2 AND o.is_current = true`,
+        [databaseId, moduleName]
+      );
+
+      if (modResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Module not found' });
+      }
+
+      const row = modResult.rows[0];
+      const def = row.definition || {};
+      const vbaSource = def.vba_source;
+      if (!vbaSource) {
+        return res.status(400).json({ error: 'Module has no VBA source' });
+      }
+
+      // Build enum map and fn registry from all modules
+      const allModules = await pool.query(
+        `SELECT definition->>'vba_source' as vba_source
+         FROM shared.objects WHERE database_id = $1 AND type = 'module' AND is_current = true
+           AND definition->>'vba_source' IS NOT NULL`,
+        [databaseId]
+      );
+      const enumMap = new Map();
+      const fnRegistry = new Set();
+      for (const r of allModules.rows) {
+        const e = collectEnumValues(r.vba_source);
+        for (const [k, v] of e) enumMap.set(k, v);
+        for (const name of extractProcedureNames(r.vba_source)) {
+          fnRegistry.add(name.toLowerCase());
+        }
+      }
+
+      // Deterministic parse
+      const handlers = parseVbaToHandlers(vbaSource, moduleName, enumMap, fnRegistry);
+      if (!handlers || handlers.length === 0) {
+        return res.json({ handlers: [], stats: { total: 0, clean: 0, llm_improved: 0, still_untranslated: 0 } });
+      }
+
+      // Build procedure and intent lookups
+      const procedures = extractProcedures(vbaSource);
+      const procByName = {};
+      for (const proc of procedures) {
+        procByName[proc.name] = proc.body;
+      }
+
+      const moduleIntents = row.intents;
+      const intentProcs = {};
+      if (moduleIntents?.mapped?.procedures) {
+        for (const proc of moduleIntents.mapped.procedures) {
+          if (proc.name) intentProcs[proc.name] = proc;
+        }
+      }
+
+      // LLM pass
+      let llmImproved = 0;
+      let stillUntranslated = 0;
+      for (let i = 0; i < handlers.length; i++) {
+        const h = handlers[i];
+        if (!needsLLMFallback(h)) continue;
+
+        const vbaBody = procByName[h.procedure] || null;
+        const intent = intentProcs[h.procedure] || null;
+
+        try {
+          const result = await translateHandlerWithLLM(h, vbaBody, intent, handlers, apiKey);
+          if (result) {
+            handlers[i] = { ...h, js: result.js, llm: true };
+            llmImproved++;
+          } else {
+            stillUntranslated++;
+          }
+        } catch (err) {
+          stillUntranslated++;
+          console.error(`LLM translate error for ${moduleName} → ${h.key}:`, err.message);
+        }
+      }
+
+      // Count clean handlers (no comment lines)
+      const clean = handlers.filter(h => h.js && !h.js.includes('// [VBA]')).length;
+
+      // Save updated handlers to DB
+      await pool.query(
+        `UPDATE shared.objects SET definition = jsonb_set(definition, '{js_handlers}', $1::jsonb) WHERE id = $2`,
+        [JSON.stringify(handlers), row.id]
+      );
+
+      // Write handler file
+      writeHandlerFile(databaseId, moduleName, handlers);
+
+      res.json({
+        handlers,
+        stats: {
+          total: handlers.length,
+          clean,
+          llm_improved: llmImproved,
+          still_untranslated: stillUntranslated,
+        },
+      });
+    } catch (err) {
+      logError(pool, 'POST /api/modules/:name/llm-translate', 'Failed to LLM translate module', err, { databaseId });
+      res.status(500).json({ error: 'Failed to LLM translate module' });
     }
   });
 

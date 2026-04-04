@@ -28,14 +28,14 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "cmd-preview-report",
     event: "on-click",
     procedure: "cmdPreviewReport_Click",
-    js: "let strPath;\nif (AC.getTempVar(\"ReportName\") === \"rptProductCatalog\") {\n  // strPath = Left(CurrentDb.Name, InStrRev(CurrentDb.Name, \"\\\"))\n  // strPath = strPath & TempVars!ReportName & \".pdf\"    'this is the name of the sacrificial PDF that will be deleted\n  // [VBA If block - condition not translatable]\n  // If FileExists(strPath) Then\n  //   Kill strPath\n  // End If\n  // TempVars.Add \"GenerateToC\", True\n  // DoCmd.OutputTo ObjectType:=acOutputReport, ObjectName:=TempVars!ReportName, OutputFormat:=acFormatPDF, OutputFile:=strPath\n  AC.setTempVar(\"GenerateToC\", false);\n}\nif (AC.getTempVar(\"ReportView\") == null) { AC.setTempVar(\"ReportView\", \"acViewPreview\"); }\n// DoCmd.OpenReport TempVars!ReportName, TempVars!ReportView, \"\", \"\", acNormal"
+    js: "let strPath;\nif (AC.getTempVar(\"ReportName\") === \"rptProductCatalog\") {\n  // strPath = Left(CurrentDb.Name, InStrRev(CurrentDb.Name, \"\\\"))\n  strPath = strPath + AC.getTempVar(\"ReportName\") + \".pdf\";\n  if (await AC.callFn(\"FileExists\", strPath)) {\n    // Kill strPath\n  }\n  // TempVars.Add \"GenerateToC\", True\n  // DoCmd.OutputTo ObjectType:=acOutputReport, ObjectName:=TempVars!ReportName, OutputFormat:=acFormatPDF, OutputFile:=strPath\n  AC.setTempVar(\"GenerateToC\", false);\n}\nif (AC.getTempVar(\"ReportView\") == null) { AC.setTempVar(\"ReportView\", \"acViewPreview\"); }\n// DoCmd.OpenReport TempVars!ReportName, TempVars!ReportView, \"\", \"\", acNormal"
   },
   "cmd-sales-byemployee-report.on-click": {
     key: "cmd-sales-byemployee-report.on-click",
     control: "cmd-sales-byemployee-report",
     event: "on-click",
     procedure: "cmdSalesByemployeeReport_Click",
-    js: "// Call ReportFormInitialization(True)\n// TempVars.Add \"ReportName\", \"rptSalesByEmployee\"\n// TempVars.Add \"ReportView\", acViewReport             'This report must be opened in Report View, so user can filter it."
+    js: "// Call ReportFormInitialization(True)\n// TempVars.Add \"ReportName\", \"rptSalesByEmployee\"\n// TempVars.Add \"ReportView\", acViewReport"
   },
   "cmd-sales-by-product-report-monthly.on-click": {
     key: "cmd-sales-by-product-report-monthly.on-click",
@@ -63,14 +63,14 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "form",
     event: "on-open",
     procedure: "Form_Open",
-    js: "// Me.SetFocus                                         'Prepare for Screen.ActiveControl later on in ReportFormInitialization.\n// Me.cmdSalesByEmployeeReport.SetFocus                'Prepare for Screen.ActiveControl later on in ReportFormInitialization.\n// cmdSalesByemployeeReport_Click                      'Init this form by doing the same thing as if user clicked the first report button."
+    js: "/* Me.SetFocus — no-op in web */;\nAC.setFocus(\"cmdSalesByEmployeeReport\");\nawait AC.callFn(\"cmdSalesByemployeeReport_Click\");"
   },
   "fn.ReportFormInitialization": {
     key: "fn.ReportFormInitialization",
     control: "fn",
     event: "ReportFormInitialization",
     procedure: "ReportFormInitialization",
-    js: "let dtMaxOrderDate;\n// dtMaxOrderDate = DateValue(DMax(\"OrderDate\", \"Orders\"))       'Set the date range relative to the max order date.\n// [VBA With block skipped]"
+    js: "let dtMaxOrderDate;\ndtMaxOrderDate = new Date(await AC.dMax(\"OrderDate\", \"Orders\"));\n// Me.txtStartDate.Enabled = blnEnableCriteria\n// Me.txtStartDate.Visible = blnEnableCriteria\n// Me.txtStartDate = IIf(blnEnableCriteria = True, DateAdd(\"m\", -3, DateValue(dtMaxOrderDate)), Null)\n// Me.txtEndDate.Enabled = blnEnableCriteria\n// Me.txtEndDate.Visible = blnEnableCriteria\n// Me.txtEndDate = IIf(blnEnableCriteria = True, dtMaxOrderDate, Null)\n// Me.lblSelectedReportName.Caption = Screen.ActiveControl.Caption"
   }
 };
 

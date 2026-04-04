@@ -167,6 +167,35 @@ function parseAccessFilter(filterStr: string): Record<string, string> {
   return result;
 }
 
+/**
+ * Build form state sync entries from the current form definition + record.
+ * Maps each bound control to its table_name (record-source) + column_name (field).
+ */
+function buildSyncEntries(
+  def: FormDefinition | null,
+  record: Record<string, unknown> | null,
+): Array<{ tableName: string; columnName: string; value: unknown }> {
+  if (!def || !record) return [];
+  const recordSource = (def['record-source'] || '').toLowerCase();
+  if (!recordSource) return [];
+
+  const entries: Array<{ tableName: string; columnName: string; value: unknown }> = [];
+  const sections = ['header', 'detail', 'footer'] as const;
+  for (const sec of sections) {
+    const section = def[sec];
+    if (!section?.controls) continue;
+    for (const ctrl of section.controls) {
+      const cs = (ctrl as Record<string, unknown>)['control-source'] as string | undefined;
+      const field = cs || ctrl.field;
+      if (!field || (typeof field === 'string' && field.startsWith('='))) continue;
+      const colName = (field as string).toLowerCase();
+      const val = record[colName] ?? record[field as string];
+      entries.push({ tableName: recordSource, columnName: colName, value: val ?? null });
+    }
+  }
+  return entries;
+}
+
 // Clipboard singleton
 let formClipboard: { record: Record<string, unknown>; cut: boolean } | null = null;
 
@@ -329,10 +358,10 @@ export const useFormStore = create<FormStore>()(
       let records: Record<string, unknown>[] = [];
 
       if (recordSource.toUpperCase().trimStart().startsWith('SELECT')) {
-        const res = await api.post<{ rows: Record<string, unknown>[]; fields: ColumnInfo[] }>('/api/queries/run', {
+        const res = await api.post<{ data: Record<string, unknown>[]; fields: ColumnInfo[] }>('/api/queries/run', {
           sql: recordSource,
         });
-        if (res.ok) records = res.data.rows || [];
+        if (res.ok) records = res.data.data || [];
       } else {
         const params = new URLSearchParams({ limit: '1000' });
         if (orderBy) {
@@ -342,8 +371,8 @@ export const useFormStore = create<FormStore>()(
         }
         if (filter) params.set('filter', filter);
 
-        const res = await api.get<Record<string, unknown>[]>(`/api/data/${encodeURIComponent(recordSource)}?${params}`);
-        if (res.ok) records = res.data;
+        const res = await api.get<{ data: Record<string, unknown>[] }>(`/api/data/${encodeURIComponent(recordSource)}?${params}`);
+        if (res.ok) records = res.data.data || [];
       }
 
       // If data-entry mode, start with empty new record
@@ -362,6 +391,11 @@ export const useFormStore = create<FormStore>()(
           s.recordPosition = { current: 0, total: 0 };
         }
       });
+
+      // Sync form state for cross-join resolution in converted queries
+      const firstRecord = records.length > 0 ? records[0] : null;
+      const entries = buildSyncEntries(get().current, firstRecord as Record<string, unknown> | null);
+      if (entries.length > 0) get().syncFormState(entries);
     },
 
     // --------------------------------------------------------
@@ -459,6 +493,10 @@ export const useFormStore = create<FormStore>()(
         s.recordPosition = { current: idx + 1, total: s.records.length };
         s.recordDirty = false;
       });
+
+      // Sync form state for cross-join resolution in converted queries
+      const entries = buildSyncEntries(get().current, get().currentRecord);
+      if (entries.length > 0) get().syncFormState(entries);
     },
 
     updateRecordField(fieldName, value) {
@@ -526,9 +564,9 @@ export const useFormStore = create<FormStore>()(
 
       // SQL
       if (rowSource.toUpperCase().trimStart().startsWith('SELECT')) {
-        const res = await api.post<{ rows: unknown[][]; fields: ColumnInfo[] }>('/api/queries/run', { sql: rowSource });
+        const res = await api.post<{ data: unknown[][]; fields: ColumnInfo[] }>('/api/queries/run', { sql: rowSource });
         if (res.ok) {
-          set(s => { s.rowSourceCache[rowSource] = { rows: res.data.rows || [], fields: res.data.fields || [] }; });
+          set(s => { s.rowSourceCache[rowSource] = { rows: res.data.data || [], fields: res.data.fields || [] }; });
         } else {
           set(s => { delete s.rowSourceCache[rowSource]; });
         }
@@ -536,10 +574,11 @@ export const useFormStore = create<FormStore>()(
       }
 
       // Table/query name
-      const res = await api.get<Record<string, unknown>[]>(`/api/data/${encodeURIComponent(rowSource.trim())}?limit=1000`);
-      if (res.ok && Array.isArray(res.data)) {
-        const fields = res.data.length > 0 ? Object.keys(res.data[0]).map(k => ({ name: k, type: 'text' })) : [];
-        const rows = res.data.map(r => Object.values(r));
+      const res = await api.get<{ data: Record<string, unknown>[] }>(`/api/data/${encodeURIComponent(rowSource.trim())}?limit=1000`);
+      if (res.ok && Array.isArray(res.data.data)) {
+        const dataRows = res.data.data;
+        const fields = dataRows.length > 0 ? Object.keys(dataRows[0]).map(k => ({ name: k, type: 'text' })) : [];
+        const rows = dataRows.map(r => Object.values(r));
         set(s => { s.rowSourceCache[rowSource] = { rows, fields }; });
       } else {
         set(s => { delete s.rowSourceCache[rowSource]; });
@@ -585,13 +624,13 @@ export const useFormStore = create<FormStore>()(
         }
       }
 
-      const res = await api.get<Record<string, unknown>[]>(`/api/data/${encodeURIComponent(recordSource)}?${params}`);
+      const res = await api.get<{ data: Record<string, unknown>[] }>(`/api/data/${encodeURIComponent(recordSource)}?${params}`);
       if (res.ok) {
         set(s => {
           if (!s.subformCache[sourceFormName]) {
             s.subformCache[sourceFormName] = { definition: null, records: [], projection: null, filterKey: '' };
           }
-          s.subformCache[sourceFormName].records = res.data;
+          s.subformCache[sourceFormName].records = res.data.data || [];
           s.subformCache[sourceFormName].filterKey = params.get('filter') || '';
         });
       }
@@ -703,7 +742,7 @@ export const useFormStore = create<FormStore>()(
         if (Array.isArray(res.data)) {
           handlers = {};
           for (const h of res.data) {
-            const k = (h as Record<string, unknown>).key as string;
+            const k = h.key;
             if (k) handlers[k] = h;
           }
         } else {

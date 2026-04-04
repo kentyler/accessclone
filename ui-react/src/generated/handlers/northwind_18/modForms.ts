@@ -28,14 +28,14 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "RequeryListForms",
     procedure: "RequeryListForms",
-    js: "// If IsFormOpen(\"frmCompanyList\") Then Forms!frmCompanyList.Recordset.Requery\n// If IsFormOpen(\"frmEmployeeList\") Then Forms!frmEmployeeList.Recordset.Requery\n// If IsFormOpen(\"frmOrderList\") Then Forms!frmOrderList.Recordset.Requery\n// If IsFormOpen(\"frmProductList\") Then Forms!frmProductList.Recordset.Requery\n// If IsFormOpen(\"frmPurchaseOrderList\") Then Forms!frmPurchaseOrderList.Recordset.Requery"
+    js: "if (await AC.callFn(\"IsFormOpen\", \"frmCompanyList\")) { AC.requeryForm(\"frmCompanyList\"); }\nif (await AC.callFn(\"IsFormOpen\", \"frmEmployeeList\")) { AC.requeryForm(\"frmEmployeeList\"); }\nif (await AC.callFn(\"IsFormOpen\", \"frmOrderList\")) { AC.requeryForm(\"frmOrderList\"); }\nif (await AC.callFn(\"IsFormOpen\", \"frmProductList\")) { AC.requeryForm(\"frmProductList\"); }\nif (await AC.callFn(\"IsFormOpen\", \"frmPurchaseOrderList\")) { AC.requeryForm(\"frmPurchaseOrderList\"); }"
   },
   "fn.RequeryProductList": {
     key: "fn.RequeryProductList",
     control: "fn",
     event: "RequeryProductList",
     procedure: "RequeryProductList",
-    js: "// If IsFormOpen(\"frmProductList\") Then Forms!frmProductList.Requery"
+    js: "if (await AC.callFn(\"IsFormOpen\", \"frmProductList\")) { AC.requeryForm(\"frmProductList\"); }"
   }
 };
 

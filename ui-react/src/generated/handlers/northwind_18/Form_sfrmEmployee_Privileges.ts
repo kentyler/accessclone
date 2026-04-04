@@ -21,7 +21,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "form",
     event: "on-open",
     procedure: "Form_Open",
-    js: "// [VBA With block skipped]"
+    js: "if (AC.nz(AC.getOpenArgs(), 0) > 0) {\n  // DoCmd.MoveSize Right:=TWIPS_PER_INCH * 3, down:=TWIPS_PER_INCH * 3, Width:=TWIPS_PER_INCH * 4.5, Height:=TWIPS_PER_INCH * 4.5\n  AC.setDefaultValue(\"cboEmployeeID\", AC.getOpenArgs());\n}"
   },
   "fn.frmLoadedAsSubform": {
     key: "fn.frmLoadedAsSubform",

@@ -7,14 +7,14 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "HighlightControl",
     procedure: "HighlightControl",
-    js: "let fc;\nlet intCurrentView;\nlet intDefaultView;\n// intCurrentView = ControlCurrentView(ctl)\n// intDefaultView = ControlDefaultView(ctl)\nif (intCurrentView === 1 && intDefaultView === 1 || intCurrentView === 2) {\n  // If ctl.FormatConditions.count >= 4 Then     'Just in case we have a runaway process.\n  // ctl.FormatConditions(3).Delete\n}\n// Set fc = ctl.FormatConditions.Add(AcFormatConditionType.acExpression, , \"True\")     'In a more elaborate implementation you can limit highlighting to the current row, by making the expression something like \"OrderDetailID=123\". This requires finding the PK in the underlying recordsource.\n// fc.BackColor = HIGHLIGHT_COLOR\n// Else\n// [VBA If block - condition not translatable]\n// If HasProperty(ctl, \"BackStyle\") Then\n//   ctl.BackStyle = 1                   '1=Normal, 0=Transparent\n//   ctl.BackColor = HIGHLIGHT_COLOR     'If a control has a BackStyle, it also has a BackColor. No need for another HasProperty test.\n// End If\n// End If"
+    js: "let fc;\nlet intCurrentView;\nlet intDefaultView;\nintCurrentView = await AC.callFn(\"ControlCurrentView\", ctl);\nintDefaultView = await AC.callFn(\"ControlDefaultView\", ctl);\nif (intCurrentView === 1 && intDefaultView === 1 || intCurrentView === 2) {\n  // [VBA If block - condition not translatable]\n  // If ctl.FormatConditions.count >= 4 Then\n  //   ctl.FormatConditions(3).Delete\n  // End If\n  /* FormatConditions — no-op in web */\n  AC.setBackColor(ctl, HIGHLIGHT_COLOR);\n} else {\n  if (await AC.callFn(\"HasProperty\", ctl, \"BackStyle\")) {\n    AC.setBackStyle(ctl, 1);\n    AC.setBackColor(ctl, HIGHLIGHT_COLOR);\n  }\n}"
   },
   "fn.HighlightInvalidControls": {
     key: "fn.HighlightInvalidControls",
     control: "fn",
     event: "HighlightInvalidControls",
     procedure: "HighlightInvalidControls",
-    js: "let ctl;\n// [VBA For Each loop skipped]"
+    js: "let ctl;\nfor (const ctl of AC.getControlNames()) {\n  if (await AC.callFn(\"IsBoundToRequiredField\", ctl)) {\n    if (AC.getValue(ctl) == null) {\n      await AC.callFn(\"HighlightControl\", ctl);\n    }\n  }\n}"
   },
   "fn.IsBoundToRequiredField": {
     key: "fn.IsBoundToRequiredField",
@@ -28,21 +28,21 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "IsValidForm",
     procedure: "IsValidForm",
-    js: "let blnIsValid;\nlet ctl;\n// blnIsValid = True   'Optimistic\n// [VBA For Each loop skipped]\nreturn blnIsValid;"
+    js: "let blnIsValid;\nlet ctl;\nblnIsValid = true;\nfor (const ctl of AC.getControlNames()) {\n  if (await AC.callFn(\"IsBoundToRequiredField\", ctl)) {\n    if (AC.getValue(ctl) == null) {\n      blnIsValid = false;\n      break;\n    }\n  }\n}\nreturn blnIsValid;"
   },
   "fn.ValidateForm": {
     key: "fn.ValidateForm",
     control: "fn",
     event: "ValidateForm",
     procedure: "ValidateForm",
-    js: "let blnCancel;\n// blnCancel = Not IsValidForm(frm)\nif (blnCancel) {\n  // HighlightInvalidControls frm\n  // MsgBox GetString(sRequiredFields), vbExclamation\n}\nreturn blnCancel;"
+    js: "let blnCancel;\nblnCancel = !(await AC.callFn(\"IsValidForm\", frm));\nif (blnCancel) {\n  await AC.callFn(\"HighlightInvalidControls\", frm);\n  alert(await AC.callFn(\"GetString\", 8));\n}\nreturn blnCancel;"
   },
   "fn.ValidateForm_RemoveHighlights": {
     key: "fn.ValidateForm_RemoveHighlights",
     control: "fn",
     event: "ValidateForm_RemoveHighlights",
     procedure: "ValidateForm_RemoveHighlights",
-    js: "let ctl;\nlet fc;\nlet intCurrentView;\nlet intDefaultView;\n// Set ctl = frm.Controls(0)   'Any control will do; we will be inspecting parent controls.\n// intCurrentView = ControlCurrentView(ctl)\n// intDefaultView = ControlDefaultView(ctl)\nif (intCurrentView === 1 && intDefaultView === 1 || intCurrentView === 2) {\n  // [VBA For Each loop skipped]\n} else {\n  // [VBA For Each loop skipped]\n}"
+    js: "let ctl;\nlet fc;\nlet intCurrentView;\nlet intDefaultView;\n// Set ctl = frm.Controls(0)\nintCurrentView = await AC.callFn(\"ControlCurrentView\", ctl);\nintDefaultView = await AC.callFn(\"ControlDefaultView\", ctl);\nif (intCurrentView === 1 && intDefaultView === 1 || intCurrentView === 2) {\n  for (const ctl of AC.getControlNames()) {\n    // [VBA For Each - collection not translatable: ctl.FormatConditions]\n    //   If fc.Expression1 = \"True\" And fc.BackColor = HIGHLIGHT_COLOR Then\n    //   fc.Delete\n    //   Exit For\n    //   End If\n    // Next\n  }\n} else {\n  for (const ctl of AC.getControlNames()) {\n    if (AC.getBackColor(ctl) === HIGHLIGHT_COLOR) { AC.setBackColor(ctl, BACKGROUND_COLOR); }\n  }\n}"
   }
 };
 

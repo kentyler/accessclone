@@ -14,21 +14,21 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "StringFormat",
     procedure: "StringFormat",
-    js: "let n;\nlet vParams;\n// If UBound(params) = -1 Then GoTo Exit_Handler       'Zero params passed in.\n// [VBA If block - condition not translatable]\n// If IsArray(params) And IsArray(params(0)) Then\n//   vParams = params(0)\n// Else\n//   vParams = params\n// End If\nfor (let n = 0; n <= (vParams.length - 1); n++) {\n  // s = Replace(s, \"{\" & n & \"}\", vParams(n))\n}\nreturn s;"
+    js: "let n;\nlet vParams;\n// If UBound(params) = -1 Then GoTo Exit_Handler\nif (Array.isArray(params) && Array.isArray(params[0])) {\n  vParams = params[0];\n} else {\n  vParams = params;\n}\nfor (let n = 0; n <= (vParams.length - 1); n++) {\n  s = s.replaceAll(\"{\" + n + \"}\", vParams[n]);\n}\nreturn s;"
   },
   "fn.StringFormatSQL": {
     key: "fn.StringFormatSQL",
     control: "fn",
     event: "StringFormatSQL",
     procedure: "StringFormatSQL",
-    js: "let i;\nlet vParams;\n// [VBA If block - condition not translatable]\n// If IsArray(params) And IsArray(params(0)) Then\n//   vParams = params(0)\n// Else\n//   vParams = params\n// End If\nfor (let i = 0; i <= (vParams.length - 1); i++) {\n  // [VBA If block - condition not translatable]\n  // If IsNull(vParams(i)) Then\n  //   vParams(i) = Nz(vParams(i), \"NULL\")\n  // Else\n  //   Select Case VarType(vParams(i))\n  //   Case vbCurrency, vbSingle, vbDouble\n  //   vParams(i) = LTrim(Str(vParams(i)))                     'Str converts regional numbers to Access standards.\n  //   Case vbString:\n  //   vParams(i) = SINGLE_QUOTE & Replace(vParams(i), SINGLE_QUOTE, TWO_SINGLE_QUOTES) & SINGLE_QUOTE\n  //   Case vbDate:\n  //   vParams(i) = \"#\" & ToAccessDate(vParams(i)) & \"#\"       'ToAccessDate ensures this works for all regional settings.\n  //   End Select\n  // End If\n}\nreturn await AC.callFn(\"StringFormat\", s, vParams);"
+    js: "let i;\nlet vParams;\nif (Array.isArray(params) && Array.isArray(params[0])) {\n  vParams = params[0];\n} else {\n  vParams = params;\n}\nfor (let i = 0; i <= (vParams.length - 1); i++) {\n  if (vParams[i] == null) {\n    vParams[i] = AC.nz(vParams[i], \"NULL\");\n  } else {\n    // [VBA Select Case - expression not translatable]\n    // Select Case VarType(vParams(i))\n    // Case vbCurrency, vbSingle, vbDouble\n    // vParams(i) = LTrim(Str(vParams(i)))\n    // Case vbString:\n    // vParams(i) = SINGLE_QUOTE & Replace(vParams(i), SINGLE_QUOTE, TWO_SINGLE_QUOTES) & SINGLE_QUOTE\n    // Case vbDate:\n    // vParams(i) = \"#\" & ToAccessDate(vParams(i)) & \"#\"\n    // End Select\n  }\n}\nreturn await AC.callFn(\"StringFormat\", s, vParams);"
   },
   "fn.StringToDictionary": {
     key: "fn.StringToDictionary",
     control: "fn",
     event: "StringToDictionary",
     procedure: "StringToDictionary",
-    js: "const KEYVALUE_DELIMITER = \"&\";\nconst VALUE_DELIMITER = \"=\";\nlet dict;\nlet intPos;\nlet strTokens;\nlet varToken;\nif (v == null) {\n} else {\n  // dict.CompareMode = vbTextCompare\n  strTokens = v.split(KEYVALUE_DELIMITER);\n  // [VBA For Each loop skipped]\n  // Erase strTokens\n}\nreturn dict;"
+    js: "const KEYVALUE_DELIMITER = \"&\";\nconst VALUE_DELIMITER = \"=\";\nlet dict;\nlet intPos;\nlet strTokens;\nlet varToken;\nif (v == null) {\n} else {\n  /* CompareMode — no-op in web */;\n  strTokens = v.split(KEYVALUE_DELIMITER);\n  for (const varToken of strTokens) {\n    intPos = (varToken.indexOf(VALUE_DELIMITER) + 1);\n    if (intPos === 0) {\n    } else {\n      dict[varToken.substring(0, intPos - 1)] = varToken.substring(intPos + 1 - 1);\n    }\n  }\n  /* Erase — no-op in JS */;\n}\nreturn dict;"
   }
 };
 

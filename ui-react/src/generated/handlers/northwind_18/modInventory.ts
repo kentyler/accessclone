@@ -7,7 +7,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "AllocateInventory",
     procedure: "AllocateInventory",
-    js: "let rsO;\nlet intQtyToAllocate;\nlet intAvailable;\nlet sql;\nsql = await AC.callFn(\"StringFormatSQL\", \"select od.* from OrderDetails od \" + \"inner join Orders o on o.OrderID = od.OrderID \" + \"where od.ProductID = {0} and od.OrderDetailStatusID in (1, 4, 5) \" + \"order by o.OrderDate, o.OrderID\", lngProductID);\n// Set rsO = g_dbApp().OpenRecordset(sql, dbOpenDynaset)\nintAvailable = await AC.callFn(\"ProductAvailable\", lngProductID);\n// intQtyToAllocate = intAvailable + ProductOnOrder(lngProductID)\n// [VBA While loop skipped]\n// rsO.Close\n// Set rsO = Nothing"
+    js: "let rsO;\nlet intQtyToAllocate;\nlet intAvailable;\nlet sql;\nsql = await AC.callFn(\"StringFormatSQL\", \"select od.* from OrderDetails od \" + \"inner join Orders o on o.OrderID = od.OrderID \" + \"where od.ProductID = {0} and od.OrderDetailStatusID in (1, 4, 5) \" + \"order by o.OrderDate, o.OrderID\", lngProductID);\n// Set rsO = g_dbApp().OpenRecordset(sql, dbOpenDynaset)\nintAvailable = await AC.callFn(\"ProductAvailable\", lngProductID);\nintQtyToAllocate = intAvailable + await AC.callFn(\"ProductOnOrder\", lngProductID);\n// [VBA While loop - condition not translatable: Not rsO.EOF]\n//   If rsO!Quantity <= intAvailable Then\n//   rsO.Edit\n//   rsO!OrderDetailStatusID = enumOrderDetailStatus.odsAllocated\n//   intAvailable = intAvailable - rsO!Quantity\n//   intQtyToAllocate = intQtyToAllocate - rsO!Quantity\n//   rsO.Update\n//   ElseIf rsO!Quantity <= intQtyToAllocate Then\n//   rsO.Edit\n//   rsO!OrderDetailStatusID = enumOrderDetailStatus.odsOnOrder\n//   intQtyToAllocate = intQtyToAllocate - rsO!Quantity\n//   rsO.Update\n//   Else\n//   rsO.Edit\n//   rsO!OrderDetailStatusID = enumOrderDetailStatus.odsNoStock\n//   rsO.Update\n//   End If\n//   rsO.MoveNext\n// Wend\n// rsO.Close\nrsO = null;"
   },
   "fn.OrderQuantity_ByStatus": {
     key: "fn.OrderQuantity_ByStatus",
@@ -28,7 +28,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "ProductAvailable",
     procedure: "ProductAvailable",
-    js: "let dtLastStockTake;\nlet intLastStockTake;\nlet intAvailable;\nlet intBought;\nlet intSold;\nreturn 0;\n// If lngProductID = 0 Then GoTo Exit_Handler\ndtLastStockTake = await AC.callFn(\"ProductLastStockTakeDate\", lngProductID);\nintLastStockTake = await AC.callFn(\"ProductLastStockTakeQuantity\", lngProductID);\nintSold = await AC.callFn(\"ProductSold\", lngProductID, dtLastStockTake);\nintBought = await AC.callFn(\"ProductBought\", lngProductID, dtLastStockTake);\n// intAvailable = intLastStockTake + intBought - intSold\nreturn intAvailable;"
+    js: "let dtLastStockTake;\nlet intLastStockTake;\nlet intAvailable;\nlet intBought;\nlet intSold;\nreturn 0;\n// If lngProductID = 0 Then GoTo Exit_Handler\ndtLastStockTake = await AC.callFn(\"ProductLastStockTakeDate\", lngProductID);\nintLastStockTake = await AC.callFn(\"ProductLastStockTakeQuantity\", lngProductID);\nintSold = await AC.callFn(\"ProductSold\", lngProductID, dtLastStockTake);\nintBought = await AC.callFn(\"ProductBought\", lngProductID, dtLastStockTake);\nintAvailable = intLastStockTake + intBought - intSold;\nreturn intAvailable;"
   },
   "fn.ProductBought": {
     key: "fn.ProductBought",
@@ -42,7 +42,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "ProductLastStockTakeDate",
     procedure: "ProductLastStockTakeDate",
-    js: "let sql;\nlet rsStockTake;\n// ProductLastStockTakeDate = g_dtNorthwindInception\n// If lngProductID = 0 Then GoTo Exit_Handler\nsql = await AC.callFn(\"StringFormatSQL\", \"select * from StockTake where ProductID = {0} order by StockTakeDate desc;\", lngProductID);\n// Set rsStockTake = g_dbApp().OpenRecordset(sql, dbOpenDynaset)\n// [VBA If block - condition not translatable]\n// If rsStockTake.RecordCount = 0 Then\n//   With rsStockTake\n//   .AddNew\n//   !StockTakeDate = Nz(DLookup(\"AddedOn\", \"Products\", \"ProductID = \" & lngProductID), Now())\n//   !ProductID = lngProductID\n//   !QuantityOnHand = 0\n//   .Update\n//   .Move 0, .LastModified    'Move to the record just added, so we can read from it.\n//   End With\n// End If\n// ProductLastStockTakeDate = rsStockTake!StockTakeDate\n// rsStockTake.Close\n// Set rsStockTake = Nothing"
+    js: "let sql;\nlet rsStockTake;\n// ProductLastStockTakeDate = g_dtNorthwindInception\n// If lngProductID = 0 Then GoTo Exit_Handler\nsql = await AC.callFn(\"StringFormatSQL\", \"select * from StockTake where ProductID = {0} order by StockTakeDate desc;\", lngProductID);\n// Set rsStockTake = g_dbApp().OpenRecordset(sql, dbOpenDynaset)\n// [VBA If block - condition not translatable]\n// If rsStockTake.RecordCount = 0 Then\n//   With rsStockTake\n//   .AddNew\n//   !StockTakeDate = Nz(DLookup(\"AddedOn\", \"Products\", \"ProductID = \" & lngProductID), Now())\n//   !ProductID = lngProductID\n//   !QuantityOnHand = 0\n//   .Update\n//   .Move 0, .LastModified\n//   End With\n// End If\n// ProductLastStockTakeDate = rsStockTake!StockTakeDate\n// rsStockTake.Close\nrsStockTake = null;"
   },
   "fn.ProductLastStockTakeQuantity": {
     key: "fn.ProductLastStockTakeQuantity",
@@ -63,14 +63,14 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "ProductOnOrder",
     procedure: "ProductOnOrder",
-    js: "let sqlWhere;\n// If lngProductID = 0 Then GoTo Exit_Handler\nsqlWhere = await AC.callFn(\"StringFormatSQL\", \"StatusID={0} and ProductID={1}\", 1, lngProductID);\n// ProductOnOrder = Nz(DLookup(\"Quantity\", \"qryPOProducts_ByStatus\", sqlWhere), 0)     'No need for DSum: qryPOProducts_ByStatus already is a Totals query."
+    js: "let sqlWhere;\n// If lngProductID = 0 Then GoTo Exit_Handler\nsqlWhere = await AC.callFn(\"StringFormatSQL\", \"StatusID={0} and ProductID={1}\", 1, lngProductID);\nreturn AC.nz(await AC.dLookup(\"Quantity\", \"qryPOProducts_ByStatus\", sqlWhere), 0);"
   },
   "fn.ProductReorderQuantity": {
     key: "fn.ProductReorderQuantity",
     control: "fn",
     event: "ProductReorderQuantity",
     procedure: "ProductReorderQuantity",
-    js: "let intReorderQty;\nlet intNoStock;\nlet intMinReorder;\nlet intOnOrder;\nlet intQtyAvailable;\nlet intTargetLevel;\nintReorderQty = 0;\n// If lngProductID = 0 Then GoTo Exit_Handler\nintNoStock = await AC.callFn(\"ProductNoStock\", lngProductID);\n// intOnOrder = ProductOnOrder(lngProductID)    'PO Status Approved.\nintQtyAvailable = await AC.callFn(\"ProductToSell\", lngProductID);\nintMinReorder = AC.nz(await AC.dLookup(\"MinimumReorderQuantity\", \"Products\", \"ProductID = \" + lngProductID), 1);\nintTargetLevel = AC.nz(await AC.dLookup(\"TargetLevel\", \"Products\", \"ProductID = \" + lngProductID), 0);\n// [VBA If block - condition not translatable]\n// If (intQtyAvailable + intOnOrder) >= (intNoStock + intTargetLevel) Then\n//   intReorderQty = intMinReorder\n// Else\n//   intReorderQty = (intNoStock + intTargetLevel) - (intQtyAvailable + intOnOrder)\n//   If intMinReorder > intReorderQty Then    'Return which ever is greater\n//   intReorderQty = intMinReorder\n// End If\n// End If\nreturn intReorderQty;"
+    js: "let intReorderQty;\nlet intNoStock;\nlet intMinReorder;\nlet intOnOrder;\nlet intQtyAvailable;\nlet intTargetLevel;\nintReorderQty = 0;\n// If lngProductID = 0 Then GoTo Exit_Handler\nintNoStock = await AC.callFn(\"ProductNoStock\", lngProductID);\nintOnOrder = await AC.callFn(\"ProductOnOrder\", lngProductID);\nintQtyAvailable = await AC.callFn(\"ProductToSell\", lngProductID);\nintMinReorder = AC.nz(await AC.dLookup(\"MinimumReorderQuantity\", \"Products\", \"ProductID = \" + lngProductID), 1);\nintTargetLevel = AC.nz(await AC.dLookup(\"TargetLevel\", \"Products\", \"ProductID = \" + lngProductID), 0);\n// [VBA If block - condition not translatable]\n// If (intQtyAvailable + intOnOrder) >= (intNoStock + intTargetLevel) Then\n//   intReorderQty = intMinReorder\n// Else\n//   intReorderQty = (intNoStock + intTargetLevel) - (intQtyAvailable + intOnOrder)\n//   If intMinReorder > intReorderQty Then\n//   intReorderQty = intMinReorder\n//   End If\n// End If\nreturn intReorderQty;"
   },
   "fn.ProductSold": {
     key: "fn.ProductSold",
@@ -84,7 +84,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "ProductToSell",
     procedure: "ProductToSell",
-    js: "let dtLastStockTake;\nlet intAllocated;\nlet intAvailable;\nlet intBought;\nlet intSold;\nlet intLastStockTake;\n// If lngProductID = 0 Then GoTo Exit_Handler\ndtLastStockTake = await AC.callFn(\"ProductLastStockTakeDate\", lngProductID);\nintLastStockTake = await AC.callFn(\"ProductLastStockTakeQuantity\", lngProductID);\nintSold = await AC.callFn(\"ProductSold\", lngProductID, dtLastStockTake);\nintBought = await AC.callFn(\"ProductBought\", lngProductID, dtLastStockTake);\nintAllocated = await AC.callFn(\"ProductAllocated\", lngProductID);\n// intAvailable = intLastStockTake + intBought - intSold - intAllocated\nreturn intAvailable;"
+    js: "let dtLastStockTake;\nlet intAllocated;\nlet intAvailable;\nlet intBought;\nlet intSold;\nlet intLastStockTake;\n// If lngProductID = 0 Then GoTo Exit_Handler\ndtLastStockTake = await AC.callFn(\"ProductLastStockTakeDate\", lngProductID);\nintLastStockTake = await AC.callFn(\"ProductLastStockTakeQuantity\", lngProductID);\nintSold = await AC.callFn(\"ProductSold\", lngProductID, dtLastStockTake);\nintBought = await AC.callFn(\"ProductBought\", lngProductID, dtLastStockTake);\nintAllocated = await AC.callFn(\"ProductAllocated\", lngProductID);\nintAvailable = intLastStockTake + intBought - intSold - intAllocated;\nreturn intAvailable;"
   }
 };
 

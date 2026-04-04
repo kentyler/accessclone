@@ -3,7 +3,6 @@ import TableViewer from './TableViewer';
 import QueryViewer from './QueryViewer';
 import ModuleViewer from './ModuleViewer';
 import MacroViewer from './MacroViewer';
-import SqlFunctionViewer from './SqlFunctionViewer';
 import LogsViewer from './LogsViewer';
 import FormEditor from './FormEditor/FormEditor';
 import ReportEditor from './ReportEditor/ReportEditor';
@@ -27,8 +26,6 @@ export default function ObjectEditor({ tab }: Props) {
       return <ModuleViewer moduleName={tab.name} />;
     case 'macros':
       return <MacroViewer macroName={tab.name} />;
-    case 'sql-functions':
-      return <SqlFunctionViewer functionName={tab.name} />;
     case 'graph':
       return <GraphExplorer />;
     default:

@@ -36,10 +36,11 @@ function extractSubformColumns(definition: FormDefinition | null): SubformColumn
   const headerLabels = (definition.header?.controls ?? [])
     .filter(c => c.type === 'label');
 
-  // Build bound controls
+  // Build bound controls — sort by x position (left-to-right, matching Access subform datasheet order)
+  // with tab-index as tiebreaker when x positions are equal
   const bound = detailCtrls
     .filter(c => (c['control-source'] || c.field) && (c.visible ?? 1) !== 0)
-    .sort((a, b) => (((a as Record<string, unknown>)['tab-index'] as number) ?? 999) - (((b as Record<string, unknown>)['tab-index'] as number) ?? 999) || ((a.x ?? 0) as number) - ((b.x ?? 0) as number));
+    .sort((a, b) => ((a.x ?? 0) as number) - ((b.x ?? 0) as number) || (((a as Record<string, unknown>)['tab-index'] as number) ?? 999) - (((b as Record<string, unknown>)['tab-index'] as number) ?? 999));
 
   return bound.map(c => {
     const cs = c['control-source'] as string | undefined;

@@ -7,14 +7,14 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "DumpTempVars",
     procedure: "DumpTempVars",
-    js: "let t;\n// Debug.Print \"Dumping \" & TempVars.count & \" TempVars:\"\n// [VBA For Each loop skipped]"
+    js: "let t;\n// Debug.Print \"Dumping \" & TempVars.count & \" TempVars:\"\nfor (const t of AC.getTempVarNames()) {\n  // Debug.Print t.Name, t.Value\n}"
   },
   "fn.NotImplemented": {
     key: "fn.NotImplemented",
     control: "fn",
     event: "NotImplemented",
     procedure: "NotImplemented",
-    js: "// strMsg = \"This feature is not yet implemented.\" & vbCrLf & strMsg\nalert(strMsg);"
+    js: "strMsg = \"This feature is not yet implemented.\" + \"\\n\" + strMsg;\nalert(strMsg);"
   }
 };
 

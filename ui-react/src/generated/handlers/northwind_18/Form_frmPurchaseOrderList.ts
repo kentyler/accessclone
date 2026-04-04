@@ -21,7 +21,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "purchase-order-id",
     event: "on-click",
     procedure: "PurchaseOrderID_Click",
-    js: "// OpenPurchaseOrderDetailsForm Me.PurchaseOrderID"
+    js: "await AC.callFn(\"OpenPurchaseOrderDetailsForm\", AC.getValue(\"PurchaseOrderID\"));"
   }
 };
 

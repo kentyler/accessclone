@@ -198,14 +198,14 @@ export const useReportStore = create<ReportStore>()(
           let records: Record<string, unknown>[] = [];
 
           if (recordSource.toUpperCase().trimStart().startsWith('SELECT')) {
-            const res = await api.post<{ rows: Record<string, unknown>[]; fields: ColumnInfo[] }>('/api/queries/run', {
+            const res = await api.post<{ data: Record<string, unknown>[]; fields: ColumnInfo[] }>('/api/queries/run', {
               sql: recordSource,
             });
-            if (res.ok) records = res.data.rows || [];
+            if (res.ok) records = res.data.data || [];
           } else {
             const params = new URLSearchParams({ limit: '1000' });
-            const res = await api.get<Record<string, unknown>[]>(`/api/data/${encodeURIComponent(recordSource)}?${params}`);
-            if (res.ok) records = res.data;
+            const res = await api.get<{ data: Record<string, unknown>[] }>(`/api/data/${encodeURIComponent(recordSource)}?${params}`);
+            if (res.ok) records = res.data.data || [];
           }
 
           set(s => { s.records = records; });
@@ -296,7 +296,7 @@ export const useReportStore = create<ReportStore>()(
         if (Array.isArray(res.data)) {
           handlers = {};
           for (const h of res.data) {
-            const k = (h as Record<string, unknown>).key as string;
+            const k = h.key;
             if (k) handlers[k] = h;
           }
         } else {

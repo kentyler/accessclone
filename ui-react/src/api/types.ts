@@ -67,15 +67,6 @@ export interface MacroListItem {
   name: string;
 }
 
-export interface SqlFunctionInfo {
-  id: number;
-  name: string;
-  arguments: string;
-  return_type: string;
-  source?: string;
-  description?: string;
-}
-
 // ============================================================
 // Control Types
 // ============================================================
@@ -364,7 +355,7 @@ export interface RowSourceData {
 // Tabs
 // ============================================================
 
-export type ObjectType = 'tables' | 'queries' | 'forms' | 'reports' | 'modules' | 'macros' | 'sql-functions' | 'graph';
+export type ObjectType = 'tables' | 'queries' | 'forms' | 'reports' | 'modules' | 'macros' | 'graph';
 
 // ============================================================
 // Graph

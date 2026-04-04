@@ -447,6 +447,11 @@ module.exports = function(pool) {
         }
         await client.query('BEGIN READ ONLY');
         await client.query('SET statement_timeout = \'30s\'');
+        // Set session_id so views referencing shared.session_state can filter by current session
+        const sessionId = req.headers['x-session-id'];
+        if (sessionId) {
+          await client.query('SELECT set_config($1, $2, true)', ['app.session_id', sessionId]);
+        }
         const result = await client.query(cleanSql);
         await client.query('COMMIT');
 
@@ -501,6 +506,10 @@ module.exports = function(pool) {
       const client = await pool.connect();
       try {
         await client.query(`SET search_path TO ${client.escapeIdentifier(schemaName)}, shared, public`);
+        const sessionId = req.headers['x-session-id'];
+        if (sessionId) {
+          await client.query('SELECT set_config($1, $2, true)', ['app.session_id', sessionId]);
+        }
         const result = await client.query(cleanSql);
         res.json({ rowCount: result.rowCount });
       } finally {

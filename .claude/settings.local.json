@@ -35,7 +35,11 @@
       "Bash(set PGPASSWORD=7297:*)",
       "Bash(PGPASSWORD=7297 psql:*)",
       "Bash(unzip:*)",
-      "Bash(export:*)"
+      "Bash(export:*)",
+      "Bash(sed:*)",
+      "Bash(PGPASSWORD=7297 node:*)",
+      "WebFetch(domain:claude.ai)",
+      "Bash(rm:*)"
     ]
   }
 }

@@ -7,63 +7,63 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "cbo-product-categories",
     event: "after-update",
     procedure: "cboProductCategories_AfterUpdate",
-    js: "if (AC.getValue(\"cboProductCategories\") === 0) {\n  // Me.ProductID.RowSource = \"qrycboProducts_All\"\n} else {\n  // Me.ProductID.RowSource = \"qrycboProducts\"\n}\n// Me.ProductID = Me.ProductID.Column(0, 0)   'Critical line for cascading comboboxes: it selects the first product, which then causes the value of ProductCategory textbox to be set.\n// ProductID_AfterUpdate                      'Since we just set the value programmatically, we need to call this procedure which would be called if it was done interactively."
+    js: "if (AC.getValue(\"cboProductCategories\") === 0) {\n  // Me.ProductID.RowSource = \"qrycboProducts_All\"\n} else {\n  // Me.ProductID.RowSource = \"qrycboProducts\"\n}\n// Me.ProductID = Me.ProductID.Column(0, 0)\nawait AC.callFn(\"ProductID_AfterUpdate\");"
   },
   "fn.Form_AfterDelConfirm": {
     key: "fn.Form_AfterDelConfirm",
     control: "fn",
     event: "Form_AfterDelConfirm",
     procedure: "Form_AfterDelConfirm",
-    js: "// [VBA If block - condition not translatable]\n// If Status = acDeleteOK Then\n//   AllocateInventory m_RowCache.ProductID      'Use the cached version, because by now the row is deleted and Me.ProductID is undefined.\n// End If"
+    js: "// [VBA If block - condition not translatable]\n// If Status = acDeleteOK Then\n//   AllocateInventory m_RowCache.ProductID\n// End If"
   },
   "form.after-update": {
     key: "form.after-update",
     control: "form",
     event: "after-update",
     procedure: "Form_AfterUpdate",
-    js: "await AC.callFn(\"ReallocateInventory\");\n// ValidateForm_RemoveHighlights Me\n// m_RowCache.ProductID = 0\n// m_RowCache.Quantity = 0"
+    js: "await AC.callFn(\"ReallocateInventory\");\nawait AC.callFn(\"ValidateForm_RemoveHighlights\", \"Me\");\n// m_RowCache.ProductID = 0\n// m_RowCache.Quantity = 0"
   },
   "fn.Form_BeforeDelConfirm": {
     key: "fn.Form_BeforeDelConfirm",
     control: "fn",
     event: "Form_BeforeDelConfirm",
     procedure: "Form_BeforeDelConfirm",
-    js: "// Response = acDataErrContinue        'We already asked user for confirmation in Form_Delete."
+    js: "/* Response = acDataErrContinue — suppress default error */"
   },
   "fn.Form_BeforeInsert": {
     key: "fn.Form_BeforeInsert",
     control: "fn",
     event: "Form_BeforeInsert",
     procedure: "Form_BeforeInsert",
-    js: "// Me.OrderDetailStatusID = enumOrderDetailStatus.odsNew       'Set initial value for new record. May be updated in Form_BeforeUpdate."
+    js: "AC.setValue(\"OrderDetailStatusID\", 3);"
   },
   "form.before-update": {
     key: "form.before-update",
     control: "form",
     event: "before-update",
     procedure: "Form_BeforeUpdate",
-    js: "// Cancel = ValidateForm(Me)\n// If Not Cancel Then SetOrderDetailStatus     'Just in case Quantity was entered before Product."
+    js: "Cancel = await AC.callFn(\"ValidateForm\", \"Me\");\nif (!(Cancel)) { await AC.callFn(\"SetOrderDetailStatus\"); }"
   },
   "form.on-current": {
     key: "form.on-current",
     control: "form",
     event: "on-current",
     procedure: "Form_Current",
-    js: "// Me.cboProductCategories = Me.ProductCategoryID  'Set the value of the unbound combobox.\n// Me.ProductID.Requery                            'Requery products dropdown so it will have products for this category.\n// ValidateForm_RemoveHighlights Me\nif (!(AC.isNewRecord() && AC.getValue(\"OrderDetailStatusID\") === 1)) {\n  // m_RowCache.ProductID = Me.ProductID\n  // m_RowCache.Quantity = Me.Quantity\n}"
+    js: "AC.setValue(\"cboProductCategories\", AC.getValue(\"ProductCategoryID\"));\nAC.requeryControl(\"ProductID\");\nawait AC.callFn(\"ValidateForm_RemoveHighlights\", \"Me\");\nif (!(AC.isNewRecord() && AC.getValue(\"OrderDetailStatusID\") === 1)) {\n  // m_RowCache.ProductID = Me.ProductID\n  // m_RowCache.Quantity = Me.Quantity\n}"
   },
   "fn.Form_Delete": {
     key: "fn.Form_Delete",
     control: "fn",
     event: "Form_Delete",
     procedure: "Form_Delete",
-    js: "// [VBA If block - condition not translatable]\n// If MsgBox(GetString(enumStrings.sDeleteRecord, \"order line item\"), vbYesNo Or vbQuestion) = vbNo Then\n//   Cancel = True\n// End If"
+    js: "if (!confirm(await AC.callFn(\"GetString\", 7, \"order line item\"))) {\n  return false;\n}"
   },
   "fn.Form_Error": {
     key: "fn.Form_Error",
     control: "fn",
     event: "Form_Error",
     procedure: "Form_Error",
-    js: "// If DataErr = 3314 Then      '3314 = You must enter a value in the '|' field.\nif (AC.getValue(\"OrderID\") == null) {\n  alert(await AC.callFn(\"GetString\", 51));\n  // Response = acDataErrContinue\n}\n// End If"
+    js: "if (DataErr === 3314) {\n  if (AC.getValue(\"OrderID\") == null) {\n    alert(await AC.callFn(\"GetString\", 51));\n    /* Response = acDataErrContinue — suppress default error */\n  }\n}"
   },
   "product-category-name.on-gotfocus": {
     key: "product-category-name.on-gotfocus",
@@ -77,7 +77,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "product-id",
     event: "after-update",
     procedure: "ProductID_AfterUpdate",
-    js: "const COL_UNITPRICE = 2;\n// [VBA If block - condition not translatable]\n// If IsNull(Me.ProductID.Column(COL_UNITPRICE)) Then\n//   Me.ProductID = 0     'Assigning Null is not possible with this required field. 0 is the next best value.\n// Else\n//   Me.UnitPrice = Me.ProductID.Column(COL_UNITPRICE)           'Column at index 2 has the hidden UnitPrice.\n// End If"
+    js: "const COL_UNITPRICE = 2;\n// [VBA If block - condition not translatable]\n// If IsNull(Me.ProductID.Column(COL_UNITPRICE)) Then\n//   Me.ProductID = 0\n// Else\n//   Me.UnitPrice = Me.ProductID.Column(COL_UNITPRICE)\n// End If"
   },
   "product-id.on-gotfocus": {
     key: "product-id.on-gotfocus",
@@ -98,14 +98,14 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "product-name",
     event: "on-gotfocus",
     procedure: "ProductName_GotFocus",
-    js: "// Me.ProductID.SetFocus           'So user can type and the dropdown will show matching data."
+    js: "AC.setFocus(\"ProductID\");"
   },
   "fn.ReallocateInventory": {
     key: "fn.ReallocateInventory",
     control: "fn",
     event: "ReallocateInventory",
     procedure: "ReallocateInventory",
-    js: "// [VBA If block - condition not translatable]\n// If m_RowCache.ProductID <> Me.ProductID And m_RowCache.ProductID <> 0 Then\n//   AllocateInventory m_RowCache.ProductID\n// End If\n// AllocateInventory Me.ProductID"
+    js: "// [VBA If block - condition not translatable]\n// If m_RowCache.ProductID <> Me.ProductID And m_RowCache.ProductID <> 0 Then\n//   AllocateInventory m_RowCache.ProductID\n// End If\nawait AC.callFn(\"AllocateInventory\", AC.getValue(\"ProductID\"));"
   },
   "fn.SetOrderDetailStatus": {
     key: "fn.SetOrderDetailStatus",

@@ -7,21 +7,21 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "AutoLogin_chk_AfterUpdate",
     procedure: "AutoLogin_chk_AfterUpdate",
-    js: "// SaveUserSetting usAutoLogin, Me.AutoLogin_chk"
+    js: "await AC.callFn(\"SaveUserSetting\", 2, AC.getValue(\"AutoLogin_chk\"));"
   },
   "cmd-login.on-click": {
     key: "cmd-login.on-click",
     control: "cmd-login",
     event: "on-click",
     procedure: "cmdLogin_Click",
-    js: "// [VBA If block - condition not translatable]\n// If IsNull(Me.cboEmployee.Value) Then\n//   MsgBox \"You must select a user to login as.  Please select someone now.\", vbOKOnly Or vbExclamation, \"Select a Login\"\n//   Me.cboEmployee.SetFocus\n//   Me.cboEmployee.Dropdown\n//   m_bolLoginClicked = False\n// End If\n// m_bolLoginClicked = True\n// m_UserID = Me.cboEmployee.Value\n// modStartup.SetAppTitle True\n// Me.Visible = False    'Do not close the form. Allow caller to inspect properties."
+    js: "if (AC.getValue(\"cboEmployee\") == null) {\n  alert(\"You must select a user to login as.  Please select someone now.\");\n  AC.setFocus(\"cboEmployee\");\n  // Me.cboEmployee.Dropdown\n  m_bolLoginClicked = false;\n}\nm_bolLoginClicked = true;\nm_UserID = AC.getValue(\"cboEmployee\");\nawait AC.callFn(\"SetAppTitle\", true);\nAC.setValue(\"Visible\", false);"
   },
   "form.on-load": {
     key: "form.on-load",
     control: "form",
     event: "on-load",
     procedure: "Form_Load",
-    js: "let bolAutoLogIn;\nlet lngUserID;\nbolAutoLogIn = false;\n// Me.Disclaimer.Caption = GetString(sDisclaimer)\nbolAutoLogIn = await AC.callFn(\"GetUserSetting\", 2);\n// Me.AutoLogin_chk.Value = bolAutoLogIn\nlngUserID = await AC.callFn(\"Get_UserID\", );\nAC.setValue(\"cboEmployee\", lngUserID);\n// [VBA If block - condition not translatable]\n// If lngUserID = 0 Then\n//   m_UserID = DEFAULT_LOGIN_ID\n//   Me.AutoLogin_chk.Visible = False\n// If lngUserID = Get_UserID_ForWindowsUser Then\n//   Me.AutoLogin_chk.Visible = True\n// Else\n//   Me.AutoLogin_chk.Visible = False\n// End If\n// m_bolLoginClicked = False\n// modStartup.SetAppTitle False"
+    js: "let bolAutoLogIn;\nlet lngUserID;\nbolAutoLogIn = false;\nAC.setValue(\"Disclaimer\", await AC.callFn(\"GetString\", 16));\nbolAutoLogIn = await AC.callFn(\"GetUserSetting\", 2);\n// Me.AutoLogin_chk.Value = bolAutoLogIn\nlngUserID = await AC.callFn(\"Get_UserID\", );\nAC.setValue(\"cboEmployee\", lngUserID);\nif (lngUserID === 0) {\n  // m_UserID = DEFAULT_LOGIN_ID\n  AC.setVisible(\"AutoLogin_chk\", false);\n} else if (lngUserID === await AC.callFn(\"Get_UserID_ForWindowsUser\")) {\n  AC.setVisible(\"AutoLogin_chk\", true);\n} else {\n  AC.setVisible(\"AutoLogin_chk\", false);\n}\nm_bolLoginClicked = false;\nawait AC.callFn(\"SetAppTitle\", false);"
   },
   "fn.Form_Unload": {
     key: "fn.Form_Unload",

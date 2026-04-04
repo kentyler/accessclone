@@ -14,14 +14,14 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "cboSupervisorID_NotInList",
     procedure: "cboSupervisorID_NotInList",
-    js: "// Response = acDataErrContinue\n// [VBA With block skipped]"
+    js: "/* Response = acDataErrContinue — suppress default error */\nAC.undo();\n// [VBA If block - condition not translatable]\n// If MsgBox(GetString(sNewEmployee, NewData), vbExclamation Or vbOKCancel, \"Add \" & NewData & \"?\") = vbOK Then\n//   Me.Dirty = False\n//   Me.Recordset.AddNew\n// End If"
   },
   "cmd-email-employee.on-click": {
     key: "cmd-email-employee.on-click",
     control: "cmd-email-employee",
     event: "on-click",
     procedure: "cmdEmailEmployee_Click",
-    js: "let strSender;\nlet strWindowsUserName;\n// strWindowsUserName = GetWindowsUserName()\nstrSender = await AC.dLookup(\"FirstName\", \"Employees\", await AC.callFn(\"StringFormatSQL\", \"Employees.WindowsUserName = {0}\", strWindowsUserName));\n// strSender = vbCrLf & vbCrLf & vbCrLf & strSender & \" \" & DLookup(\"LastName\", \"Employees\", StringFormatSQL(\"Employees.WindowsUserName = {0}\", strWindowsUserName))\n// DoCmd.SendObject ObjectType:=acSendNoObject, To:=Nz(Me.EmailAddress, \"\"), Subject:=\"NorthWind Traders: \", MessageText:=strSender, editMessage:=True"
+    js: "let strSender;\nlet strWindowsUserName;\nstrWindowsUserName = await AC.callFn(\"GetWindowsUserName\", );\nstrSender = await AC.dLookup(\"FirstName\", \"Employees\", await AC.callFn(\"StringFormatSQL\", \"Employees.WindowsUserName = {0}\", strWindowsUserName));\nstrSender = \"\\n\" + \"\\n\" + \"\\n\" + strSender + \" \" + await AC.dLookup(\"LastName\", \"Employees\", await AC.callFn(\"StringFormatSQL\", \"Employees.WindowsUserName = {0}\", strWindowsUserName));\n// DoCmd.SendObject ObjectType:=acSendNoObject, To:=Nz(Me.EmailAddress, \"\"), Subject:=\"NorthWind Traders: \", MessageText:=strSender, editMessage:=True"
   },
   "cmd-new-employee.on-click": {
     key: "cmd-new-employee.on-click",
@@ -35,7 +35,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "EmployeeCanBeDeleted",
     procedure: "EmployeeCanBeDeleted",
-    js: "let blnReturn;\nlet lngEmployeeOrders;\nlet lngEmployeeSupervisor;\nlet lngEmployeePrivileges;\nlet lngEmployeePurchaseOrders;\nlet sCantDeleteResponse;\nlet strOpenArgs;\nlet strMsgCaption;\nblnReturn = true;\nstrMsgCaption = \"Message from Employees\";\n// [VBA With block skipped]\nreturn blnReturn;"
+    js: "let blnReturn;\nlet lngEmployeeOrders;\nlet lngEmployeeSupervisor;\nlet lngEmployeePrivileges;\nlet lngEmployeePurchaseOrders;\nlet sCantDeleteResponse;\nlet strOpenArgs;\nlet strMsgCaption;\nblnReturn = true;\nstrMsgCaption = \"Message from Employees\";\nlngEmployeeOrders = await AC.dCount(\"OrderID\", \"Orders\", await AC.callFn(\"StringFormatSQL\", \"EmployeeID ={0}\", lngEmployeeID));\nlngEmployeeSupervisor = await AC.dCount(\"EmployeeID\", \"Employees\", await AC.callFn(\"StringFormatSQL\", \"SupervisorID ={0}\", lngEmployeeID));\nlngEmployeePrivileges = await AC.dCount(\"EmployeeID\", \"EmployeePrivileges\", await AC.callFn(\"StringFormatSQL\", \"EmployeeID ={0}\", lngEmployeeID));\nlngEmployeePurchaseOrders = await AC.dCount(\"PurchaseOrderID\", \"PurchaseOrders\", await AC.callFn(\"StringFormatSQL\", \"SubmittedByID ={0}\", lngEmployeeID));\nif (lngEmployeeOrders > 0) {\n  sCantDeleteResponse = await AC.callFn(\"GetString\", 13, AC.getValue(\"FullNameFNLN\"), \"has Orders (\" + lngEmployeeOrders + \").\", \"Employees with orders can not be deleted\");\n}\nif (lngEmployeePurchaseOrders > 0) {\n  sCantDeleteResponse = sCantDeleteResponse + \"\\n\" + \"\\n\" + await AC.callFn(\"GetString\", 13, AC.getValue(\"FullNameFNLN\"), \"has Purchase Orders (\" + lngEmployeePurchaseOrders + \").\", \"Employees with purchase orders can not be deleted\");\n}\nif (lngEmployeeSupervisor > 0) {\n  sCantDeleteResponse = sCantDeleteResponse + \"\\n\" + \"\\n\" + await AC.callFn(\"GetString\", 13, AC.getValue(\"FullNameFNLN\"), \"is a Supervisor.\", \"Employees supervising other employees can not be deleted      <br />      until their employees are reassigned\");\n}\nif (lngEmployeePrivileges > 0) {\n  sCantDeleteResponse = sCantDeleteResponse + \"\\n\" + \"\\n\" + await AC.callFn(\"GetString\", 13, AC.getValue(\"FullNameFNLN\"), \"has elevated Privileges.\", \"Employees with elevated privileges can not be deleted     <br />      until those privileges are revoked\");\n}\n// blnReturn = (lngEmployeeOrders + lngEmployeeSupervisor + lngEmployeePrivileges + lngEmployeePurchaseOrders = 0)\nif (blnReturn === true) {\n  // RemoveFromMRU \"Orders\", Nz(DLookup(\"PkValue\", \"MRU\", \"EmployeeID = \" & lngEmployeeID), 0)\n  // RemoveFromMRU \"PurchaseOrders\", Nz(DLookup(\"PkValue\", \"MRU\", \"EmployeeID = \" & lngEmployeeID), 0)\n  // TempVars.Add Name:=\"EmployeeToDelete\", Value:=TempVars!EmployeeToDelete & Chr(13) & Me.FullNameFNLN.Value\n} else {\n  sCantDeleteResponse = sCantDeleteResponse.substring(0, sCantDeleteResponse.length - 6);\n  strOpenArgs = await AC.callFn(\"StringFormat\", \"Header={0}&Message={1}&Actions={2}&FormCaption={3}\", \"Employee Delete Not Allowed\", sCantDeleteResponse, \"vbOK\", strMsgCaption);\n  AC.openForm(\"frmGenericDialog\");\n  if (await AC.callFn(\"IsFormOpen\", \"frmGenericDialog\")) {\n    AC.closeForm(\"frmGenericDialog\");\n  }\n}\nreturn blnReturn;"
   },
   "fn.Form_AfterDelConfirm": {
     key: "fn.Form_AfterDelConfirm",
@@ -49,49 +49,49 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "Form_AfterInsert",
     procedure: "Form_AfterInsert",
-    js: "let lngNewEmployeeID;\n// [VBA With block skipped]"
+    js: "let lngNewEmployeeID;\nlngNewEmployeeID = AC.getValue(\"EmployeeID\");\n// DoCmd.OpenForm FormName:=\"sfrmEmployee_Privileges\", View:=acNormal, WhereCondition:=\"EmployeeID = \" & lngNewEmployeeID, DataMode:=acFormAdd, WindowMode:=acDialog, OpenArgs:=lngNewEmployeeID"
   },
   "form.after-update": {
     key: "form.after-update",
     control: "form",
     event: "after-update",
     procedure: "Form_AfterUpdate",
-    js: "// Call RequeryEmployeeList(Me.EmployeeID)\n// ValidateForm_RemoveHighlights Me"
+    js: "// Call RequeryEmployeeList(Me.EmployeeID)\nawait AC.callFn(\"ValidateForm_RemoveHighlights\", \"Me\");"
   },
   "fn.Form_BeforeDelConfirm": {
     key: "fn.Form_BeforeDelConfirm",
     control: "fn",
     event: "Form_BeforeDelConfirm",
     procedure: "Form_BeforeDelConfirm",
-    js: "// [VBA If block - condition not translatable]\n// If MsgBox(GetString(sDeleteEmployee, TempVars!EmployeeToDelete), vbQuestion Or vbYesNo, \"Delete Employee?\") = vbNo Then\n//   Cancel = True\n// End If\n// TempVars.Add Name:=\"EmployeeToDelete\", Value:=\"\"\n// Response = acDataErrContinue"
+    js: "if (!confirm(await AC.callFn(\"GetString\", 14, AC.getTempVar(\"EmployeeToDelete\")))) {\n  return false;\n}\n// TempVars.Add Name:=\"EmployeeToDelete\", Value:=\"\"\n/* Response = acDataErrContinue — suppress default error */"
   },
   "form.before-update": {
     key: "form.before-update",
     control: "form",
     event: "before-update",
     procedure: "Form_BeforeUpdate",
-    js: "// Cancel = ValidateForm(Me)"
+    js: "Cancel = await AC.callFn(\"ValidateForm\", \"Me\");"
   },
   "form.on-current": {
     key: "form.on-current",
     control: "form",
     event: "on-current",
     procedure: "Form_Current",
-    js: "// ValidateForm_RemoveHighlights Me\n// [VBA With block skipped]"
+    js: "await AC.callFn(\"ValidateForm_RemoveHighlights\", \"Me\");\n// Me.cmdNewEmployee.Visible = Not Me.NewRecord\nAC.requeryControl(\"cboSupervisorID\");\nAC.setValue(\"lblRecentOrders\", \"Recent Orders for \" + AC.getValue(\"FullNameFNLN\"));"
   },
   "fn.Form_Delete": {
     key: "fn.Form_Delete",
     control: "fn",
     event: "Form_Delete",
     procedure: "Form_Delete",
-    js: "// Cancel = Not EmployeeCanBeDeleted(Me.EmployeeID)"
+    js: "Cancel = !(await AC.callFn(\"EmployeeCanBeDeleted\", AC.getValue(\"EmployeeID\")));"
   },
   "fn.RequeryEmployeeList": {
     key: "fn.RequeryEmployeeList",
     control: "fn",
     event: "RequeryEmployeeList",
     procedure: "RequeryEmployeeList",
-    js: "let rst;\n// [VBA With block skipped]\n// Set rst = Nothing"
+    js: "let rst;\nAC.requery();\nrst = AC.getValue(\"RecordsetClone\");\n// rst.FindFirst \"EmployeeID = \" & lngEmployeeID\n// Me.Bookmark = rst.Bookmark\nrst = null;"
   }
 };
 

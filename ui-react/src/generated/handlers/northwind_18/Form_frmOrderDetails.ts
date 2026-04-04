@@ -7,35 +7,35 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "AllInvoiceLineItemsHaveStatus",
     procedure: "AllInvoiceLineItemsHaveStatus",
-    js: "let blnReturn;\n// [VBA With block skipped]\nreturn blnReturn;"
+    js: "let blnReturn;\n// [VBA With block - target not translatable: Me.sfrmOrderLineItems.Form.RecordsetClone]\n//   If .RecordCount = 0 Then\n//   blnReturn = True\n//   Else\n//   .MoveFirst\n//   blnReturn = True\n//   Do While Not .EOF\n//   If !OrderDetailStatusID <> ods Then\n//   blnReturn = False\n//   Exit Do\n//   End If\n//   .MoveNext\n//   Loop\n//   End If\n// End With\nreturn blnReturn;"
   },
   "cmd-add-order.on-click": {
     key: "cmd-add-order.on-click",
     control: "cmd-add-order",
     event: "on-click",
     procedure: "cmdAddOrder_Click",
-    js: "if (AC.isNewRecord()) {\n  alert(await AC.callFn(\"GetString\", 18));\n} else {\n  // RunCommand acCmdRecordsGoToNew\n}"
+    js: "if (AC.isNewRecord()) {\n  alert(await AC.callFn(\"GetString\", 18));\n} else {\n  AC.gotoRecord(\"new\");\n}"
   },
   "cmd-close-order.on-click": {
     key: "cmd-close-order.on-click",
     control: "cmd-close-order",
     event: "on-click",
     procedure: "cmdCloseOrder_Click",
-    js: "if (AC.isNewRecord()) {\n  alert(await AC.callFn(\"GetString\", 39));\n} else {\n  if (AC.getValue(\"OrderStatusID\") === 5) {\n    // RunCommand acCmdSaveRecord\n    // [VBA If block - condition not translatable]\n    // If MsgBox(GetString(enumStrings.sOrderClosed), vbYesNo Or vbQuestion) = vbYes Then\n    //   Me.OrderStatusID = enumOrderStatus.osClosed\n    //   RunCommand acCmdSaveRecord      'Save record, so Requery below will pick up the new value.\n    //   SetFormStatus\n    // End If\n  } else {\n    alert(await AC.callFn(\"GetString\", 4));\n  }\n}"
+    js: "if (AC.isNewRecord()) {\n  alert(await AC.callFn(\"GetString\", 39));\n} else {\n  if (AC.getValue(\"OrderStatusID\") === 5) {\n    await AC.saveRecord();\n    if (confirm(await AC.callFn(\"GetString\", 5))) {\n      AC.setValue(\"OrderStatusID\", 1);\n      await AC.saveRecord();\n      await AC.callFn(\"SetFormStatus\");\n    }\n  } else {\n    alert(await AC.callFn(\"GetString\", 4));\n  }\n}"
   },
   "cmd-create-invoice.on-click": {
     key: "cmd-create-invoice.on-click",
     control: "cmd-create-invoice",
     event: "on-click",
     procedure: "cmdCreateInvoice_Click",
-    js: "if (AC.isNewRecord()) {\n  alert(await AC.callFn(\"GetString\", 39));\n} else {\n  // RunCommand acCmdSaveRecord      'The report should pick up saved values.\n  if (AC.getValue(\"OrderStatusID\") === 3) {\n    if (await AC.dCount(\"*\", \"OrderDetails\", \"OrderID = \" + AC.getValue(\"OrderID\")) === 0) {\n      alert(await AC.callFn(\"GetString\", 34));\n    } else {\n      if (await AC.callFn(\"AllInvoiceLineItemsHaveStatus\", 1)) {\n        if (await AC.callFn(\"ShippingFeeFilledOut\", )) {\n          AC.openReport(\"rptInvoice\");\n          if (AC.getValue(\"OrderStatusID\") === 3) {\n            AC.setValue(\"OrderStatusID\", 2);\n            // Me.InvoiceDate = Now()\n            AC.setVisible(\"cmdPrintInvoice\", true);\n            // SetLineItemsStatus enumOrderDetailStatus.odsInvoiced\n          } else {\n          }\n          await AC.saveRecord();\n          await AC.callFn(\"SetFormStatus\");\n        } else {\n          alert(\"Shipping Fee is required for the invoice.\");\n        }\n      } else {\n        alert(await AC.callFn(\"GetString\", 17));\n      }\n    }\n  } else {\n    alert(await AC.callFn(\"GetString\", 50));\n  }\n}"
+    js: "if (AC.isNewRecord()) {\n  alert(await AC.callFn(\"GetString\", 39));\n} else {\n  await AC.saveRecord();\n  if (AC.getValue(\"OrderStatusID\") === 3) {\n    if (await AC.dCount(\"*\", \"OrderDetails\", \"OrderID = \" + AC.getValue(\"OrderID\")) === 0) {\n      alert(await AC.callFn(\"GetString\", 34));\n    } else {\n      if (await AC.callFn(\"AllInvoiceLineItemsHaveStatus\", 1)) {\n        if (await AC.callFn(\"ShippingFeeFilledOut\", )) {\n          AC.openReport(\"rptInvoice\");\n          if (AC.getValue(\"OrderStatusID\") === 3) {\n            AC.setValue(\"OrderStatusID\", 2);\n            AC.setValue(\"InvoiceDate\", new Date());\n            AC.setVisible(\"cmdPrintInvoice\", true);\n            await AC.callFn(\"SetLineItemsStatus\", 2);\n          } else {\n          }\n          await AC.saveRecord();\n          await AC.callFn(\"SetFormStatus\");\n        } else {\n          alert(\"Shipping Fee is required for the invoice.\");\n        }\n      } else {\n        alert(await AC.callFn(\"GetString\", 17));\n      }\n    }\n  } else {\n    alert(await AC.callFn(\"GetString\", 50));\n  }\n}"
   },
   "cmd-delete-order.on-click": {
     key: "cmd-delete-order.on-click",
     control: "cmd-delete-order",
     event: "on-click",
     procedure: "cmdDeleteOrder_Click",
-    js: "// If IsNull(Me.OrderID) Then      'Alternatively can test for Me.NewRecord.\nalert(\"This is a new order. There is nothing to delete.\");\n// Else\nif (AC.getValue(\"OrderStatusID\") === 3 || AC.getValue(\"OrderStatusID\") === 2) {\n  // RunCommand acCmdDeleteRecord\n} else {\n  alert(await AC.callFn(\"GetString\", 6));\n}\n// End If"
+    js: "if (AC.getValue(\"OrderID\") == null) {\n  alert(\"This is a new order. There is nothing to delete.\");\n} else {\n  if (AC.getValue(\"OrderStatusID\") === 3 || AC.getValue(\"OrderStatusID\") === 2) {\n    AC.deleteRecord();\n  } else {\n    alert(await AC.callFn(\"GetString\", 6));\n  }\n}"
   },
   "cmd-print-invoice.on-click": {
     key: "cmd-print-invoice.on-click",
@@ -49,14 +49,14 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "cmd-receive-payment",
     event: "on-click",
     procedure: "cmdReceivePayment_Click",
-    js: "if (AC.isNewRecord()) {\n  alert(await AC.callFn(\"GetString\", 39));\n} else {\n  if (AC.getValue(\"OrderStatusID\") === 4) {\n    if (await AC.callFn(\"PaidFieldsFilledOut\", )) {\n      AC.setValue(\"OrderStatusID\", 5);\n      // RunCommand acCmdSaveRecord      'This will trigger Form_BeforeUpdate where we will do additional validation.\n      await AC.callFn(\"SetFormStatus\");\n    }\n  } else {\n    alert(await AC.callFn(\"GetString\", 49));\n  }\n}"
+    js: "if (AC.isNewRecord()) {\n  alert(await AC.callFn(\"GetString\", 39));\n} else {\n  if (AC.getValue(\"OrderStatusID\") === 4) {\n    if (await AC.callFn(\"PaidFieldsFilledOut\", )) {\n      AC.setValue(\"OrderStatusID\", 5);\n      await AC.saveRecord();\n      await AC.callFn(\"SetFormStatus\");\n    }\n  } else {\n    alert(await AC.callFn(\"GetString\", 49));\n  }\n}"
   },
   "cmd-ship-order.on-click": {
     key: "cmd-ship-order.on-click",
     control: "cmd-ship-order",
     event: "on-click",
     procedure: "cmdShipOrder_Click",
-    js: "if (AC.isNewRecord()) {\n  alert(await AC.callFn(\"GetString\", 39));\n} else {\n  if (AC.getValue(\"OrderStatusID\") === 2) {\n    if (await AC.callFn(\"ShippingFieldsFilledOut\", )) {\n      AC.setValue(\"OrderStatusID\", 4);\n      // RunCommand acCmdSaveRecord      'This will trigger Form_BeforeUpdate where we will do additional validation.\n      // SetLineItemsStatus enumOrderDetailStatus.odsShipped\n      await AC.callFn(\"SetFormStatus\");\n    }\n  } else {\n    alert(await AC.callFn(\"GetString\", 10));\n  }\n}"
+    js: "if (AC.isNewRecord()) {\n  alert(await AC.callFn(\"GetString\", 39));\n} else {\n  if (AC.getValue(\"OrderStatusID\") === 2) {\n    if (await AC.callFn(\"ShippingFieldsFilledOut\", )) {\n      AC.setValue(\"OrderStatusID\", 4);\n      await AC.saveRecord();\n      await AC.callFn(\"SetLineItemsStatus\", 6);\n      await AC.callFn(\"SetFormStatus\");\n    }\n  } else {\n    alert(await AC.callFn(\"GetString\", 10));\n  }\n}"
   },
   "customer-id.after-update": {
     key: "customer-id.after-update",
@@ -70,84 +70,84 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "Form_AfterInsert",
     procedure: "Form_AfterInsert",
-    js: "// AddToMRU \"Orders\", Me.OrderID"
+    js: "await AC.callFn(\"AddToMRU\", \"Orders\", AC.getValue(\"OrderID\"));"
   },
   "form.after-update": {
     key: "form.after-update",
     control: "form",
     event: "after-update",
     procedure: "Form_AfterUpdate",
-    js: "// ValidateForm_RemoveHighlights Me"
+    js: "await AC.callFn(\"ValidateForm_RemoveHighlights\", \"Me\");"
   },
   "fn.Form_BeforeDelConfirm": {
     key: "fn.Form_BeforeDelConfirm",
     control: "fn",
     event: "Form_BeforeDelConfirm",
     procedure: "Form_BeforeDelConfirm",
-    js: "// Response = acDataErrContinue"
+    js: "/* Response = acDataErrContinue — suppress default error */"
   },
   "fn.Form_BeforeInsert": {
     key: "fn.Form_BeforeInsert",
     control: "fn",
     event: "Form_BeforeInsert",
     procedure: "Form_BeforeInsert",
-    js: "// Me.EmployeeID = Get_UserID()\n// Me.TaxRate = GetSystemSetting(ssTaxRate)\nAC.setValue(\"OrderStatusID\", 3);"
+    js: "AC.setValue(\"EmployeeID\", await AC.callFn(\"Get_UserID\", ));\nAC.setValue(\"TaxRate\", await AC.callFn(\"GetSystemSetting\", 1));\nAC.setValue(\"OrderStatusID\", 3);"
   },
   "form.before-update": {
     key: "form.before-update",
     control: "form",
     event: "before-update",
     procedure: "Form_BeforeUpdate",
-    js: "// Cancel = ValidateForm(Me)\nif (!(Cancel)) {\n  // ValidateForm_RemoveHighlights Me\n}"
+    js: "Cancel = await AC.callFn(\"ValidateForm\", \"Me\");\nif (!(Cancel)) {\n  await AC.callFn(\"ValidateForm_RemoveHighlights\", \"Me\");\n}"
   },
   "form.on-close": {
     key: "form.on-close",
     control: "form",
     event: "on-close",
     procedure: "Form_Close",
-    js: "// CloseOrderDetailsForm Me\nawait AC.callFn(\"RequeryListForms\");"
+    js: "await AC.callFn(\"CloseOrderDetailsForm\", \"Me\");\nawait AC.callFn(\"RequeryListForms\");"
   },
   "form.on-current": {
     key: "form.on-current",
     control: "form",
     event: "on-current",
     procedure: "Form_Current",
-    js: "// ValidateForm_RemoveHighlights Me        'Needed if user canceled a new record with yellow highlights on the form.\nawait AC.callFn(\"SetFormStatus\");\n// Me.Caption = \"Order \" & Me.OrderID      'Show the orderID in the caption, so several instances can easily be distinguished.\nawait AC.callFn(\"LockControls\");\nif (AC.isNewRecord()) {\n  // [VBA With block skipped]\n  AC.setVisible(\"cmdPrintInvoice\", false);\n} else {\n  // [VBA With block skipped]\n  // Me.cmdPrintInvoice.Visible = (Me.OrderStatusID <> enumOrderStatus.osNew)\n}"
+    js: "await AC.callFn(\"ValidateForm_RemoveHighlights\", \"Me\");\nawait AC.callFn(\"SetFormStatus\");\nAC.setFormCaption(\"Order \" + AC.getValue(\"OrderID\"));\nawait AC.callFn(\"LockControls\");\nif (AC.isNewRecord()) {\n  AC.setSubformAllow(\"sfrmOrderLineItems\", \"allowAdditions\", true);\n  AC.setSubformAllow(\"sfrmOrderLineItems\", \"allowEdits\", true);\n  AC.setSubformAllow(\"sfrmOrderLineItems\", \"allowDeletions\", true);\n  AC.setVisible(\"cmdPrintInvoice\", false);\n} else {\n  // Me.sfrmOrderLineItems.Form.AllowAdditions = (Me.OrderStatusID = enumOrderStatus.osNew)\n  // Me.sfrmOrderLineItems.Form.AllowEdits = Me.sfrmOrderLineItems.Form.AllowAdditions\n  // Me.sfrmOrderLineItems.Form.AllowDeletions = Me.sfrmOrderLineItems.Form.AllowAdditions\n  // Me.cmdPrintInvoice.Visible = (Me.OrderStatusID <> enumOrderStatus.osNew)\n}"
   },
   "fn.Form_Delete": {
     key: "fn.Form_Delete",
     control: "fn",
     event: "Form_Delete",
     procedure: "Form_Delete",
-    js: "let lngProductID;\n// [VBA If block - condition not translatable]\n// If MsgBox(GetString(enumStrings.sDeleteRecord, \"order\"), vbYesNo Or vbQuestion) = vbYes Then\n//   lngProductID = 0\n//   With Me.sfrmOrderLineItems.Form.RecordsetClone\n//   If .RecordCount > 0 Then\n//   .MoveFirst\n//   While Not .EOF\n//   lngProductID = !ProductID\n//   .Delete\n//   AllocateInventory lngProductID\n//   .MoveNext\n//   Wend\n//   End If\n//   End With\n//   RemoveFromMRU \"Orders\", Me.OrderID\n// Else\n//   Cancel = True\n// End If"
+    js: "let lngProductID;\nif (confirm(await AC.callFn(\"GetString\", 7, \"order\"))) {\n  lngProductID = 0;\n  // [VBA With block - target not translatable: Me.sfrmOrderLineItems.Form.RecordsetClone]\n  //   If .RecordCount > 0 Then\n  //   .MoveFirst\n  //   While Not .EOF\n  //   lngProductID = !ProductID\n  //   .Delete\n  //   AllocateInventory lngProductID\n  //   .MoveNext\n  //   Wend\n  //   End If\n  // End With\n  await AC.callFn(\"RemoveFromMRU\", \"Orders\", AC.getValue(\"OrderID\"));\n} else {\n  return false;\n}"
   },
   "form.on-load": {
     key: "form.on-load",
     control: "form",
     event: "on-load",
     procedure: "Form_Load",
-    js: "let dict;\nif (AC.getTempVar(\"OpenArgs\") == null) {\n  // If Not Me.NewRecord Then RunCommand acCmdRecordsGoToNew\n} else {\n  dict = await AC.callFn(\"StringToDictionary\", AC.getTempVar(\"OpenArgs\"));\n  // Me.RecordSource = \"select * from qryOrder where OrderID = \" & dict(\"OrderID\")\n  AC.setTempVar(\"OpenArgs\", \"Null\");\n  // Set dict = Nothing\n  // If Not Me.NewRecord Then AddToMRU \"Orders\", Me.OrderID\n}"
+    js: "let dict;\nif (AC.getTempVar(\"OpenArgs\") == null) {\n  if (!(AC.isNewRecord())) { AC.gotoRecord(\"new\"); }\n} else {\n  dict = await AC.callFn(\"StringToDictionary\", AC.getTempVar(\"OpenArgs\"));\n  // Me.RecordSource = \"select * from qryOrder where OrderID = \" & dict(\"OrderID\")\n  AC.setTempVar(\"OpenArgs\", null);\n  dict = null;\n  if (!(AC.isNewRecord())) { await AC.callFn(\"AddToMRU\", \"Orders\", AC.getValue(\"OrderID\")); }\n}"
   },
   "fn.LockControls": {
     key: "fn.LockControls",
     control: "fn",
     event: "LockControls",
     procedure: "LockControls",
-    js: "let varControls;\nlet v;\n// varControls = Array()       'Initialize, so it is no longer empty. Without this,error 13 = Type mismatch will occur when looping over varControls.\nswitch (AC.getValue(\"OrderStatusID\")) {\n  case enumOrderStatus.osNew:\n    // varControls = Array(\"OrderID\", \"CustomerID\", \"EmployeeID\", \"OrderStatusName\", \"OrderDate\", \"InvoiceDate\", \"ShippedDate\", \"ShipperID\", \"PaymentMethod\", \"PaidDate\", \"txtTaxAmount\", \"txtTotal\")\n    break;\n  case osInvoiced:\n    // varControls = Array(\"OrderID\", \"CustomerID\", \"EmployeeID\", \"OrderStatusName\", \"OrderDate\", \"InvoiceDate\", \"ShippingFee\", \"PaymentMethod\", \"PaidDate\", \"TaxRate\", \"TaxStatusID\", \"txtTaxAmount\", \"txtTotal\")\n    break;\n  case osShipped:\n    // varControls = Array(\"OrderID\", \"CustomerID\", \"EmployeeID\", \"OrderStatusName\", \"OrderDate\", \"InvoiceDate\", \"ShippedDate\", \"ShipperID\", \"ShippingFee\", \"TaxRate\", \"TaxStatusID\", \"txtTaxAmount\", \"txtTotal\")\n    break;\n  case osPaid:\n    // varControls = Array(\"OrderID\", \"CustomerID\", \"EmployeeID\", \"OrderStatusName\", \"OrderDate\", \"InvoiceDate\", \"ShippedDate\", \"ShipperID\", \"ShippingFee\", \"PaymentMethod\", \"PaidDate\", \"TaxRate\", \"TaxStatusID\", \"txtTaxAmount\", \"txtTotal\")\n    break;\n  case osClosed:\n    // varControls = Array(\"OrderID\", \"CustomerID\", \"EmployeeID\", \"Notes\", \"OrderStatusName\", \"OrderDate\", \"InvoiceDate\", \"ShippedDate\", \"ShipperID\", \"ShippingFee\", \"PaymentMethod\", \"PaidDate\", \"TaxRate\", \"TaxStatusID\", \"txtTaxAmount\", \"txtTotal\")\n    break;\n  default:\n    // If IsNull(Me.OrderStatusID) Then            'NOTE: You cannot have a Case Null, because comparisons with Null are Null, not True/False.\n    // varControls = Array(\"OrderID\", \"OrderStatusName\", \"OrderDate\", \"InvoiceDate\", \"ShippedDate\", \"ShipperID\", \"PaymentMethod\", \"PaidDate\", \"txtTaxAmount\", \"txtTotal\")\n    // Else\n    // Debug.Assert False      'Unexpected order status.\n    // End If\n}\n// [VBA For Each loop skipped]\n// [VBA For Each loop skipped]"
+    js: "let varControls;\nlet v;\n// varControls = Array()\nswitch (AC.getValue(\"OrderStatusID\")) {\n  case enumOrderStatus.osNew:\n    // varControls = Array(\"OrderID\", \"CustomerID\", \"EmployeeID\", \"OrderStatusName\", \"OrderDate\", \"InvoiceDate\", \"ShippedDate\", \"ShipperID\", \"PaymentMethod\", \"PaidDate\", \"txtTaxAmount\", \"txtTotal\")\n    break;\n  case osInvoiced:\n    // varControls = Array(\"OrderID\", \"CustomerID\", \"EmployeeID\", \"OrderStatusName\", \"OrderDate\", \"InvoiceDate\", \"ShippingFee\", \"PaymentMethod\", \"PaidDate\", \"TaxRate\", \"TaxStatusID\", \"txtTaxAmount\", \"txtTotal\")\n    break;\n  case osShipped:\n    // varControls = Array(\"OrderID\", \"CustomerID\", \"EmployeeID\", \"OrderStatusName\", \"OrderDate\", \"InvoiceDate\", \"ShippedDate\", \"ShipperID\", \"ShippingFee\", \"TaxRate\", \"TaxStatusID\", \"txtTaxAmount\", \"txtTotal\")\n    break;\n  case osPaid:\n    // varControls = Array(\"OrderID\", \"CustomerID\", \"EmployeeID\", \"OrderStatusName\", \"OrderDate\", \"InvoiceDate\", \"ShippedDate\", \"ShipperID\", \"ShippingFee\", \"PaymentMethod\", \"PaidDate\", \"TaxRate\", \"TaxStatusID\", \"txtTaxAmount\", \"txtTotal\")\n    break;\n  case osClosed:\n    // varControls = Array(\"OrderID\", \"CustomerID\", \"EmployeeID\", \"Notes\", \"OrderStatusName\", \"OrderDate\", \"InvoiceDate\", \"ShippedDate\", \"ShipperID\", \"ShippingFee\", \"PaymentMethod\", \"PaidDate\", \"TaxRate\", \"TaxStatusID\", \"txtTaxAmount\", \"txtTotal\")\n    break;\n  default:\n    if (AC.getValue(\"OrderStatusID\") == null) {\n      // varControls = Array(\"OrderID\", \"OrderStatusName\", \"OrderDate\", \"InvoiceDate\", \"ShippedDate\", \"ShipperID\", \"PaymentMethod\", \"PaidDate\", \"txtTaxAmount\", \"txtTotal\")\n    } else {\n      // Debug.Assert False\n    }\n}\nfor (const v of AC.getControlNames()) {\n  AC.setLocked(v, false);\n  AC.setEnabled(v, true);\n  AC.setBackShade(v, 100);\n}\nfor (const v of varControls) {\n  // Me.Controls(v).Locked = True\n  // Me.Controls(v).Enabled = False\n  // Me.Controls(v).BackShade = 95\n}"
   },
   "fn.PaidFieldsFilledOut": {
     key: "fn.PaidFieldsFilledOut",
     control: "fn",
     event: "PaidFieldsFilledOut",
     procedure: "PaidFieldsFilledOut",
-    js: "let blnIsValid;\n// blnIsValid = True       'Optimistic.\nif (AC.getValue(\"PaymentMethod\") == null) {\n  blnIsValid = false;\n  // HighlightControl Me.PaymentMethod\n}\nif (AC.getValue(\"PaidDate\") == null) {\n  blnIsValid = false;\n  // HighlightControl Me.PaidDate\n}\nif (!(blnIsValid)) {\n  alert(await AC.callFn(\"GetString\", 36));\n}\nreturn blnIsValid;"
+    js: "let blnIsValid;\nblnIsValid = true;\nif (AC.getValue(\"PaymentMethod\") == null) {\n  blnIsValid = false;\n  await AC.callFn(\"HighlightControl\", AC.getValue(\"PaymentMethod\"));\n}\nif (AC.getValue(\"PaidDate\") == null) {\n  blnIsValid = false;\n  await AC.callFn(\"HighlightControl\", AC.getValue(\"PaidDate\"));\n}\nif (!(blnIsValid)) {\n  alert(await AC.callFn(\"GetString\", 36));\n}\nreturn blnIsValid;"
   },
   "fn.SetFormStatus": {
     key: "fn.SetFormStatus",
     control: "fn",
     event: "SetFormStatus",
     procedure: "SetFormStatus",
-    js: "if (AC.isNewRecord()) {\n  // [VBA With block skipped]\n  AC.setVisible(\"cmdPrintInvoice\", false);\n} else {\n  // [VBA With block skipped]\n  // Me.cmdPrintInvoice.Visible = (Me.OrderStatusID <> enumOrderStatus.osNew)\n}\n// Me.cmdCreateInvoice.ForeShade = 95      '95 means Darker 5%\n// Me.cmdShipOrder.ForeShade = 95\n// Me.cmdReceivePayment.ForeShade = 95\n// Me.cmdCloseOrder.ForeShade = 95\nif (AC.isNewRecord()) {\n} else {\n  await AC.callFn(\"LockControls\");\n  // If Me.OrderStatusID = enumOrderStatus.osNew Then GoTo Exit_Handler\n  // Me.cmdCreateInvoice.ForeShade = 70      '70 means Darker 30%\n  // If Me.OrderStatusID = enumOrderStatus.osInvoiced Then GoTo Exit_Handler\n  // Me.cmdShipOrder.ForeShade = 70\n  // If Me.OrderStatusID = enumOrderStatus.osShipped Then GoTo Exit_Handler\n  // Me.cmdReceivePayment.ForeShade = 70\n  // If Me.OrderStatusID = enumOrderStatus.osPaid Then GoTo Exit_Handler\n  // Me.cmdCloseOrder.ForeShade = 70\n}"
+    js: "if (AC.isNewRecord()) {\n  AC.setSubformAllow(\"sfrmOrderLineItems\", \"allowAdditions\", true);\n  AC.setSubformAllow(\"sfrmOrderLineItems\", \"allowEdits\", true);\n  AC.setSubformAllow(\"sfrmOrderLineItems\", \"allowDeletions\", true);\n  AC.setVisible(\"cmdPrintInvoice\", false);\n} else {\n  // Me.sfrmOrderLineItems.Form.AllowAdditions = (Me.OrderStatusID = enumOrderStatus.osNew)\n  // Me.sfrmOrderLineItems.Form.AllowEdits = Me.sfrmOrderLineItems.Form.AllowAdditions\n  // Me.sfrmOrderLineItems.Form.AllowDeletions = Me.sfrmOrderLineItems.Form.AllowAdditions\n  // Me.cmdPrintInvoice.Visible = (Me.OrderStatusID <> enumOrderStatus.osNew)\n}\n// Me.cmdCreateInvoice.ForeShade = 95\n// Me.cmdShipOrder.ForeShade = 95\n// Me.cmdReceivePayment.ForeShade = 95\n// Me.cmdCloseOrder.ForeShade = 95\nif (AC.isNewRecord()) {\n} else {\n  await AC.callFn(\"LockControls\");\n  // If Me.OrderStatusID = enumOrderStatus.osNew Then GoTo Exit_Handler\n  // Me.cmdCreateInvoice.ForeShade = 70\n  // If Me.OrderStatusID = enumOrderStatus.osInvoiced Then GoTo Exit_Handler\n  // Me.cmdShipOrder.ForeShade = 70\n  // If Me.OrderStatusID = enumOrderStatus.osShipped Then GoTo Exit_Handler\n  // Me.cmdReceivePayment.ForeShade = 70\n  // If Me.OrderStatusID = enumOrderStatus.osPaid Then GoTo Exit_Handler\n  // Me.cmdCloseOrder.ForeShade = 70\n}"
   },
   "fn.SetLineItemsStatus": {
     key: "fn.SetLineItemsStatus",
@@ -175,14 +175,14 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "fn",
     event: "ShippingFeeFilledOut",
     procedure: "ShippingFeeFilledOut",
-    js: "let blnIsValid;\n// blnIsValid = True       'Optimistic.\nif (AC.getValue(\"ShippingFee\") == null) {\n  blnIsValid = false;\n  // HighlightControl Me.ShippingFee\n}\nreturn blnIsValid;"
+    js: "let blnIsValid;\nblnIsValid = true;\nif (AC.getValue(\"ShippingFee\") == null) {\n  blnIsValid = false;\n  await AC.callFn(\"HighlightControl\", AC.getValue(\"ShippingFee\"));\n}\nreturn blnIsValid;"
   },
   "fn.ShippingFieldsFilledOut": {
     key: "fn.ShippingFieldsFilledOut",
     control: "fn",
     event: "ShippingFieldsFilledOut",
     procedure: "ShippingFieldsFilledOut",
-    js: "let blnIsValid;\n// blnIsValid = True       'Optimistic.\nif (AC.getValue(\"ShippedDate\") == null) {\n  blnIsValid = false;\n  // HighlightControl Me.ShippedDate\n}\nif (AC.getValue(\"ShipperID\") == null) {\n  blnIsValid = false;\n  // HighlightControl Me.ShipperID\n}\nif (AC.getValue(\"ShippingFee\") == null) {\n  blnIsValid = false;\n  // HighlightControl Me.ShippingFee\n}\nif (!(blnIsValid)) {\n  alert(await AC.callFn(\"GetString\", 9));\n}\nreturn blnIsValid;"
+    js: "let blnIsValid;\nblnIsValid = true;\nif (AC.getValue(\"ShippedDate\") == null) {\n  blnIsValid = false;\n  await AC.callFn(\"HighlightControl\", AC.getValue(\"ShippedDate\"));\n}\nif (AC.getValue(\"ShipperID\") == null) {\n  blnIsValid = false;\n  await AC.callFn(\"HighlightControl\", AC.getValue(\"ShipperID\"));\n}\nif (AC.getValue(\"ShippingFee\") == null) {\n  blnIsValid = false;\n  await AC.callFn(\"HighlightControl\", AC.getValue(\"ShippingFee\"));\n}\nif (!(blnIsValid)) {\n  alert(await AC.callFn(\"GetString\", 9));\n}\nreturn blnIsValid;"
   }
 };
 

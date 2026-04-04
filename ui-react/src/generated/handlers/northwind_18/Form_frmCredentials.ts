@@ -7,7 +7,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "cmd-add-me",
     event: "on-click",
     procedure: "cmdAddMe_Click",
-    js: "// RunCommand acCmdSaveRecord\n// m_UserID = Me.EmployeeID.Value\n// modStartup.SetAppTitle True\n// Me.Visible = False    'Do not close the form. Allow caller to inspect properties."
+    js: "await AC.saveRecord();\nm_UserID = AC.getValue(\"EmployeeID\");\nawait AC.callFn(\"SetAppTitle\", true);\nAC.setValue(\"Visible\", false);"
   },
   "cmd-exit.on-click": {
     key: "cmd-exit.on-click",
@@ -21,7 +21,7 @@ export const handlers: Record<string, { key: string; control: string; event: str
     control: "form",
     event: "before-update",
     procedure: "Form_BeforeUpdate",
-    js: "// Cancel = ValidateForm(Me)"
+    js: "Cancel = await AC.callFn(\"ValidateForm\", \"Me\");"
   },
   "form.on-load": {
     key: "form.on-load",
